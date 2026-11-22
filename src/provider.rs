@@ -68,6 +68,26 @@ pub struct Event {
     pub start: i64,
     pub end: i64,
     pub genre: Option<u32>,
+    /// What it's about, from the broadcast guide.
+    pub info: Option<String>,
+}
+
+impl Event {
+    /// The genre's name, where the provider's number is known.
+    pub fn genre_name(&self) -> Option<&'static str> {
+        // Philips' own numbering, worked out from the titles it labels; only
+        // the clear ones (1, 2, 9 and 17 are mixed bags)
+        Some(match self.genre? {
+            0 => "film",
+            3 => "sport",
+            4 => "children's",
+            5 => "music",
+            6 => "documentary",
+            7 => "news",
+            11 => "drama",
+            _ => return None,
+        })
+    }
 }
 
 /// What's on a channel now, and what's next.
@@ -84,6 +104,12 @@ pub trait Guide {
     fn now_next(&self, cx: &Cx, at: i64) -> Result<Vec<NowNext>>;
     /// One channel's (by [`Channel::id`]) programmes between `from` and `to`.
     fn schedule(&self, cx: &Cx, channel: u32, from: i64, to: i64) -> Result<Vec<Event>>;
+    /// What the programme starting at `start` on `channel` is about, if the
+    /// guide says. May be slow the first time (the schedule doesn't carry
+    /// descriptions when they're costly to read).
+    fn info(&self, _cx: &Cx, _channel: u32, _start: i64) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 /// Channels you can switch between.

@@ -180,7 +180,12 @@ fn watch(c: &Ctx, args: &[String]) -> Result<()> {
 
 /// `channel now`: what live TV is tuned to, and what's on it.
 fn on_now(c: &Ctx, args: &[String]) -> Result<()> {
-    let (_, id) = provider_flag(args);
+    let (words, id) = provider_flag(args);
+    let info = match words.as_slice() {
+        [] => false,
+        [w] if w == "--info" => true,
+        _ => return usage("usage: tvbee onnow [--info] [--provider ID]"),
+    };
     let p = channel_provider(id.as_deref())?;
     let cx = Cx { tv: &c.tv };
     let Some(ch) = p.channels().expect("checked").current(&cx)? else {
@@ -190,7 +195,16 @@ fn on_now(c: &Ctx, args: &[String]) -> Result<()> {
     let events = p.guide().map(|g| g.schedule(&cx, ch.id, at, at + 6 * 3600)).transpose()?.unwrap_or_default();
     println!("{}", ch.label());
     for (e, when) in events.iter().zip(["now ", "next"]) {
-        println!("  {when}  {}-{}  {}", hhmm(e.start, off), hhmm(e.end, off), e.title);
+        let genre = e.genre_name().map_or(String::new(), |g| format!("  ({g})"));
+        println!("  {when}  {}-{}  {}{genre}", hhmm(e.start, off), hhmm(e.end, off), e.title);
+        if !info {
+            continue;
+        }
+        // the first time, the TV takes a while to hand over the descriptions
+        let about = p.guide().map(|g| g.info(&cx, ch.id, e.start)).transpose()?.flatten();
+        for line in about.as_deref().unwrap_or("(no description in the broadcast guide)").lines() {
+            println!("               {line}");
+        }
     }
     Ok(())
 }
@@ -277,7 +291,8 @@ pub fn commands() -> Vec<Command> {
             .long("The live TV channel list with what's on each now, marking the one the TV is\ntuned to. On Philips TVs it needs pairing ('tvbee pair')."),
         Command::new(CAT, "watch", "<channel> [--provider ID]", "switch live TV to a channel, by number or name", watch)
             .long("  tvbee watch 4\n  tvbee watch more 4\n  tvbee watch bbc two\nNames match from the start, then anywhere; the lowest channel number wins."),
-        Command::new(CAT, "onnow", "[--provider ID]", "the channel live TV is on, and what's on it now and next", on_now),
+        Command::new(CAT, "onnow", "[--info] [--provider ID]", "the channel live TV is on, and what's on it now and next", on_now)
+            .long("  --info   with each programme's description, from the broadcast guide (the first\n           time takes the TV about half a minute; then it's cached)"),
         Command::new(CAT, "fav", "[add|remove <channel>] [--provider ID]", "favourite channels: list, add, remove", fav).long(
             "  tvbee fav                  list them\n\
              \x20 tvbee fav add more 4       add a channel (by number or name)\n\

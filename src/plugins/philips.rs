@@ -205,7 +205,11 @@ pub struct Freeview;
 pub static FREEVIEW: Freeview = Freeview;
 
 const GUIDE_URI: &str = "content://org.droidtv.epgdvb/antenna/scheduletable";
-const GUIDE_COLUMNS: &str = "eventname:presetid:starttime:endtime:genre";
+/// The free-text column last, so it can be split on the column names.
+/// Descriptions (`shortinfo`) are read separately, in pages: with them, the
+/// whole guide is more than one query can return (Android's 2MB cursor
+/// window), and the TV quietly drops the rest.
+const GUIDE_COLUMNS: &str = "presetid:starttime:endtime:genre:eventname";
 
 /// Text from the TV without control characters (some guide titles are
 /// padded with NULs, which take no room on screen but count as characters).
@@ -213,18 +217,45 @@ pub fn clean(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect::<String>().trim().to_string()
 }
 
-/// Rows of `content query --projection eventname:presetid:starttime:endtime:genre`:
-/// `Row: 0 eventname=..., presetid=12, starttime=..., endtime=..., genre=2`.
-/// Titles may contain ", ", so the other fields are found from the right.
+/// A description: control characters out, but its line breaks kept.
+pub fn clean_info(s: &str) -> Option<String> {
+    let s: String = s.chars().filter(|c| *c == '\n' || !c.is_control()).collect();
+    let s = s.trim();
+    (!s.is_empty() && s != "NULL").then(|| s.to_string())
+}
+
+/// The rows of `content query` output, a row's continuation lines (from
+/// values with line breaks) joined back on.
+pub fn query_rows(out: &str) -> Vec<String> {
+    let mut rows: Vec<String> = Vec::new();
+    for l in out.lines() {
+        let l = l.strip_suffix('\r').unwrap_or(l);
+        match (l.starts_with("Row: "), rows.last_mut()) {
+            (true, _) => rows.push(l.to_string()),
+            (false, Some(row)) => {
+                row.push('\n');
+                row.push_str(l);
+            }
+            (false, None) => {}
+        }
+    }
+    rows
+}
+
+/// Rows of `content query --projection presetid:starttime:endtime:genre:eventname[:shortinfo]`:
+/// `Row: 0 presetid=12, starttime=..., endtime=..., genre=2, eventname=..., shortinfo=...`.
+/// Titles and descriptions can hold ", ", and descriptions line breaks (the
+/// rest of a row then comes on the next lines).
 pub fn parse_events(out: &str) -> Vec<crate::provider::Event> {
-    out.lines()
-        .filter_map(|l| {
-            let l = l.trim().strip_prefix("Row: ")?;
-            let rest = &l[l.find(" eventname=")? + " eventname=".len()..];
-            let (rest, genre) = rest.rsplit_once(", genre=")?;
-            let (rest, end) = rest.rsplit_once(", endtime=")?;
-            let (rest, start) = rest.rsplit_once(", starttime=")?;
-            let (title, preset) = rest.rsplit_once(", presetid=")?;
+    query_rows(out)
+        .iter()
+        .filter_map(|row| {
+            let rest = &row[row.find(" presetid=")? + " presetid=".len()..];
+            let (preset, rest) = rest.split_once(", starttime=")?;
+            let (start, rest) = rest.split_once(", endtime=")?;
+            let (end, rest) = rest.split_once(", genre=")?;
+            let (genre, rest) = rest.split_once(", eventname=")?;
+            let (title, info) = rest.split_once(", shortinfo=").unwrap_or((rest, ""));
             if title == "NULL" {
                 return None;
             }
@@ -234,6 +265,7 @@ pub fn parse_events(out: &str) -> Vec<crate::provider::Event> {
                 start: start.parse().ok()?,
                 end: end.parse().ok()?,
                 genre: genre.parse().ok(),
+                info: clean_info(info),
             })
         })
         .collect()
@@ -247,27 +279,139 @@ fn guide_cache_file(ip: &str) -> Option<std::path::PathBuf> {
     Some(crate::plugin::cache_path(ip)?.with_file_name(format!("{ip}.guide")))
 }
 
-/// One event per line: `channel start end genre title` (tab-separated).
+/// The cache file's first line; a file without it (an older tvbee's, with
+/// no descriptions) is read afresh.
+const GUIDE_CACHE_HEADER: &str = "# tvbee guide v3";
+
+/// One event per line: `channel start end genre title info`, tab-separated;
+/// the description's line breaks and backslashes escaped (`\n`, `\\`).
 pub fn render_events(events: &[crate::provider::Event]) -> String {
-    events
-        .iter()
-        .map(|e| format!("{}\t{}\t{}\t{}\t{}\n", e.channel, e.start, e.end, e.genre.map_or(String::new(), |g| g.to_string()), e.title.replace(['\t', '\n'], " ")))
-        .collect()
+    let mut out = format!("{GUIDE_CACHE_HEADER}\n");
+    for e in events {
+        let info = e.info.as_deref().unwrap_or("").replace('\\', "\\\\").replace('\n', "\\n").replace('\t', " ");
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{}\t{}\t{info}\n",
+            e.channel,
+            e.start,
+            e.end,
+            e.genre.map_or(String::new(), |g| g.to_string()),
+            e.title.replace(['\t', '\n'], " ")
+        ));
+    }
+    out
 }
 
+fn unescape_info(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match (c, c == '\\') {
+            (_, true) => match chars.next() {
+                Some('n') => out.push('\n'),
+                Some(o) => out.push(o),
+                None => {}
+            },
+            (c, false) => out.push(c),
+        }
+    }
+    out
+}
+
+/// The events in a cache file; nothing for a file in an older format.
 pub fn parse_cached_events(text: &str) -> Vec<crate::provider::Event> {
+    if !text.starts_with(GUIDE_CACHE_HEADER) {
+        return Vec::new();
+    }
     text.lines()
+        .skip(1)
         .filter_map(|l| {
-            let mut f = l.splitn(5, '\t');
+            let mut f = l.splitn(6, '\t');
             Some(crate::provider::Event {
                 channel: f.next()?.parse().ok()?,
                 start: f.next()?.parse().ok()?,
                 end: f.next()?.parse().ok()?,
                 genre: f.next()?.parse().ok(),
                 title: clean(f.next()?),
+                info: f.next().and_then(|i| clean_info(&unescape_info(i))),
             })
         })
         .collect()
+}
+
+/// Rows of `--projection presetid:starttime:shortinfo`: (channel, start, description).
+pub fn parse_infos(out: &str) -> (usize, Vec<(u32, i64, String)>) {
+    let rows = query_rows(out);
+    let infos = rows
+        .iter()
+        .filter_map(|row| {
+            let rest = &row[row.find(" presetid=")? + " presetid=".len()..];
+            let (preset, rest) = rest.split_once(", starttime=")?;
+            let (start, info) = rest.split_once(", shortinfo=")?;
+            Some((preset.parse().ok()?, start.parse().ok()?, clean_info(info)?))
+        })
+        .collect();
+    (rows.len(), infos)
+}
+
+type Infos = std::sync::Arc<std::collections::HashMap<(u32, i64), String>>;
+static INFOS: std::sync::Mutex<Option<(String, std::time::Instant, Infos)>> = std::sync::Mutex::new(None);
+const INFO_CACHE_HEADER: &str = "# tvbee guide descriptions v1";
+/// Rows a page: about 1MB with descriptions, well inside the 2MB a query can return.
+const INFO_PAGE: usize = 4000;
+
+/// Every description in the guide: from memory, else the cache file, else
+/// the TV, a page at a time (ordered and paged through the sort clause,
+/// which the TV passes to its database as it is).
+fn guide_infos(tv: &Tv) -> Result<Infos> {
+    let mut mem = INFOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, _, infos)) = mem.as_ref().filter(|(ip, at, _)| *ip == tv.ip && at.elapsed() < GUIDE_FRESH) {
+        return Ok(infos.clone());
+    }
+    let file = crate::plugin::cache_path(&tv.ip).map(|p| p.with_file_name(format!("{}.guide-info", tv.ip)));
+    let age = file.as_ref().and_then(|f| std::fs::metadata(f).ok()?.modified().ok()?.elapsed().ok());
+    let cached = match (&file, age) {
+        (Some(f), Some(age)) if age < GUIDE_FRESH => std::fs::read_to_string(f).ok().filter(|t| t.starts_with(INFO_CACHE_HEADER)).map(|t| {
+            let map = t
+                .lines()
+                .skip(1)
+                .filter_map(|l| {
+                    let mut f = l.splitn(3, '\t');
+                    Some(((f.next()?.parse().ok()?, f.next()?.parse().ok()?), unescape_info(f.next()?)))
+                })
+                .collect();
+            (map, std::time::Instant::now() - age)
+        }),
+        _ => None,
+    };
+    let (map, at) = match cached {
+        Some(c) => c,
+        None => {
+            tv.connect()?;
+            let mut map = std::collections::HashMap::new();
+            let mut text = format!("{INFO_CACHE_HEADER}\n");
+            for page in 0.. {
+                let cmd = format!(
+                    "content query --uri {GUIDE_URI} --projection presetid:starttime:shortinfo --sort 'presetid, starttime LIMIT {INFO_PAGE} OFFSET {}'",
+                    page * INFO_PAGE
+                );
+                let (rows, infos) = parse_infos(&tv.shell(&[&cmd])?);
+                for (ch, start, info) in infos {
+                    text.push_str(&format!("{ch}\t{start}\t{}\n", info.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', " ")));
+                    map.insert((ch, start), info);
+                }
+                if rows < INFO_PAGE {
+                    break;
+                }
+            }
+            if let Some(f) = &file {
+                let _ = std::fs::write(f, text);
+            }
+            (map, std::time::Instant::now())
+        }
+    };
+    let infos: Infos = std::sync::Arc::new(map);
+    *mem = Some((tv.ip.clone(), at, infos.clone()));
+    Ok(infos)
 }
 
 type Guide = std::sync::Arc<Vec<crate::provider::Event>>;
@@ -352,6 +496,10 @@ impl crate::provider::Guide for Freeview {
         // what's on, and anything starting in the next six hours
         let events: Vec<_> = guide_events(cx.tv)?.iter().filter(|e| e.end > at && e.start < at + 6 * 3600).cloned().collect();
         Ok(now_next_of(&events, at))
+    }
+
+    fn info(&self, cx: &crate::provider::Cx, channel: u32, start: i64) -> Result<Option<String>> {
+        Ok(guide_infos(cx.tv)?.get(&(channel, start)).cloned())
     }
 
     /// The guide's `presetid` is the channel's ccid.
@@ -559,10 +707,11 @@ mod guide_tests {
         assert!(device_json("abc").contains(r#""id":"abc""#));
     }
 
-    const OUT: &str = "Row: 0 eventname=The Make a Difference Show, presetid=12, starttime=100, endtime=200, genre=2
-Row: 1 eventname=Dotun Adebayo, presetid=12, starttime=200, endtime=300, genre=NULL
-Row: 2 eventname=News, Weather, and Sport, presetid=1, starttime=150, endtime=250, genre=4
-Row: 3 eventname=NULL, presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL
+    const OUT: &str = "Row: 0 presetid=12, starttime=100, endtime=200, genre=2, eventname=The Make a Difference Show, shortinfo=Stories of people, places, and change.
+Row: 1 presetid=12, starttime=200, endtime=300, genre=NULL, eventname=Dotun Adebayo, shortinfo=NULL
+Row: 2 presetid=1, starttime=150, endtime=250, genre=4, eventname=News, Weather, and Sport, shortinfo=The headlines.
+Then the weather.
+Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, shortinfo=NULL
 ";
 
     #[test]
@@ -572,6 +721,10 @@ Row: 3 eventname=NULL, presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL
         assert_eq!(e[2].title, "News, Weather, and Sport");
         assert_eq!((e[2].channel, e[2].start, e[2].end, e[2].genre), (1, 150, 250, Some(4)));
         assert_eq!(e[1].genre, None);
+        assert_eq!(e[0].info.as_deref(), Some("Stories of people, places, and change."));
+        assert_eq!(e[1].info, None);
+        // a description over two lines
+        assert_eq!(e[2].info.as_deref(), Some("The headlines.\nThen the weather."));
     }
 
     #[test]
@@ -586,9 +739,19 @@ Row: 3 eventname=NULL, presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL
     #[test]
     fn cleans_titles() {
         assert_eq!(clean("Pokémon the Movie...\u{0}\u{0}"), "Pokémon the Movie...");
-        let e = parse_events("Row: 0 eventname=Countryfile\u{0}, presetid=101, starttime=1, endtime=2, genre=NULL\n");
+        let e = parse_events("Row: 0 presetid=101, starttime=1, endtime=2, genre=NULL, eventname=Countryfile\u{0}, shortinfo=NULL\n");
         assert_eq!(e[0].title, "Countryfile");
-        assert_eq!(parse_cached_events("101\t1\t2\t\tCountryfile\u{0}\u{0}\n")[0].title, "Countryfile");
+        assert_eq!(parse_cached_events(&format!("{GUIDE_CACHE_HEADER}\n101\t1\t2\t\tCountryfile\u{0}\u{0}\t\n"))[0].title, "Countryfile");
+        // an older cache (no header): read afresh
+        assert!(parse_cached_events("101\t1\t2\t\tCountryfile\n").is_empty());
+    }
+
+    #[test]
+    fn reads_description_pages() {
+        let out = "Row: 0 presetid=12, starttime=100, shortinfo=Stories.\r\nRow: 1 presetid=12, starttime=200, shortinfo=NULL\nRow: 2 presetid=1, starttime=150, shortinfo=Line one,\nline two.\n";
+        let (rows, infos) = parse_infos(out);
+        assert_eq!(rows, 3);
+        assert_eq!(infos, [(12, 100, "Stories.".to_string()), (1, 150, "Line one,\nline two.".to_string())]);
     }
 
     #[test]

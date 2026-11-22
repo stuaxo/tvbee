@@ -60,6 +60,8 @@ pub enum Action {
     Search { pkg: String, query: String, keys: bool },
     /// Fetch the programme guide (for the guide pop-up).
     LoadGuide,
+    /// Fetch a programme's description (channel, start).
+    LoadInfo(u32, i64),
     /// Switch live TV to a channel.
     Watch(crate::provider::Channel),
     /// Make a channel a favourite (true) or not.
@@ -212,6 +214,8 @@ enum Msg {
     Running(std::collections::BTreeSet<String>),
     /// The guide pop-up's rows, or why there aren't any.
     Guide(std::result::Result<Guide, String>),
+    /// A programme's description (channel, start).
+    Info((u32, i64), std::result::Result<Option<String>, String>),
 }
 
 /// A channel in the guide pop-up, with its programmes for the next day.
@@ -249,9 +253,10 @@ pub enum Seg {
 
 /// One channel's row of the timeline grid: `width` cells from `start`,
 /// `spc` seconds a cell. A programme is `│HH:MM Title` over the cells its
-/// time covers; one that started before the left edge shows `◂Title`.
-pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: usize, offset: i64) -> Vec<(Seg, String)> {
-    let mut buf = vec![(' ', Seg::Gap); width];
+/// time covers; one that started before the left edge shows `◂Title`. Runs
+/// of the programme starting at `focus` are flagged (to draw it marked).
+pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: usize, offset: i64, focus: Option<i64>) -> Vec<(Seg, String, bool)> {
+    let mut buf = vec![(' ', Seg::Gap, false); width];
     let end = start + spc * width as i64;
     let cell = |t: i64| (t - start).div_euclid(spc).clamp(0, width as i64) as usize;
     for e in events.iter().filter(|e| e.end > start && e.start < end) {
@@ -272,16 +277,66 @@ pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: 
             content.truncate(w - 1);
             content.push(('…', Seg::Title));
         }
-        for (i, c) in content.into_iter().take(w).enumerate() {
-            buf[x0 + i] = c;
+        let marked = focus == Some(e.start);
+        for (i, (c, seg)) in content.into_iter().take(w).enumerate() {
+            buf[x0 + i] = (c, seg, marked);
+        }
+        // the whole block, spaces too
+        if marked {
+            for cell in &mut buf[x0..x1] {
+                cell.2 = true;
+            }
         }
     }
-    let mut out: Vec<(Seg, String)> = Vec::new();
-    for (c, seg) in buf {
+    let mut out: Vec<(Seg, String, bool)> = Vec::new();
+    for (c, seg, marked) in buf {
         match out.last_mut() {
-            Some((s, text)) if *s == seg => text.push(c),
-            _ => out.push((seg, c.to_string())),
+            Some((s, text, m)) if *s == seg && *m == marked => text.push(c),
+            _ => out.push((seg, c.to_string(), marked)),
         }
+    }
+    out
+}
+
+/// What clicking part of the details panel does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailsClick {
+    Open,
+    Focus,
+    Unfocus,
+    Hide,
+}
+
+/// The details panel under the guide: hidden (one line), open, or open
+/// with the keyboard in it (to scroll).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Details {
+    Closed,
+    Open,
+    Focused,
+}
+
+/// Lines in the open details panel.
+const DETAILS_ROWS: usize = 7;
+
+/// The details panel's text for programme `e` on channel `ch`, wrapped to
+/// `width`: title, then when/how long/channel/genre, then the description.
+/// `info`: None while it's being read, Some(None) if the guide has none.
+pub fn details_text(e: &crate::provider::Event, ch: &crate::provider::Channel, info: Option<Option<&str>>, width: usize, offset: i64) -> Vec<(String, Seg)> {
+    use crate::plugins::guide::{day_hhmm, hhmm};
+    let mins = (e.end - e.start) / 60;
+    let length = if mins >= 60 { format!("{}h{:02}", mins / 60, mins % 60) } else { format!("{mins} min") };
+    let mut meta = vec![format!("{}–{} ({length})", day_hhmm(e.start, offset), hhmm(e.end, offset)), ch.label()];
+    meta.extend(e.genre_name().map(str::to_string));
+    let mut out = vec![(e.title.clone(), Seg::Title), (meta.join(" · "), Seg::Time), (String::new(), Seg::Gap)];
+    match info {
+        Some(Some(info)) => {
+            for para in info.split('\n') {
+                out.extend(textwrap(para, width).into_iter().map(|l| (l, Seg::Gap)));
+            }
+        }
+        Some(None) => out.push(("(no description in the broadcast guide)".into(), Seg::Time)),
+        None => out.push(("reading descriptions from the TV (the first time takes half a minute)...".into(), Seg::Time)),
     }
     out
 }
@@ -510,6 +565,19 @@ impl Worker {
     fn act(&mut self, a: Action, tx: &Sender<Msg>) -> Result<String> {
         self.tv.connect()?;
         Ok(match a {
+            Action::LoadInfo(ch, start) => {
+                // the first read takes the TV a while: off the worker, so the screen keeps refreshing
+                let (ip, tx) = (self.tv.ip.clone(), tx.clone());
+                std::thread::spawn(move || {
+                    let tv = Tv { ip };
+                    let info = live_provider()
+                        .and_then(|p| p.guide())
+                        .map_or(Ok(None), |g| g.info(&crate::provider::Cx { tv: &tv }, ch, start))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::Info((ch, start), info));
+                });
+                String::new()
+            }
             Action::LoadGuide => {
                 let _ = tx.send(Msg::Guide(load_guide(&self.tv).map_err(|e| e.to_string())));
                 String::new()
@@ -743,6 +811,17 @@ struct App {
     guide_view: i64,
     /// When the slide last moved.
     guide_slid: Instant,
+    /// The details panel, and how far it's scrolled.
+    details: Details,
+    details_scroll: usize,
+    /// The programme the details are for (channel, start), to start each
+    /// one from the top.
+    details_of: Option<(u32, i64)>,
+    /// Descriptions fetched so far (None: the guide has none), by (channel, start).
+    infos: std::collections::HashMap<(u32, i64), Option<String>>,
+    /// Descriptions asked for and not back yet; `want_info` is the next to ask for.
+    infos_asked: std::collections::HashSet<(u32, i64)>,
+    want_info: Option<(u32, i64)>,
 }
 
 /// How long an action gets to settle before the screen shows whatever the
@@ -1158,6 +1237,8 @@ pub enum Hit {
     GuideTab(GuideTab),
     /// Option N in the options dialog.
     OptionItem(usize),
+    /// Part of the guide's details panel.
+    Details(DetailsClick),
     /// A field of what's on that opens something.
     Open(nowplaying::Open),
     ConfirmYes,
@@ -1272,6 +1353,11 @@ impl App {
             Msg::Apps(list) => self.apps = Some(list),
             Msg::Searchable(list) => self.searchable = Some(list),
             Msg::Running(set) => self.running = set,
+            Msg::Info(key, info) => {
+                self.infos_asked.remove(&key);
+                let info = info.unwrap_or_else(|e| Some(format!("(couldn't read the description: {e})")));
+                self.infos.insert(key, info);
+            }
             Msg::Guide(g) => {
                 if let Some(news) = g.as_ref().ok().and_then(|g| g.news.clone()) {
                     self.note = news;
@@ -1431,7 +1517,27 @@ impl App {
     /// go earlier/later in time, Tab switches tabs, Enter watches, Esc closes.
     fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Sender<Action>) {
         let mut tab = tab;
+        // keys for the details panel while it has the keyboard
+        if self.details == Details::Focused {
+            match code {
+                KeyCode::Esc | KeyCode::BackTab | KeyCode::Tab => self.details = Details::Open,
+                KeyCode::Backspace | KeyCode::Char('h') => self.details = Details::Closed,
+                KeyCode::Up => self.details_scroll = self.details_scroll.saturating_sub(1),
+                KeyCode::Down => self.details_scroll += 1,
+                KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(DETAILS_ROWS),
+                KeyCode::PageDown => self.details_scroll += DETAILS_ROWS,
+                KeyCode::Home => self.details_scroll = 0,
+                KeyCode::End => self.details_scroll = usize::MAX / 2,
+                _ => {}
+            }
+            return;
+        }
         match code {
+            // shift+tab: into the details panel (opening it)
+            KeyCode::BackTab => {
+                self.details = Details::Focused;
+                return;
+            }
             KeyCode::Esc => {
                 self.overlay = Overlay::None;
                 return;
@@ -1449,7 +1555,7 @@ impl App {
                 self.toggle_favourite(at, actions);
                 return;
             }
-            KeyCode::Tab | KeyCode::BackTab => tab = tab.other(),
+            KeyCode::Tab => tab = tab.other(),
             KeyCode::Right => self.guide_later = (self.guide_later + 1).min(GUIDE_AHEAD / GUIDE_STEP),
             KeyCode::Left => self.guide_later = self.guide_later.saturating_sub(1).max(0),
             KeyCode::Backspace => {
@@ -1621,8 +1727,21 @@ impl App {
             (Overlay::Options(_), Some(Hit::OptionItem(i))) => self.toggle_option(i),
             (Overlay::Options(_), Some(Hit::Popup)) => {}
             (Overlay::Options(_), _) => self.overlay = Overlay::None,
+            (Overlay::Guide { .. }, Some(Hit::Details(click))) => {
+                self.details = match click {
+                    DetailsClick::Open => Details::Open,
+                    DetailsClick::Focus => Details::Focused,
+                    DetailsClick::Unfocus => Details::Open,
+                    DetailsClick::Hide => Details::Closed,
+                };
+            }
             (Overlay::Guide { .. }, Some(Hit::GuideStar(id))) => self.toggle_favourite(id, actions),
-            (Overlay::Guide { .. }, Some(Hit::GuideRow(id))) => self.watch_channel(id, actions),
+            (Overlay::Guide { .. }, Some(Hit::GuideRow(id))) => {
+                if self.details == Details::Focused {
+                    self.details = Details::Open;
+                }
+                self.watch_channel(id, actions);
+            }
             (Overlay::Guide { at, .. }, Some(Hit::GuideTab(t))) => self.overlay = Overlay::Guide { tab: t, at },
             (Overlay::None, Some(Hit::Open(o))) => self.open(o, actions),
             (Overlay::Guide { .. }, Some(Hit::Popup)) => {}
@@ -1996,6 +2115,8 @@ impl App {
                 let mut text: Vec<Line> = Vec::new();
                 let mut ids: Vec<Option<u32>> = Vec::new();
                 let mut tabs: Vec<(GuideTab, String)> = Vec::new();
+                // (text row, x within the box, width, what clicking does) for the details panel
+                let mut details_hits: Vec<(usize, u16, u16, DetailsClick)> = Vec::new();
                 let total = usize::from(area.width.saturating_sub(8)).clamp(50, 140);
                 // the timeline grid, right of the channel names
                 let ch_w = 24;
@@ -2059,7 +2180,9 @@ impl App {
                         text.push(Line::from(head));
                         ids.push(None);
                         let shown = guide_shown(&g.rows, tab, &self.prompt, t);
-                        let room = usize::from(area.height.saturating_sub(11)).max(3);
+                        // the details panel takes its rows from the list
+                        let panel_h = if self.details == Details::Closed { 1 } else { DETAILS_ROWS + 1 };
+                        let room = usize::from(area.height.saturating_sub(11)).saturating_sub(panel_h + 1).max(3);
                         if shown.is_empty() {
                             let why = match (tab, self.prompt.is_empty()) {
                                 (GuideTab::Favourites, true) => "no favourites yet: add channels to a favourites list on the TV".to_string(),
@@ -2078,11 +2201,15 @@ impl App {
                             let name = format!("{star} {}{}{wait}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
                             let mut spans = vec![Span::raw(format!("{mark}{}  ", fit(&name, ch_w + 1)))];
                             // times and edges dimmed, so the titles stand out (not on the highlighted row)
-                            for (seg, run) in grid_row(&r.events, view, spc, grid_w, off) {
-                                spans.push(match seg {
+                            // on the highlighted row, the programme the details are about is marked
+                            let focus = (i == sel).then(|| r.at(t)).and_then(|(on, after)| on.or(after)).map(|e| e.start);
+                            for (seg, run, marked) in grid_row(&r.events, view, spc, grid_w, off, focus) {
+                                let span = match seg {
                                     Seg::Edge | Seg::Time if i != sel => Span::styled(run, dim),
                                     _ => Span::raw(run),
-                                });
+                                };
+                                // marked: drawn the other way round, within the reversed row
+                                spans.push(if marked { span.style(Style::new().fg(Color::Magenta).bg(Color::Black).bold()) } else { span });
                             }
                             let line = Line::from(spans);
                             text.push(if i == sel { line.reversed() } else { line });
@@ -2093,9 +2220,86 @@ impl App {
                             text.push(Line::default());
                             ids.push(None);
                         }
+                        // the details panel: the highlighted channel's programme at the guide's time
+                        let picked = shown.get(sel).and_then(|r| {
+                            let (on, after) = r.at(t);
+                            on.or(after).map(|e| (e.clone(), r.channel.clone()))
+                        });
+                        let key = picked.as_ref().map(|(e, ch)| (ch.id, e.start));
+                        if key != self.details_of {
+                            self.details_of = key;
+                            self.details_scroll = 0;
+                        }
+                        let panel_top = text.len();
+                        let focused = self.details == Details::Focused;
+                        let bar_style = if focused { Style::new().fg(Color::Black).bg(Color::Magenta).bold() } else { Style::new().fg(Color::Magenta) };
+                        match (self.details, &picked) {
+                            (Details::Closed, _) => {
+                                let what = picked.as_ref().map_or(String::new(), |(e, _)| format!(": {}", e.title));
+                                text.push(Line::from(vec![Span::styled("▸ details", bar_style), Span::styled(format!("{what}   (shift+tab or click to open)"), dim)]));
+                                details_hits.push((panel_top, 0, total as u16, DetailsClick::Open));
+                            }
+                            (_, None) => {
+                                text.push(Line::from(vec![Span::styled("▾ details", bar_style), Span::styled("  nothing on then", dim)]));
+                                details_hits.push((panel_top, 0, total as u16, DetailsClick::Hide));
+                            }
+                            (_, Some((e, ch))) => {
+                                let key = (ch.id, e.start);
+                                let info = match (e.info.as_deref(), self.infos.get(&key)) {
+                                    (Some(i), _) => Some(Some(i)),
+                                    (None, Some(i)) => Some(i.as_deref()),
+                                    (None, None) => {
+                                        if self.infos_asked.insert(key) {
+                                            self.want_info = Some(key);
+                                        }
+                                        None
+                                    }
+                                };
+                                let all = details_text(e, ch, info, total.saturating_sub(2), off);
+                                self.details_scroll = self.details_scroll.min(all.len().saturating_sub(DETAILS_ROWS));
+                                let more = if all.len() > DETAILS_ROWS {
+                                    format!("  {}-{} of {} lines", self.details_scroll + 1, (self.details_scroll + DETAILS_ROWS).min(all.len()), all.len())
+                                } else {
+                                    String::new()
+                                };
+                                let head = "▾ details ";
+                                let (focus_b, hide_b) = (if focused { "[back to the guide]" } else { "[focus: scroll]" }, "[hide]");
+                                text.push(Line::from(vec![
+                                    Span::styled(head, bar_style),
+                                    Span::raw(" "),
+                                    Span::styled(focus_b, Style::new().fg(Color::Cyan)),
+                                    Span::raw(" "),
+                                    Span::styled(hide_b, Style::new().fg(Color::Cyan)),
+                                    Span::styled(more, dim),
+                                ]));
+                                let fx = (head.chars().count() + 1) as u16;
+                                details_hits.push((panel_top, fx, focus_b.chars().count() as u16, if focused { DetailsClick::Unfocus } else { DetailsClick::Focus }));
+                                details_hits.push((panel_top, fx + focus_b.chars().count() as u16 + 1, hide_b.len() as u16, DetailsClick::Hide));
+                                for (k, (line, seg)) in all.iter().skip(self.details_scroll).take(DETAILS_ROWS).enumerate() {
+                                    text.push(match seg {
+                                        Seg::Title => Line::from(format!(" {line}")).bold(),
+                                        Seg::Time => Line::from(format!(" {line}")).fg(Color::DarkGray),
+                                        _ => Line::from(format!(" {line}")),
+                                    });
+                                    details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
+                                }
+                                for k in all.len().saturating_sub(self.details_scroll)..DETAILS_ROWS {
+                                    text.push(Line::default());
+                                    details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
+                                }
+                            }
+                        }
+                        while ids.len() < text.len() {
+                            ids.push(None);
+                        }
                         text.push(Line::default());
                         let more = if shown.len() > room { format!("  ({} of {})", sel + 1, shown.len()) } else { String::new() };
-                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  ←/→ half an hour  tab switch  ⏎/click watch  * or ☆/★ favourite (· to sync)  ▶ on now  esc{more}")).fg(Color::DarkGray));
+                        let keys = if focused {
+                            "details: ↑/↓ pgup/pgdn scroll  esc/shift+tab back to the guide  h hide".to_string()
+                        } else {
+                            format!("↑/↓ choose  ←/→ half an hour  tab switch  ⏎/click watch  * favourite  shift+tab details  esc{more}")
+                        };
+                        text.push(Line::from(keys).fg(Color::DarkGray));
                         format!(" guide: {} ", g.provider)
                     }
                 };
@@ -2108,6 +2312,10 @@ impl App {
                         // the star (after the ▶ column), with a cell either side to be easy to hit
                         self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: 4.min(r.width), height: 1 }, Hit::GuideStar(id)));
                     }
+                }
+                for (row, x, w, click) in details_hits {
+                    let y = r.y + 1 + u16::try_from(row).unwrap_or(0);
+                    self.hits.push((ratatui::layout::Rect { x: r.x + 1 + x, y, width: w.min(r.width.saturating_sub(2)), height: 1 }, Hit::Details(click)));
                 }
                 // tab labels on the first row
                 let mut x = r.x + 1;
@@ -2366,7 +2574,7 @@ const HELP: &str = " everywhere
    i        system info      a      launch an app (space there: front / restart / close)
    /        search the app in front (tab picks another app)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
-            or earlier, tab favourites, ⏎ watch,
+            or earlier, tab favourites, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
             clicking the channel line opens it too
    . o      open a link (YouTube, Netflix, media files)
@@ -2426,6 +2634,10 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
             app.handle(m);
         }
         term.draw(|f| app.draw(f))?;
+        // drawing the details panel can find a description it needs
+        if let Some((ch, start)) = app.want_info.take() {
+            let _ = actions.send(Action::LoadInfo(ch, start));
+        }
         // short poll: keeps the progress bar moving and keys snappy; shorter
         // still while the guide slides
         let wait = if app.animating() { Duration::from_millis(10) } else { Duration::from_millis(200) };
@@ -2540,6 +2752,12 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         guide_later: 0,
         guide_view: 0,
         guide_slid: Instant::now(),
+        details: Details::Closed,
+        details_scroll: 0,
+        details_of: None,
+        infos: std::collections::HashMap::new(),
+        infos_asked: std::collections::HashSet::new(),
+        want_info: None,
     };
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     let result = ratatui::run(|term| {
@@ -2595,7 +2813,7 @@ mod tests {
     fn guide_filters_and_moves() {
         let row = |id: u32, n: &str, name: &str, now: &str, fav: bool| GuideRow {
             channel: crate::provider::Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: fav },
-            events: vec![crate::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None }],
+            events: vec![crate::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None, info: None }],
         };
         let rows = [
             row(159, "1", "BBC ONE Lon", "Countryfile", true),
@@ -2618,7 +2836,7 @@ mod tests {
         assert_eq!(guide_move(&[159, 143], 158, KeyCode::Char('x')), 159); // filtered away: first
         assert_eq!(guide_move(&[], 158, KeyCode::Down), 158);
         // later in the day: what's on then, and after it
-        let ev = |title: &str, start, end| crate::provider::Event { channel: 1, title: title.into(), start, end, genre: None };
+        let ev = |title: &str, start, end| crate::provider::Event { channel: 1, title: title.into(), start, end, genre: None, info: None };
         let day = GuideRow { channel: rows[0].channel.clone(), events: vec![ev("Apple", 0, 100), ev("Banana", 100, 200), ev("Cherry", 250, 300)] };
         let titles = |t| { let (a, b) = day.at(t); (a.map(|e| e.title.clone()), b.map(|e| e.title.clone())) };
         assert_eq!(titles(50), (Some("Apple".into()), Some("Banana".into())));
@@ -2627,21 +2845,33 @@ mod tests {
         assert_eq!(titles(400), (None, None));
         assert!(guide_matches(&day, "banana", 150) && !guide_matches(&day, "banana", 260));
         // the grid: 60s a cell, from 0
-        let grid = |w| grid_row(&day.events, 0, 60, w, 0).into_iter().map(|(_, t)| t).collect::<String>();
+        let grid = |w| grid_row(&day.events, 0, 60, w, 0, None).into_iter().map(|(_, t, _)| t).collect::<String>();
         // Apple 0-100s (1 cell), Banana 100-200s (cells 1-3), gap, Cherry 250-300s (cell 4)
         assert_eq!(grid(6), "││0 │ ");
         let long = [ev("A long title here", 0, 1800), ev("B", 1800, 2400)];
-        let row = grid_row(&long, 0, 60, 40, 0);
-        let flat: String = row.iter().map(|(_, t)| t.as_str()).collect();
+        let row = grid_row(&long, 0, 60, 40, 0, Some(1800));
+        let flat: String = row.iter().map(|(_, t, _)| t.as_str()).collect();
         assert_eq!(flat, "│00:00 A long title here      │00:30 B  ");
-        assert_eq!(row[0], (Seg::Edge, "│".into()));
-        assert_eq!(row[1], (Seg::Time, "00:00 ".into()));
+        assert_eq!(row[0], (Seg::Edge, "│".into(), false));
+        assert_eq!(row[1], (Seg::Time, "00:00 ".into(), false));
+        // the focused programme (B, from 1800) is flagged, its spaces too
+        let marked: String = row.iter().filter(|(_, _, m)| *m).map(|(_, t, _)| t.as_str()).collect();
+        assert_eq!(marked, "│00:30 B  ");
         // started before the left edge; and a cut-off title
-        let flat: String = grid_row(&long, 300, 60, 10, 0).iter().map(|(_, t)| t.as_str()).collect();
+        let flat: String = grid_row(&long, 300, 60, 10, 0, None).iter().map(|(_, t, _)| t.as_str()).collect();
         assert_eq!(flat, "◂A long t…");
         let (ruler, mark) = grid_ruler(0, 60, 40, 600, 0);
         assert_eq!((ruler.trim_end(), mark), ("00:00                         00:30", Some(10)));
         assert_eq!(grid_scale(90), 80);
+        // the details text
+        let mut e = ev("Garage Squad", 0, 3600);
+        e.genre = Some(6);
+        e.info = Some("The team restore a classic car for a family.\nNew series.".into());
+        let info = e.info.clone();
+        let lines: Vec<String> = details_text(&e, &rows[3].channel, Some(info.as_deref()), 30, 0).into_iter().map(|(l, _)| l).collect();
+        assert_eq!(lines, ["Garage Squad", "Thu 00:00–01:00 (1h00) · 18 More 4 · documentary", "", "The team restore a classic car", "for a family.", "New series."]);
+        let loading: Vec<String> = details_text(&e, &rows[3].channel, None, 30, 0).into_iter().map(|(l, _)| l).collect();
+        assert!(loading[3].starts_with("reading descriptions"));
         // steps land on the half hour
         assert_eq!(guide_time_at(1_000, 0), 1_000);
         assert_eq!(guide_time_at(1_000, 1), 1_800);

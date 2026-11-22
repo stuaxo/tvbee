@@ -208,7 +208,7 @@ mod tests {
     fn live_tv_line() {
         use crate::provider::{Channel, Event};
         let ch = Channel { id: 143, number: Some("18".into()), name: Some("More 4".into()), radio: false, favourite: false };
-        let ev = |t: &str, start, end| Event { channel: 143, title: t.into(), start, end, genre: None };
+        let ev = |t: &str, start, end| Event { channel: 143, title: t.into(), start, end, genre: None, info: None };
         let events = [ev("Come Dine with Me", 1000, 3100), ev("Grand Designs", 3100, 6700)];
         let hm = |t: i64, _| format!("t{t}");
         let a = live_activity(&ch, &events, 1600, 0, hm);
