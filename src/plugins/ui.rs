@@ -1028,6 +1028,8 @@ pub enum Hit {
     AppChoice(usize),
     /// A channel (by id) in the guide.
     GuideRow(u32),
+    /// The star of a channel in the guide: never switches channel.
+    GuideStar(u32),
     GuideTab(GuideTab),
     /// A field of what's on that opens something.
     Open(nowplaying::Open),
@@ -1410,6 +1412,9 @@ impl App {
             (Overlay::Confirm { .. }, Some(Hit::Popup)) => {}
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
+            }
+            (Overlay::Guide { .. }, Some(Hit::GuideStar(_))) => {
+                self.note = "favourites can't be changed from tvbee yet: use the TV's own channel list".into();
             }
             (Overlay::Guide { .. }, Some(Hit::GuideRow(id))) => self.watch_channel(id, actions),
             (Overlay::Guide { at, .. }, Some(Hit::GuideTab(t))) => self.overlay = Overlay::Guide { tab: t, at },
@@ -1853,6 +1858,8 @@ impl App {
                     if let Some(id) = id {
                         let y = r.y + 1 + u16::try_from(row).unwrap_or(0);
                         self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::GuideRow(id)));
+                        // the star (after the ▶ column), with a cell either side to be easy to hit
+                        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: 4.min(r.width), height: 1 }, Hit::GuideStar(id)));
                     }
                 }
                 // tab labels on the first row
