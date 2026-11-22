@@ -27,16 +27,16 @@ jobs:
       - run: cargo test --features "${{ matrix.features }}"
 
   # build with Debian's own packaged Rust (no rustup), as someone building
-  # from source on Debian 13 would; the default build has no dependencies
+  # from source on Debian 13 would
   debian:
     name: Debian 13, packaged Rust
     runs-on: ubuntu-latest
     container: debian:trixie
     steps:
       - uses: actions/checkout@v4
-      # ca-certificates: cargo reads the crates.io index over HTTPS to check
-      # Cargo.lock, even though the default build uses no crates
-      - run: apt-get update && apt-get install -y --no-install-recommends cargo ca-certificates
+      # ca-certificates: cargo fetches crates over HTTPS; gcc and libc6-dev
+      # build the bundled SQLite
+      - run: apt-get update && apt-get install -y --no-install-recommends cargo ca-certificates gcc libc6-dev
       - run: cargo --version && cargo build --locked && cargo test --locked
 
   # the oldest Rust we claim to support (Cargo.toml rust-version)

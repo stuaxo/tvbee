@@ -13,6 +13,10 @@ keywords = ["android-tv", "adb", "remote", "cli", "tv"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+# a local cache of what's read from the TV (guide, descriptions, ...); SQLite
+# bundled, so no system library is needed (a C compiler is, to build it)
+diesel = { version = "2.2", default-features = false, features = ["sqlite"] }
+libsqlite3-sys = { version = ">=0.17.2, <0.31.0", features = ["bundled"] }
 ratatui = { version = "0.30.2", optional = true, features = ["unstable-rendered-line-info"] }
 
 [features]

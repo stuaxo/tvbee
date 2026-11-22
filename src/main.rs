@@ -15,6 +15,7 @@ mod pairing;
 mod plugins;
 mod provider;
 mod registry;
+mod store;
 mod tv;
 mod watch;
 

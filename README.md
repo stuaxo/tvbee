@@ -40,8 +40,9 @@ The release builds include the full-screen remote (`tvbee ui`). From source:
     cargo install --git https://github.com/stuaxo/tvbee              # plain
     cargo install --git https://github.com/stuaxo/tvbee --features ui
 
-The plain build has no dependencies and builds with Debian 13's packaged Rust
-(`apt install cargo`); `--features ui` needs Rust 1.88 or newer.
+The plain build works with Debian 13's packaged Rust (`apt install cargo
+build-essential`: a C compiler builds the bundled SQLite that tvbee caches the
+TV's guide in); `--features ui` needs Rust 1.88 or newer.
 
 On the TV, turn on network debugging (Developer options). `tvbee findtv` finds
 it on the network; point tvbee at it with `TV_IP` (see below) and accept the

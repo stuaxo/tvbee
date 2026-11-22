@@ -275,68 +275,6 @@ pub fn parse_events(out: &str) -> Vec<crate::provider::Event> {
 /// slowly, and reading it takes the TV a few seconds.
 const GUIDE_FRESH: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-fn guide_cache_file(ip: &str) -> Option<std::path::PathBuf> {
-    Some(crate::plugin::cache_path(ip)?.with_file_name(format!("{ip}.guide")))
-}
-
-/// The cache file's first line; a file without it (an older tvbee's, with
-/// no descriptions) is read afresh.
-const GUIDE_CACHE_HEADER: &str = "# tvbee guide v3";
-
-/// One event per line: `channel start end genre title info`, tab-separated;
-/// the description's line breaks and backslashes escaped (`\n`, `\\`).
-pub fn render_events(events: &[crate::provider::Event]) -> String {
-    let mut out = format!("{GUIDE_CACHE_HEADER}\n");
-    for e in events {
-        let info = e.info.as_deref().unwrap_or("").replace('\\', "\\\\").replace('\n', "\\n").replace('\t', " ");
-        out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{info}\n",
-            e.channel,
-            e.start,
-            e.end,
-            e.genre.map_or(String::new(), |g| g.to_string()),
-            e.title.replace(['\t', '\n'], " ")
-        ));
-    }
-    out
-}
-
-fn unescape_info(s: &str) -> String {
-    let mut out = String::new();
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        match (c, c == '\\') {
-            (_, true) => match chars.next() {
-                Some('n') => out.push('\n'),
-                Some(o) => out.push(o),
-                None => {}
-            },
-            (c, false) => out.push(c),
-        }
-    }
-    out
-}
-
-/// The events in a cache file; nothing for a file in an older format.
-pub fn parse_cached_events(text: &str) -> Vec<crate::provider::Event> {
-    if !text.starts_with(GUIDE_CACHE_HEADER) {
-        return Vec::new();
-    }
-    text.lines()
-        .skip(1)
-        .filter_map(|l| {
-            let mut f = l.splitn(6, '\t');
-            Some(crate::provider::Event {
-                channel: f.next()?.parse().ok()?,
-                start: f.next()?.parse().ok()?,
-                end: f.next()?.parse().ok()?,
-                genre: f.next()?.parse().ok(),
-                title: clean(f.next()?),
-                info: f.next().and_then(|i| clean_info(&unescape_info(i))),
-            })
-        })
-        .collect()
-}
 
 /// Rows of `--projection presetid:starttime:shortinfo`: (channel, start, description).
 pub fn parse_infos(out: &str) -> (usize, Vec<(u32, i64, String)>) {
@@ -355,58 +293,53 @@ pub fn parse_infos(out: &str) -> (usize, Vec<(u32, i64, String)>) {
 
 type Infos = std::sync::Arc<std::collections::HashMap<(u32, i64), String>>;
 static INFOS: std::sync::Mutex<Option<(String, std::time::Instant, Infos)>> = std::sync::Mutex::new(None);
-const INFO_CACHE_HEADER: &str = "# tvbee guide descriptions v1";
 /// Rows a page: about 1MB with descriptions, well inside the 2MB a query can return.
 const INFO_PAGE: usize = 4000;
+/// Where this guide comes from, as the cache records it: the TV's own
+/// broadcast (over the air) guide.
+const SOURCE: &str = "broadcast";
 
-/// Every description in the guide: from memory, else the cache file, else
-/// the TV, a page at a time (ordered and paged through the sort clause,
-/// which the TV passes to its database as it is).
+/// How long ago `what` was read from the TV into the cache, if it was.
+fn cache_age(c: &mut diesel::sqlite::SqliteConnection, tv: &Tv, what: &str) -> Option<std::time::Duration> {
+    let at = crate::store::fetched_at(c, &tv.ip, SOURCE, what).ok()??;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    Some(std::time::Duration::from_secs(now.saturating_sub(at).max(0) as u64))
+}
+
+/// Every description in the guide: from memory, else the cache, else the
+/// TV, a page at a time (ordered and paged through the sort clause, which
+/// the TV passes to its database as it is).
 fn guide_infos(tv: &Tv) -> Result<Infos> {
     let mut mem = INFOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((_, _, infos)) = mem.as_ref().filter(|(ip, at, _)| *ip == tv.ip && at.elapsed() < GUIDE_FRESH) {
         return Ok(infos.clone());
     }
-    let file = crate::plugin::cache_path(&tv.ip).map(|p| p.with_file_name(format!("{}.guide-info", tv.ip)));
-    let age = file.as_ref().and_then(|f| std::fs::metadata(f).ok()?.modified().ok()?.elapsed().ok());
-    let cached = match (&file, age) {
-        (Some(f), Some(age)) if age < GUIDE_FRESH => std::fs::read_to_string(f).ok().filter(|t| t.starts_with(INFO_CACHE_HEADER)).map(|t| {
-            let map = t
-                .lines()
-                .skip(1)
-                .filter_map(|l| {
-                    let mut f = l.splitn(3, '\t');
-                    Some(((f.next()?.parse().ok()?, f.next()?.parse().ok()?), unescape_info(f.next()?)))
-                })
-                .collect();
-            (map, std::time::Instant::now() - age)
-        }),
-        _ => None,
-    };
+    // the cache is a help, never a requirement
+    let mut db = crate::store::open().ok();
+    let cached = db.as_mut().and_then(|c| {
+        let age = cache_age(c, tv, "descriptions").filter(|a| *a < GUIDE_FRESH)?;
+        Some((crate::store::load_descriptions(c, &tv.ip, SOURCE).ok()?, std::time::Instant::now() - age))
+    });
     let (map, at) = match cached {
         Some(c) => c,
         None => {
             tv.connect()?;
-            let mut map = std::collections::HashMap::new();
-            let mut text = format!("{INFO_CACHE_HEADER}\n");
+            let mut all = Vec::new();
             for page in 0.. {
                 let cmd = format!(
                     "content query --uri {GUIDE_URI} --projection presetid:starttime:shortinfo --sort 'presetid, starttime LIMIT {INFO_PAGE} OFFSET {}'",
                     page * INFO_PAGE
                 );
                 let (rows, infos) = parse_infos(&tv.shell(&[&cmd])?);
-                for (ch, start, info) in infos {
-                    text.push_str(&format!("{ch}\t{start}\t{}\n", info.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', " ")));
-                    map.insert((ch, start), info);
-                }
+                all.extend(infos);
                 if rows < INFO_PAGE {
                     break;
                 }
             }
-            if let Some(f) = &file {
-                let _ = std::fs::write(f, text);
+            if let Some(c) = db.as_mut() {
+                let _ = crate::store::save_descriptions(c, &tv.ip, SOURCE, &all);
             }
-            (map, std::time::Instant::now())
+            (all.into_iter().map(|(ch, start, info)| ((ch, start), info)).collect(), std::time::Instant::now())
         }
     };
     let infos: Infos = std::sync::Arc::new(map);
@@ -418,32 +351,27 @@ type Guide = std::sync::Arc<Vec<crate::provider::Event>>;
 static GUIDE: std::sync::Mutex<Option<(String, std::time::Instant, Guide)>> = std::sync::Mutex::new(None);
 
 /// The whole guide, sorted by channel then start: from memory, else the
-/// cache file, else the TV (which ignores filters, so it's all or nothing).
+/// cache, else the TV (which ignores filters, so it's all or nothing).
 fn guide_events(tv: &Tv) -> Result<Guide> {
     let mut mem = GUIDE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((_, _, events)) = mem.as_ref().filter(|(ip, at, _)| *ip == tv.ip && at.elapsed() < GUIDE_FRESH) {
         return Ok(events.clone());
     }
-    let file = guide_cache_file(&tv.ip);
-    let age = file.as_ref().and_then(|f| std::fs::metadata(f).ok()?.modified().ok()?.elapsed().ok());
-    let cached = match (&file, age) {
-        (Some(f), Some(age)) if age < GUIDE_FRESH => {
-            Some((parse_cached_events(&std::fs::read_to_string(f).unwrap_or_default()), std::time::Instant::now() - age))
-        }
-        _ => None,
-    };
-    let (events, at) = match cached.filter(|(e, _)| !e.is_empty()) {
+    let mut db = crate::store::open().ok();
+    let cached = db.as_mut().and_then(|c| {
+        let age = cache_age(c, tv, "events").filter(|a| *a < GUIDE_FRESH)?;
+        let events = crate::store::load_events(c, &tv.ip, SOURCE).ok().filter(|e| !e.is_empty())?;
+        Some((events, std::time::Instant::now() - age))
+    });
+    let (events, at) = match cached {
         Some(c) => c,
         None => {
             tv.connect()?;
             let cmd = format!("content query --uri {GUIDE_URI} --projection {GUIDE_COLUMNS}");
             let mut events = parse_events(&tv.shell(&[&cmd])?);
             events.sort_by_key(|e| (e.channel, e.start));
-            if let Some(f) = &file {
-                if let Some(dir) = f.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-                let _ = std::fs::write(f, render_events(&events));
+            if let Some(c) = db.as_mut() {
+                let _ = crate::store::save_events(c, &tv.ip, SOURCE, &events);
             }
             (events, std::time::Instant::now())
         }
@@ -741,9 +669,7 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
         assert_eq!(clean("Pokémon the Movie...\u{0}\u{0}"), "Pokémon the Movie...");
         let e = parse_events("Row: 0 presetid=101, starttime=1, endtime=2, genre=NULL, eventname=Countryfile\u{0}, shortinfo=NULL\n");
         assert_eq!(e[0].title, "Countryfile");
-        assert_eq!(parse_cached_events(&format!("{GUIDE_CACHE_HEADER}\n101\t1\t2\t\tCountryfile\u{0}\u{0}\t\n"))[0].title, "Countryfile");
-        // an older cache (no header): read afresh
-        assert!(parse_cached_events("101\t1\t2\t\tCountryfile\n").is_empty());
+
     }
 
     #[test]
@@ -754,11 +680,6 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
         assert_eq!(infos, [(12, 100, "Stories.".to_string()), (1, 150, "Line one,\nline two.".to_string())]);
     }
 
-    #[test]
-    fn caches_guide_rows() {
-        let e = parse_events(OUT);
-        assert_eq!(parse_cached_events(&render_events(&e)), e);
-    }
 
     #[test]
     fn reads_favourite_lists() {
