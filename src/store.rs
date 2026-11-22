@@ -111,6 +111,8 @@ fn path() -> Option<std::path::PathBuf> {
     Some(crate::plugin::cache_path("x")?.with_file_name("tvbee.sqlite"))
 }
 
+// newer clippy flags the code this derive generates, not ours
+#[allow(clippy::redundant_field_names)]
 #[derive(QueryableByName)]
 struct Version {
     #[diesel(sql_type = diesel::sql_types::Integer)]
