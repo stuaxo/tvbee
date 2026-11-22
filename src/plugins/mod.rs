@@ -30,6 +30,7 @@ pub fn all() -> Vec<Plugin> {
         Plugin::builtin("debloat", "disabling unwanted system apps, reversibly", debloat::commands),
         Plugin::builtin("diagnose", "finding the TV and checking the setup", diagnose::commands),
         Plugin::builtin("guide", "programme guides and content providers", guide::commands),
+        Plugin::builtin("options", "tvbee's own settings", crate::options::commands),
         Plugin::builtin("pairing", "pairing tvbee with services on the TV", crate::pairing::commands),
         Plugin::builtin("display", "seeing the TV screen", display::commands).with_menu(display::menu),
         Plugin::builtin("info", "querying the TV's state", info::commands),

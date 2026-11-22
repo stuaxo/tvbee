@@ -159,6 +159,9 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     unmute       unmute (no-op if not muted)
     vol          change volume
 
+[options]
+    options      tvbee's own settings: list them, or set one
+
 [pairing]
     pair         pair tvbee with a service on the TV
     pairings     services tvbee can pair with, and whether it has

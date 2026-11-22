@@ -9,6 +9,7 @@ mod mdns;
 mod menu;
 mod more;
 mod nowplaying;
+mod options;
 mod plugin;
 mod pairing;
 mod plugins;

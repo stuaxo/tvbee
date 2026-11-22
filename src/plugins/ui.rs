@@ -91,6 +91,7 @@ pub enum Input {
     OpenApps,
     OpenSearch,
     OpenGuide,
+    OpenOptions,
     Do(Action),
     Nothing,
 }
@@ -117,6 +118,7 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
         (KeyCode::Char('a'), _) => Input::OpenApps,
         (KeyCode::Char('g'), _) => Input::OpenGuide,
+        (KeyCode::Char(','), _) => Input::OpenOptions,
         (KeyCode::Char('/'), _) => Input::OpenSearch,
         (KeyCode::Char(' ') | KeyCode::Char('p'), _) => act(PlayPause),
         (KeyCode::Backspace, _) => act(Key(KEY_BACK)),
@@ -233,6 +235,77 @@ impl GuideRow {
 /// half hour (19:30, 20:00, ...).
 pub fn guide_time_at(now: i64, later: i64) -> i64 {
     if later == 0 { now } else { (now.div_euclid(GUIDE_STEP) + later) * GUIDE_STEP }
+}
+
+/// A run of the guide grid: a programme's edge, its start time, its title,
+/// or empty time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seg {
+    Edge,
+    Time,
+    Title,
+    Gap,
+}
+
+/// One channel's row of the timeline grid: `width` cells from `start`,
+/// `spc` seconds a cell. A programme is `│HH:MM Title` over the cells its
+/// time covers; one that started before the left edge shows `◂Title`.
+pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: usize, offset: i64) -> Vec<(Seg, String)> {
+    let mut buf = vec![(' ', Seg::Gap); width];
+    let end = start + spc * width as i64;
+    let cell = |t: i64| (t - start).div_euclid(spc).clamp(0, width as i64) as usize;
+    for e in events.iter().filter(|e| e.end > start && e.start < end) {
+        let (x0, x1) = (cell(e.start), cell(e.end));
+        if x1 <= x0 {
+            continue;
+        }
+        let mut content: Vec<(char, Seg)> = Vec::new();
+        if e.start >= start {
+            content.push(('│', Seg::Edge));
+            content.extend(format!("{} ", crate::plugins::guide::hhmm(e.start, offset)).chars().map(|c| (c, Seg::Time)));
+        } else {
+            content.push(('◂', Seg::Edge));
+        }
+        content.extend(e.title.chars().map(|c| (c, Seg::Title)));
+        let w = x1 - x0;
+        if content.len() > w && w > 2 {
+            content.truncate(w - 1);
+            content.push(('…', Seg::Title));
+        }
+        for (i, c) in content.into_iter().take(w).enumerate() {
+            buf[x0 + i] = c;
+        }
+    }
+    let mut out: Vec<(Seg, String)> = Vec::new();
+    for (c, seg) in buf {
+        match out.last_mut() {
+            Some((s, text)) if *s == seg => text.push(c),
+            _ => out.push((seg, c.to_string())),
+        }
+    }
+    out
+}
+
+/// The time ruler over the grid: half-hour labels, and ▼ at `now`.
+pub fn grid_ruler(start: i64, spc: i64, width: usize, now: i64, offset: i64) -> (String, Option<usize>) {
+    let mut buf = vec![' '; width];
+    let mut t = (start + GUIDE_STEP - 1).div_euclid(GUIDE_STEP) * GUIDE_STEP;
+    while t < start + spc * width as i64 {
+        let x = ((t - start) / spc) as usize;
+        for (i, c) in crate::plugins::guide::hhmm(t, offset).chars().enumerate() {
+            if x + i < width {
+                buf[x + i] = c;
+            }
+        }
+        t += GUIDE_STEP;
+    }
+    let marker = (now >= start && now < start + spc * width as i64).then(|| ((now - start) / spc) as usize);
+    (buf.into_iter().collect(), marker)
+}
+
+/// Seconds a grid cell stands for, so about two hours fit.
+pub fn grid_scale(width: usize) -> i64 {
+    (7200 / width.max(1) as i64).clamp(40, 120)
 }
 
 /// How far ahead the guide goes (← → move through it in GUIDE_STEP steps).
@@ -665,6 +738,11 @@ struct App {
     guide: Option<std::result::Result<Guide, String>>,
     /// How many GUIDE_STEPs ahead of now the guide shows.
     guide_later: i64,
+    /// Where the grid's left edge is drawn now (Unix seconds); it slides
+    /// toward where it should be when scroll animations are on.
+    guide_view: i64,
+    /// When the slide last moved.
+    guide_slid: Instant,
 }
 
 /// How long an action gets to settle before the screen shows whatever the
@@ -728,6 +806,8 @@ pub enum Overlay {
     Search(usize),
     /// What to do with launcher row `sel` of `tab`; `at` is the highlighted choice.
     AppActions { tab: AppTab, sel: usize, at: usize },
+    /// tvbee's options, with N highlighted.
+    Options(usize),
     /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
     /// the filter typed is `App::prompt`.
     Guide { tab: GuideTab, at: u32 },
@@ -1035,6 +1115,8 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
         Overlay::Guide { tab, at } => (Overlay::Guide { tab, at }, None),
+        // handled by App::options_key
+        Overlay::Options(i) => (Overlay::Options(i), None),
         Overlay::Confirm { item, yes } => match code {
             KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(Action::Menu(item))),
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { item, yes: !yes }, None),
@@ -1074,6 +1156,8 @@ pub enum Hit {
     /// The star of a channel in the guide: never switches channel.
     GuideStar(u32),
     GuideTab(GuideTab),
+    /// Option N in the options dialog.
+    OptionItem(usize),
     /// A field of what's on that opens something.
     Open(nowplaying::Open),
     ConfirmYes,
@@ -1131,6 +1215,7 @@ fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
         button("a", "apps", Input::OpenApps),
         button("/", "search", Input::OpenSearch),
         button("g", "guide", Input::OpenGuide),
+        button(",", "options", Input::OpenOptions),
         button(".", "more", OpenMenu),
         button("?", "help", ToggleHelp),
         button("q", "quit", Quit),
@@ -1277,6 +1362,7 @@ impl App {
         });
         self.prompt.clear();
         self.guide_later = 0;
+        self.guide_view = self.guide_start();
         self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
         let _ = actions.send(Action::LoadGuide);
     }
@@ -1286,6 +1372,54 @@ impl App {
         match o {
             nowplaying::Open::Guide { channel } => self.open_guide(channel, actions),
         }
+    }
+
+    /// Where the grid's left edge should be: the half hour before now, plus
+    /// the steps taken.
+    fn guide_start(&self) -> i64 {
+        crate::plugins::guide::now().div_euclid(GUIDE_STEP) * GUIDE_STEP + self.guide_later * GUIDE_STEP
+    }
+
+    /// Whether the guide is sliding (so frames should come quickly).
+    fn animating(&self) -> bool {
+        matches!(self.overlay, Overlay::Guide { .. }) && self.guide_view != self.guide_start()
+    }
+
+    /// Move the drawn grid toward where it should be: one cell every 10ms
+    /// with scroll animations on, else straight there.
+    fn slide(&mut self, spc: i64) {
+        let target = self.guide_start();
+        if !crate::options::get(crate::options::SCROLL_ANIMATION) {
+            self.guide_view = target;
+            return;
+        }
+        let cells = (self.guide_slid.elapsed().as_millis() / 10).max(1) as i64;
+        self.guide_slid = Instant::now();
+        let step = (cells * spc).min((target - self.guide_view).abs());
+        self.guide_view += step * (target - self.guide_view).signum();
+    }
+
+    /// Keys in the options dialog: ↑/↓ choose, Space/Enter toggle, Esc closes.
+    fn options_key(&mut self, i: usize, code: KeyCode) {
+        let n = crate::options::OPTIONS.len().max(1);
+        match code {
+            KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') | KeyCode::Backspace => self.overlay = Overlay::None,
+            KeyCode::Up => self.overlay = Overlay::Options((i + n - 1) % n),
+            KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::Options((i + 1) % n),
+            KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
+            _ => {}
+        }
+    }
+
+    /// Flip option `i` and save it.
+    fn toggle_option(&mut self, i: usize) {
+        let Some(o) = crate::options::OPTIONS.get(i) else { return };
+        let on = !crate::options::get(o.name);
+        self.note = match crate::options::set(o.name, on) {
+            Ok(()) => format!("{}: {}", o.label, if on { "on" } else { "off" }),
+            Err(e) => format!("couldn't save the option: {e}"),
+        };
+        self.overlay = Overlay::Options(i);
     }
 
     /// The time the guide shows.
@@ -1375,6 +1509,7 @@ impl App {
             Input::ToggleInfo => self.info = !self.info,
             Input::OpenSearch => self.open_search(None),
             Input::OpenGuide => self.open_guide(None, actions),
+            Input::OpenOptions => self.overlay = Overlay::Options(0),
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
                 let standby = self.snap.as_ref().is_some_and(|s| s.standby);
@@ -1483,6 +1618,9 @@ impl App {
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
             }
+            (Overlay::Options(_), Some(Hit::OptionItem(i))) => self.toggle_option(i),
+            (Overlay::Options(_), Some(Hit::Popup)) => {}
+            (Overlay::Options(_), _) => self.overlay = Overlay::None,
             (Overlay::Guide { .. }, Some(Hit::GuideStar(id))) => self.toggle_favourite(id, actions),
             (Overlay::Guide { .. }, Some(Hit::GuideRow(id))) => self.watch_channel(id, actions),
             (Overlay::Guide { at, .. }, Some(Hit::GuideTab(t))) => self.overlay = Overlay::Guide { tab: t, at },
@@ -1534,6 +1672,7 @@ impl App {
                 let (next, _) = apps_key(tab, sel, if up { KeyCode::Up } else { KeyCode::Down }, &rows);
                 self.overlay = next;
             }
+            Overlay::Options(i) => self.options_key(i, if up { KeyCode::Up } else { KeyCode::Down }),
             Overlay::Guide { tab, at } => self.guide_key(tab, at, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE, actions),
             Overlay::None => {
                 let _ = actions.send(Action::Volume(if up { 1 } else { -1 }));
@@ -1835,6 +1974,22 @@ impl App {
                     }
                 }
             }
+            Overlay::Options(sel) => {
+                let mut text = Vec::new();
+                for (i, o) in crate::options::OPTIONS.iter().enumerate() {
+                    let tick = if crate::options::get(o.name) { "[x]" } else { "[ ]" };
+                    let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), Style::new().fg(Color::DarkGray))]);
+                    text.push(if i == sel { line.reversed() } else { line });
+                }
+                text.push(Line::default());
+                text.push(Line::from("↑/↓ choose  space/⏎/click toggle  esc closes  (saved in ~/.config/tvbee/options.txt)").fg(Color::DarkGray));
+                let r = popup(f, " options ", text, Color::Blue);
+                self.hits.push((r, Hit::Popup));
+                for i in 0..crate::options::OPTIONS.len() {
+                    let y = r.y + 1 + u16::try_from(i).unwrap_or(0);
+                    self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::OptionItem(i)));
+                }
+            }
             Overlay::Guide { tab, at } => {
                 let area = f.area();
                 // the text, and the channel each line shows (for clicks)
@@ -1842,6 +1997,15 @@ impl App {
                 let mut ids: Vec<Option<u32>> = Vec::new();
                 let mut tabs: Vec<(GuideTab, String)> = Vec::new();
                 let total = usize::from(area.width.saturating_sub(8)).clamp(50, 140);
+                // the timeline grid, right of the channel names
+                let ch_w = 24;
+                let grid_w = total.saturating_sub(ch_w + 4).max(10);
+                let spc = grid_scale(grid_w);
+                if self.guide_slid.elapsed() > Duration::from_millis(200) {
+                    // not sliding lately: a slide starts from now
+                    self.guide_slid = Instant::now() - Duration::from_millis(10);
+                }
+                self.slide(spc);
                 let title = match &self.guide {
                     None => {
                         text.push(Line::from("reading the guide (the first time takes a few seconds)...").italic());
@@ -1878,22 +2042,21 @@ impl App {
                         };
                         text.push(filter);
                         ids.push(None);
-                        let ch_w = 24;
-                        let now_w = (total - ch_w - 4) * 55 / 100;
-                        let next_w = total - ch_w - 4 - now_w;
+                        let view = self.guide_view;
                         let t = self.guide_time();
-                        let (on_head, after_head) = if self.guide_later == 0 {
-                            ("now".to_string(), "next".to_string())
-                        } else {
-                            (format!("on at {}  ← earlier", crate::plugins::guide::day_hhmm(t, off)), "then  later →".to_string())
-                        };
-                        let head_style = Style::new().fg(Color::DarkGray);
-                        let on_style = if self.guide_later == 0 { head_style } else { Style::new().fg(Color::Magenta).bold() };
-                        text.push(Line::from(vec![
-                            Span::styled(format!("  {}  ", fit("channel", ch_w)), head_style),
-                            Span::styled(fit(&on_head, now_w), on_style),
-                            Span::styled(format!("  {}", fit(&after_head, next_w)), head_style),
-                        ]));
+                        let dim = Style::new().fg(Color::DarkGray);
+                        let (ruler, marker) = grid_ruler(view, spc, grid_w, crate::plugins::guide::now(), off);
+                        let mut head = vec![Span::styled(format!("  {}  ", fit(&format!("channel   {}", crate::plugins::guide::day_hhmm(view, off).split(' ').next().unwrap_or("")), ch_w)), dim)];
+                        match marker {
+                            Some(m) => {
+                                let r: Vec<char> = ruler.chars().collect();
+                                head.push(Span::styled(r[..m].iter().collect::<String>(), dim));
+                                head.push(Span::styled("▼", Style::new().fg(Color::Magenta).bold()));
+                                head.push(Span::styled(r[m + 1..].iter().collect::<String>(), dim));
+                            }
+                            None => head.push(Span::styled(ruler, dim)),
+                        }
+                        text.push(Line::from(head));
                         ids.push(None);
                         let shown = guide_shown(&g.rows, tab, &self.prompt, t);
                         let room = usize::from(area.height.saturating_sub(11)).max(3);
@@ -1913,22 +2076,14 @@ impl App {
                             // not on the TV yet: tvbee will send it when it can
                             let wait = if g.pending.contains_key(&r.channel.id) { " ·" } else { "" };
                             let name = format!("{star} {}{}{wait}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
-                            let (on, after) = r.at(t);
-                            // times dimmed, so the titles stand out (not on the highlighted row)
-                            let time_style = if i == sel { Style::new() } else { Style::new().fg(Color::DarkGray) };
-                            let programme = |e: Option<&crate::provider::Event>, w: usize| -> Vec<Span<'static>> {
-                                match e {
-                                    Some(e) => vec![
-                                        Span::styled(format!("{} ", crate::plugins::guide::hhmm(e.start, off)), time_style),
-                                        Span::raw(fit(&e.title, w.saturating_sub(6))),
-                                    ],
-                                    None => vec![Span::raw(" ".repeat(w))],
-                                }
-                            };
                             let mut spans = vec![Span::raw(format!("{mark}{}  ", fit(&name, ch_w + 1)))];
-                            spans.extend(programme(on, now_w));
-                            spans.push(Span::raw("  "));
-                            spans.extend(programme(after, next_w));
+                            // times and edges dimmed, so the titles stand out (not on the highlighted row)
+                            for (seg, run) in grid_row(&r.events, view, spc, grid_w, off) {
+                                spans.push(match seg {
+                                    Seg::Edge | Seg::Time if i != sel => Span::styled(run, dim),
+                                    _ => Span::raw(run),
+                                });
+                            }
                             let line = Line::from(spans);
                             text.push(if i == sel { line.reversed() } else { line });
                             ids.push(Some(r.channel.id));
@@ -1940,7 +2095,7 @@ impl App {
                         }
                         text.push(Line::default());
                         let more = if shown.len() > room { format!("  ({} of {})", sel + 1, shown.len()) } else { String::new() };
-                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  ←/→ earlier/later  tab switch  ⏎/click watch  * or ☆/★ favourite (· to sync)  ▶ on now  esc{more}")).fg(Color::DarkGray));
+                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  ←/→ half an hour  tab switch  ⏎/click watch  * or ☆/★ favourite (· to sync)  ▶ on now  esc{more}")).fg(Color::DarkGray));
                         format!(" guide: {} ", g.provider)
                     }
                 };
@@ -2215,6 +2370,7 @@ const HELP: &str = " everywhere
             * or click the star to add/remove a favourite);
             clicking the channel line opens it too
    . o      open a link (YouTube, Netflix, media files)
+   ,        options (scroll animations, ...)
    q Esc    quit
 
  player mode
@@ -2270,14 +2426,18 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
             app.handle(m);
         }
         term.draw(|f| app.draw(f))?;
-        // short poll: keeps the progress bar moving and keys snappy
-        if !event::poll(Duration::from_millis(200))? {
+        // short poll: keeps the progress bar moving and keys snappy; shorter
+        // still while the guide slides
+        let wait = if app.animating() { Duration::from_millis(10) } else { Duration::from_millis(200) };
+        if !event::poll(wait)? {
             continue;
         }
         match event::read()? {
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
+                } else if let Overlay::Options(i) = app.overlay {
+                    app.options_key(i, k.code);
                 } else if let Overlay::Guide { tab, at } = app.overlay {
                     app.guide_key(tab, at, k.code, k.modifiers, actions);
                 } else if let Overlay::Search(at) = app.overlay {
@@ -2378,6 +2538,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         settling: None,
         guide: None,
         guide_later: 0,
+        guide_view: 0,
+        guide_slid: Instant::now(),
     };
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     let result = ratatui::run(|term| {
@@ -2464,6 +2626,22 @@ mod tests {
         assert_eq!(titles(220), (None, Some("Cherry".into()))); // a gap
         assert_eq!(titles(400), (None, None));
         assert!(guide_matches(&day, "banana", 150) && !guide_matches(&day, "banana", 260));
+        // the grid: 60s a cell, from 0
+        let grid = |w| grid_row(&day.events, 0, 60, w, 0).into_iter().map(|(_, t)| t).collect::<String>();
+        // Apple 0-100s (1 cell), Banana 100-200s (cells 1-3), gap, Cherry 250-300s (cell 4)
+        assert_eq!(grid(6), "││0 │ ");
+        let long = [ev("A long title here", 0, 1800), ev("B", 1800, 2400)];
+        let row = grid_row(&long, 0, 60, 40, 0);
+        let flat: String = row.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(flat, "│00:00 A long title here      │00:30 B  ");
+        assert_eq!(row[0], (Seg::Edge, "│".into()));
+        assert_eq!(row[1], (Seg::Time, "00:00 ".into()));
+        // started before the left edge; and a cut-off title
+        let flat: String = grid_row(&long, 300, 60, 10, 0).iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(flat, "◂A long t…");
+        let (ruler, mark) = grid_ruler(0, 60, 40, 600, 0);
+        assert_eq!((ruler.trim_end(), mark), ("00:00                         00:30", Some(10)));
+        assert_eq!(grid_scale(90), 80);
         // steps land on the half hour
         assert_eq!(guide_time_at(1_000, 0), 1_000);
         assert_eq!(guide_time_at(1_000, 1), 1_800);
