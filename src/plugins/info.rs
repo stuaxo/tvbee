@@ -1,0 +1,581 @@
+use crate::error::{failed, usage, Result};
+use crate::nowplaying::{self, Activity};
+use crate::tv::Tv;
+use crate::registry::Command;
+use crate::Ctx;
+
+const CAT: &str = "info";
+
+fn focus_line(dump: &str) -> Option<&str> {
+    dump.lines().find(|l| l.contains("mCurrentFocus")).map(str::trim)
+}
+
+/// `Window{eeb8591 u0 org.x/org.x.Activity}` -> `org.x/org.x.Activity`
+pub fn focus_window(dump: &str) -> Option<String> {
+    let line = focus_line(dump)?;
+    let rest = &line[line.rfind(" u0 ")? + 4..];
+    Some(rest.trim_end_matches('}').to_string())
+}
+
+pub fn focus_package(dump: &str) -> Option<String> {
+    let win = focus_window(dump)?;
+    let pkg = win.split(['/', ' ']).next()?;
+    (!pkg.is_empty()).then(|| pkg.to_string())
+}
+
+/// Memory figures from `/proc/meminfo`, in kB.
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
+pub struct Mem {
+    pub total: u64,
+    pub free: u64,
+    pub available: u64,
+    pub swap_total: u64,
+    pub swap_free: u64,
+}
+
+impl Mem {
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub fn used(&self) -> u64 {
+        self.total.saturating_sub(self.available)
+    }
+
+    pub fn swap_used(&self) -> u64 {
+        self.swap_total.saturating_sub(self.swap_free)
+    }
+}
+
+pub fn parse_meminfo(meminfo: &str) -> Option<Mem> {
+    let kb = |key: &str| -> Option<u64> {
+        let line = meminfo.lines().find(|l| l.starts_with(key))?;
+        line.split_whitespace().nth(1)?.parse().ok()
+    };
+    let (total, free) = (kb("MemTotal:")?, kb("MemFree:")?);
+    Some(Mem {
+        total,
+        free,
+        available: kb("MemAvailable:").unwrap_or(free),
+        swap_total: kb("SwapTotal:").unwrap_or(0),
+        swap_free: kb("SwapFree:").unwrap_or(0),
+    })
+}
+
+/// One-line RAM summary from `/proc/meminfo` (instant, unlike `dumpsys meminfo`
+/// which takes ~8s on this TV).
+pub fn ram_summary(meminfo: &str) -> Option<String> {
+    let m = parse_meminfo(meminfo)?;
+    let mb = |k: u64| k / 1024;
+    Some(format!(
+        "{} MB free, {} MB available of {} MB; swap used {} MB",
+        mb(m.free),
+        mb(m.available),
+        mb(m.total),
+        mb(m.swap_used())
+    ))
+}
+
+/// One filesystem from `df -k`.
+#[derive(Debug, PartialEq, Clone)]
+pub struct Disk {
+    pub mount: String,
+    pub total_kb: u64,
+    pub used_kb: u64,
+    /// What apps can still use (less than total - used: some is reserved).
+    pub avail_kb: u64,
+}
+
+/// `df -k` rows: `Filesystem 1K-blocks Used Available Use% Mounted on`.
+pub fn parse_df(df: &str) -> Vec<Disk> {
+    df.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            let n = f.len();
+            if n < 6 {
+                return None;
+            }
+            Some(Disk {
+                mount: f[n - 1].to_string(),
+                total_kb: f[n - 5].parse().ok()?,
+                used_kb: f[n - 4].parse().ok()?,
+                avail_kb: f[n - 3].parse().ok()?,
+            })
+        })
+        .collect()
+}
+
+/// The storage worth showing: internal `/data`, and adopted (USB/SD) storage
+/// under `/mnt/expand`, labelled.
+pub fn interesting_disks(disks: &[Disk]) -> Vec<(&'static str, &Disk)> {
+    disks
+        .iter()
+        .filter_map(|d| match d.mount.as_str() {
+            "/data" => Some(("internal", d)),
+            m if m.starts_with("/mnt/expand/") => Some(("adopted", d)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `/proc/loadavg` -> the 1, 5 and 15 minute load averages.
+pub fn parse_loadavg(s: &str) -> Option<(f64, f64, f64)> {
+    let mut f = s.split_whitespace().map(str::parse::<f64>);
+    Some((f.next()?.ok()?, f.next()?.ok()?, f.next()?.ok()?))
+}
+
+/// `3d 4h`, `5h 12m` or `7m`.
+pub fn human_uptime(secs: f64) -> String {
+    let t = secs.max(0.0) as u64;
+    let (d, h, m) = (t / 86_400, t / 3600 % 24, t / 60 % 60);
+    if d > 0 {
+        format!("{d}d {h}h")
+    } else if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{m}m")
+    }
+}
+
+/// Everything the resource figures need, in one adb round trip.
+pub const SYSTEM_CMD: &str = "cat /proc/meminfo; echo @@; cat /proc/loadavg; echo @@; cat /proc/uptime; \
+echo @@; df -k 2>/dev/null; echo @@; grep -c ^processor /proc/cpuinfo";
+
+/// Memory, load, uptime and storage, from [`SYSTEM_CMD`].
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct System {
+    pub mem: Option<Mem>,
+    pub load: Option<(f64, f64, f64)>,
+    pub uptime_secs: Option<f64>,
+    pub disks: Vec<Disk>,
+    pub cores: Option<u32>,
+}
+
+pub fn parse_system(out: &str) -> System {
+    let parts: Vec<&str> = out.split("@@").collect();
+    let part = |i: usize| parts.get(i).copied().unwrap_or("");
+    System {
+        mem: parse_meminfo(part(0)),
+        load: parse_loadavg(part(1)),
+        uptime_secs: part(2).split_whitespace().next().and_then(|v| v.parse().ok()),
+        disks: parse_df(part(3).trim_start_matches('\n')),
+        cores: part(4).trim().parse().ok(),
+    }
+}
+
+pub fn read_system(tv: &crate::tv::Tv) -> Result<System> {
+    Ok(parse_system(&tv.shell(&[SYSTEM_CMD])?))
+}
+
+/// kB as "78 MB" or "3.6 GB".
+pub fn size(kb: u64) -> String {
+    if kb >= 1024 * 1024 {
+        format!("{:.1} GB", kb as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{} MB", kb / 1024)
+    }
+}
+
+/// `internal 3.5/3.6 GB (98%, 78 MB free)`
+pub fn disk_summary(label: &str, d: &Disk) -> String {
+    let pct = (d.used_kb * 100).checked_div(d.total_kb).unwrap_or(0);
+    format!(
+        "{label} {}/{} ({pct}%, {} free)",
+        size(d.used_kb).trim_end_matches(" GB").trim_end_matches(" MB"),
+        size(d.total_kb),
+        size(d.avail_kb)
+    )
+}
+
+pub fn read_ram(tv: &crate::tv::Tv) -> Result<Option<String>> {
+    Ok(ram_summary(&tv.shell(&["cat", "/proc/meminfo"])?))
+}
+
+fn now(c: &Ctx, _: &[String]) -> Result<()> {
+    c.tv.connect()?;
+    if let Some(l) = focus_line(&c.tv.window_dump()?) {
+        println!("{l}");
+    }
+    Ok(())
+}
+
+/// `[--watch] [--interval <secs>]` -> watch interval in seconds, if watching.
+pub fn parse_watch_args(name: &str, args: &[String]) -> Result<Option<f64>> {
+    let (mut watch, mut every) = (false, 2.0);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--watch" | "-w" => watch = true,
+            "--interval" | "-n" => {
+                every = it
+                    .next()
+                    .and_then(|v| super::media::parse_duration(v))
+                    .filter(|s| *s >= 0.5)
+                    .map_or_else(|| usage(format!("{name}: --interval needs a duration of at least 0.5s")), Ok)?;
+                watch = true;
+            }
+            _ => return usage(format!("usage: tvbee {name} {WATCH_USAGE}")),
+        }
+    }
+    Ok(watch.then_some(every))
+}
+
+const WATCH_USAGE: &str = "[--watch] [--interval <secs>]";
+
+macro_rules! watch_long {
+    () => {
+        "  --watch, -w            keep the report on screen, refreshing it; q quits, r refreshes now\n  --interval, -n <secs>  seconds between refreshes (default 2; implies --watch)"
+    };
+}
+
+/// Print `report` once, or keep it on screen with --watch.
+fn run_report(c: &Ctx, name: &'static str, args: &[String], report: fn(&Tv) -> Result<String>) -> Result<()> {
+    match parse_watch_args(name, args)? {
+        None => {
+            c.tv.connect()?;
+            print!("{}", report(&c.tv)?);
+            Ok(())
+        }
+        Some(every) => {
+            let tv = Tv { ip: c.tv.ip.clone() };
+            crate::watch::run(name, every, move || {
+                tv.connect()?;
+                report(&tv)
+            })
+        }
+    }
+}
+
+fn status(c: &Ctx, args: &[String]) -> Result<()> {
+    run_report(c, "status", args, status_text)
+}
+
+/// Two `dumpsys` queries side by side, to hide the TV's latency.
+fn join2<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B + Send) -> (A, B) {
+    std::thread::scope(|sc| {
+        let b = sc.spawn(b);
+        let a = a();
+        (a, b.join().expect("worker thread panicked"))
+    })
+}
+
+fn wakefulness(power: &str) -> Option<String> {
+    power
+        .lines()
+        .find(|l| l.contains("mWakefulness="))
+        .map(|l| l.trim().trim_start_matches("mWakefulness=").to_string())
+}
+
+/// What the TV is doing, from the power, window and media_session dumps.
+fn activity_from(tv: &Tv, wake: Option<&str>, window: &str, media: &str) -> Option<Activity> {
+    match (wake, focus_package(window)) {
+        (Some(w), _) if w != "Awake" => {
+            Some(Activity { what: "In standby".into(), title: None, url: None, progress: None })
+        }
+        (_, Some(pkg)) => nowplaying::activity(tv, &pkg, &super::media::parse_media_sessions(media)),
+        _ => None,
+    }
+}
+
+fn push_line(out: &mut String, label: &str, value: &str) {
+    use std::fmt::Write;
+    let _ = writeln!(out, "{:<10}{value}", format!("{label}:"));
+}
+
+/// The what / title / progress / url lines (those that are known).
+fn push_activity(out: &mut String, a: &Activity) {
+    push_line(out, "what", &a.what);
+    if let Some(t) = &a.title {
+        push_line(out, "title", t);
+    }
+    if let Some(p) = &a.progress {
+        push_line(out, "progress", &nowplaying::progress_bar(p, 30));
+    }
+    if let Some(u) = &a.url {
+        push_line(out, "url", u);
+    }
+}
+
+/// The status report, one `label:   value` line each.
+fn status_text(tv: &Tv) -> Result<String> {
+    let ((power, window), ((audio, system), media)) = join2(
+        || join2(|| tv.shell(&["dumpsys", "power"]), || tv.window_dump()),
+        || join2(|| join2(|| tv.shell(&["dumpsys", "audio"]), || read_system(tv)), || tv.shell(&["dumpsys", "media_session"])),
+    );
+    let (power, window, audio, system) = (power?, window?, audio?, system?);
+    // media sessions only feed the optional what/title lines, so don't fail on them
+    let media = media.unwrap_or_default();
+    let wake = wakefulness(&power);
+    let activity = activity_from(tv, wake.as_deref(), &window, &media);
+
+    let mut out = String::new();
+    push_line(&mut out, "TV", &tv.ip);
+    if let Some(a) = &activity {
+        push_activity(&mut out, a);
+    }
+    if let Some(w) = &wake {
+        push_line(&mut out, "power", w);
+    }
+    push_line(&mut out, "focus", &focus_window(&window).unwrap_or_default());
+    let muted = super::media::parse_muted(&audio).map_or_else(|| "unknown".into(), |m| m.to_string());
+    if let Some((v, max)) = super::media::parse_volume(&audio) {
+        push_line(&mut out, "volume", &format!("{v}/{max}"));
+    }
+    push_line(&mut out, "muted", &muted);
+    if let Some(m) = system.mem {
+        let mb = |k: u64| k / 1024;
+        let ram = format!(
+            "{} MB free, {} MB available of {} MB; swap used {} MB",
+            mb(m.free),
+            mb(m.available),
+            mb(m.total),
+            mb(m.swap_used())
+        );
+        push_line(&mut out, "ram", &ram);
+    }
+    let disks: Vec<String> = interesting_disks(&system.disks).iter().map(|(l, d)| disk_summary(l, d)).collect();
+    if !disks.is_empty() {
+        push_line(&mut out, "storage", &disks.join("; "));
+    }
+    if let Some((a, b, c)) = system.load {
+        let cores = system.cores.map_or(String::new(), |n| format!(" ({n} cores)"));
+        push_line(&mut out, "load", &format!("{a:.2} {b:.2} {c:.2}{cores}"));
+    }
+    if let Some(u) = system.uptime_secs {
+        push_line(&mut out, "uptime", &human_uptime(u));
+    }
+    Ok(out)
+}
+
+const NOTHING: &str = "nothing playing that tvbee recognises\n";
+
+/// Just the what / title / progress / url lines.
+fn nowplaying_text(tv: &Tv) -> Result<String> {
+    let ((power, window), media) = join2(
+        || join2(|| tv.shell(&["dumpsys", "power"]), || tv.window_dump()),
+        || tv.shell(&["dumpsys", "media_session"]),
+    );
+    let (power, window, media) = (power?, window?, media?);
+    let mut out = String::new();
+    match activity_from(tv, wakefulness(&power).as_deref(), &window, &media) {
+        Some(a) => push_activity(&mut out, &a),
+        None => out.push_str(NOTHING),
+    }
+    Ok(out)
+}
+
+fn nowplaying_cmd(c: &Ctx, args: &[String]) -> Result<()> {
+    // one-shot: say "nothing" on stderr and exit 1, so scripts can tell
+    if parse_watch_args("nowplaying", args)?.is_none() {
+        c.tv.connect()?;
+        let text = nowplaying_text(&c.tv)?;
+        if text == NOTHING {
+            return failed(format!("nowplaying: {}", NOTHING.trim_end()));
+        }
+        print!("{text}");
+        return Ok(());
+    }
+    run_report(c, "nowplaying", args, nowplaying_text)
+}
+
+/// What the TV reports about its clock.
+#[derive(Debug, PartialEq)]
+pub struct TvClock {
+    pub epoch: i64,
+    /// e.g. "+0100"
+    pub offset: String,
+    /// e.g. "2026-10-30 22:13:11 GMT"
+    pub text: String,
+    pub auto_time: Option<bool>,
+    pub auto_zone: Option<bool>,
+    pub zone: String,
+}
+
+fn flag(s: Option<&str>) -> Option<bool> {
+    match s?.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
+/// Parse the output of [`CLOCK_CMD`]: the date line, auto_time, auto_time_zone, timezone.
+pub fn parse_clock(out: &str) -> Option<TvClock> {
+    let mut lines = out.lines();
+    let mut f = lines.next()?.split_whitespace();
+    let epoch = f.next()?.parse().ok()?;
+    let offset = f.next()?.to_string();
+    let text = f.collect::<Vec<_>>().join(" ");
+    Some(TvClock {
+        epoch,
+        offset,
+        text,
+        auto_time: flag(lines.next()),
+        auto_zone: flag(lines.next()),
+        zone: lines.next().unwrap_or_default().trim().to_string(),
+    })
+}
+
+const CLOCK_CMD: &str = "date '+%s %z %F %T %Z'; settings get global auto_time; settings get global auto_time_zone; getprop persist.sys.timezone";
+
+fn onoff(v: Option<bool>) -> &'static str {
+    match v {
+        Some(true) => "on",
+        Some(false) => "off",
+        None => "unknown",
+    }
+}
+
+/// This PC's (epoch seconds, "+0100", "date text") from `date`.
+fn pc_clock() -> Result<(f64, String, String)> {
+    let out = std::process::Command::new("date").arg("+%z|%F %T %Z").output()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (off, rest) = text.trim().split_once('|').unwrap_or(("", ""));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64());
+    Ok((now, off.to_string(), rest.to_string()))
+}
+
+fn time(c: &Ctx, _: &[String]) -> Result<()> {
+    c.tv.connect()?;
+    let before = pc_clock()?.0;
+    let raw = c.tv.shell(&[CLOCK_CMD])?;
+    let after = pc_clock()?;
+    let Some(tv) = parse_clock(&raw) else {
+        return failed("time: couldn't read the clock from the TV");
+    };
+    // compare against the middle of the request to cancel adb latency
+    let pc_mid = (before + after.0) / 2.0;
+    let diff = tv.epoch as f64 - pc_mid;
+
+    println!("TV time:    {}", tv.text);
+    println!("TV zone:    {} (UTC{})", if tv.zone.is_empty() { "unknown" } else { &tv.zone }, tv.offset);
+    println!("auto time:  {}   auto zone: {}", onoff(tv.auto_time), onoff(tv.auto_zone));
+    println!("this PC:    {} (UTC{})", after.2, after.1);
+    println!("difference: TV is {diff:+.1}s vs this PC");
+    if diff.abs() > 5.0 {
+        println!("WARNING: the TV clock is off by more than 5s");
+    }
+    if tv.offset != after.1 {
+        println!("WARNING: the TV's UTC offset ({}) differs from this PC's ({}) - daylight saving or timezone mismatch?", tv.offset, after.1);
+    }
+    if tv.auto_time == Some(false) {
+        println!("note: automatic date & time is off, so the TV won't correct itself");
+    }
+    Ok(())
+}
+
+fn logs(c: &Ctx, args: &[String]) -> Result<()> {
+    c.tv.connect()?;
+    match args.first() {
+        None => print!("{}", c.tv.adb(&["logcat", "-d", "-v", "time", "-t", "200"])?),
+        Some(pat) => {
+            let text = c.tv.adb(&["logcat", "-d", "-v", "time"])?;
+            let hits = super::tools::grep_i(&text, pat)?;
+            let lines: Vec<&str> = hits.lines().collect();
+            for l in &lines[lines.len().saturating_sub(200)..] {
+                println!("{l}");
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn commands() -> Vec<Command> {
+    vec![
+        Command::new(CAT, "status", WATCH_USAGE, "power state, foreground app, mute and free RAM", status).long(concat!(
+            "When tvbee recognises what is on, it says so in words, e.g.\n  what:     Watching YouTube\n  title:    <title> (<channel>)\n  progress: ━━━━━━━━━━━━━━━━━━━━━━━━━━━┃── 25:16 / 27:31 (91%)\n  url:      https://www.youtube.com/watch?v=...\nTitles come from the app's media session; the progress bar and link from its\ndevtools page, for apps that expose one (currently YouTube). Lines are left out\nwhen there is nothing to say. 'tvbee nowplaying' shows just those lines.\n\n", watch_long!()),
+        ),
+        Command::new(CAT, "nowplaying", WATCH_USAGE, "what's on: app, title, progress bar and link", nowplaying_cmd)
+            .long(concat!(
+                "The what/title/progress/url lines from 'tvbee status', on their own. Prints\n\"nothing playing ...\" and exits 1 when tvbee doesn't recognise what is on.\n\n",
+                watch_long!()
+            ))
+            .aliases(&["np"]),
+        Command::new(CAT, "time", "", "show the TV's clock and compare it with this PC", time).long(
+            "Prints the TV's local time, timezone and automatic-time settings, and how far\nits clock is from this PC's. Warns when the clock is off by more than 5s or the\nUTC offset differs (the usual symptom after a daylight-saving change).",
+        ),
+        Command::new(CAT, "now", "", "print the foreground window only", now),
+        Command::new(CAT, "logs", "[regex]", "recent logcat, optionally filtered", logs)
+            .long("Case-insensitive extended regex; shows the last 200 matching lines."),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DUMP: &str = "  mCurrentFocus=Window{eeb8591 u0 org.droidtv.nettvbrowser/org.droidtv.nettvbrowser.BrowserNetTvActivity}\n";
+
+    #[test]
+    fn parses_focus() {
+        assert_eq!(
+            focus_window(DUMP).unwrap(),
+            "org.droidtv.nettvbrowser/org.droidtv.nettvbrowser.BrowserNetTvActivity"
+        );
+        assert_eq!(focus_package(DUMP).unwrap(), "org.droidtv.nettvbrowser");
+        assert_eq!(focus_package("no focus here"), None);
+    }
+
+    #[test]
+    fn watch_args() {
+        let a = |v: &[&str]| parse_watch_args("status", &v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(a(&[]).unwrap(), None);
+        assert_eq!(a(&["--watch"]).unwrap(), Some(2.0));
+        assert_eq!(a(&["-n", "5"]).unwrap(), Some(5.0));
+        assert_eq!(a(&["--watch", "--interval", "1m"]).unwrap(), Some(60.0));
+        assert!(a(&["-n", "0.1"]).is_err());
+        assert!(a(&["--bogus"]).is_err());
+    }
+
+    #[test]
+    fn parses_clock() {
+        let out = "1793397600 +0000 2026-10-30 22:00:00 GMT\n1\n0\nEurope/London\n";
+        let c = parse_clock(out).unwrap();
+        assert_eq!(c.epoch, 1_793_397_600);
+        assert_eq!(c.offset, "+0000");
+        assert_eq!(c.text, "2026-10-30 22:00:00 GMT");
+        assert_eq!(c.auto_time, Some(true));
+        assert_eq!(c.auto_zone, Some(false));
+        assert_eq!(c.zone, "Europe/London");
+        // settings missing/null on some firmwares
+        let c = parse_clock("1 +0100 2026-07-01 00:00:01 BST\nnull\nnull\n\n").unwrap();
+        assert_eq!((c.auto_time, c.auto_zone), (None, None));
+        assert_eq!(parse_clock("garbage"), None);
+    }
+
+    #[test]
+    fn parses_system_figures() {
+        let df = "Filesystem                                             1K-blocks     Used Available Use% Mounted on
+tmpfs                                                     687516      516    687000   1% /dev
+/dev/block/mmcblk0p7                                     3791072  3695136     79552  98% /data
+/dev/block/dm-1                                        732199464 39472900 692726564   6% /mnt/expand/76ea532c-6c26
+/mnt/expand/76ea532c-6c26/media 732199464 39472900 692726564   6% /storage/emulated
+";
+        let disks = parse_df(df);
+        assert_eq!(disks.len(), 4);
+        assert_eq!(disks[1], Disk { mount: "/data".into(), total_kb: 3_791_072, used_kb: 3_695_136, avail_kb: 79_552 });
+        let shown: Vec<_> = interesting_disks(&disks).iter().map(|(l, d)| (*l, d.mount.clone())).collect();
+        assert_eq!(shown, vec![("internal", "/data".to_string()), ("adopted", "/mnt/expand/76ea532c-6c26".to_string())]);
+        assert_eq!(parse_loadavg("87.91 86.73 86.06 19/2452 28527"), Some((87.91, 86.73, 86.06)));
+        assert_eq!(human_uptime(101_149.0), "1d 4h");
+        assert_eq!(human_uptime(4_000.0), "1h 6m");
+        assert_eq!(human_uptime(90.0), "1m");
+        assert_eq!(disk_summary("internal", &disks[1]), "internal 3.5/3.6 GB (97%, 77 MB free)");
+        let sys = parse_system("MemTotal: 100 kB\nMemFree: 10 kB\n@@\n1.5 2 3 1/2 3\n@@\n60.5 1\n@@\nFilesystem 1K-blocks Used Available Use% Mounted on\n/dev/x 10 5 5 50% /data\n@@\n4\n");
+        assert_eq!(sys.mem.unwrap().total, 100);
+        assert_eq!(sys.load, Some((1.5, 2.0, 3.0)));
+        assert_eq!(sys.uptime_secs, Some(60.5));
+        assert_eq!(sys.disks.len(), 1);
+        assert_eq!(sys.cores, Some(4));
+    }
+
+    #[test]
+    fn summarises_ram() {
+        let m = "MemTotal:        1374000 kB\nMemFree:           41000 kB\nMemAvailable:     210000 kB\nSwapTotal:        430000 kB\nSwapFree:         205000 kB\n";
+        assert_eq!(
+            ram_summary(m).unwrap(),
+            "40 MB free, 205 MB available of 1341 MB; swap used 219 MB"
+        );
+        assert_eq!(ram_summary("nothing"), None);
+    }
+}

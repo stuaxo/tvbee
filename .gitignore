@@ -1,0 +1,11 @@
+/target
+
+# screenshots tvbee saves in the current directory
+/tvbee-*.png
+
+# editors and OS
+*.swp
+*~
+.idea/
+.vscode/
+.DS_Store

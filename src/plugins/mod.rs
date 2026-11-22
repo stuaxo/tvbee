@@ -1,0 +1,41 @@
+pub mod apps;
+pub mod display;
+pub mod info;
+pub mod input;
+pub mod media;
+pub mod open;
+pub mod philips;
+pub mod power;
+pub mod search;
+pub mod tools;
+#[cfg(feature = "ui")]
+pub mod ui;
+
+use crate::plugin::Plugin;
+
+/// Commands of optional plugins left out of this build: (command, cargo feature).
+pub const NOT_BUILT: &[(&str, &str)] = &[
+    #[cfg(not(feature = "ui"))]
+    ("ui", "ui"),
+];
+
+/// Every plugin, built-in and vendor. Add new ones here.
+pub fn all() -> Vec<Plugin> {
+    vec![
+        Plugin::builtin("apps", "launching and managing Android apps", apps::commands).with_menu(apps::menu),
+        Plugin::builtin("display", "seeing the TV screen", display::commands).with_menu(display::menu),
+        Plugin::builtin("info", "querying the TV's state", info::commands),
+        Plugin::builtin("input", "remote-control keys, text, inputs and channels", input::commands).with_menu(input::menu),
+        Plugin::builtin("media", "playback keys, volume and mute", media::commands),
+        Plugin::builtin("power", "sleep, wake, reboot, shutdown", power::commands).with_menu(power::menu),
+        Plugin::builtin("tools", "housekeeping and the CLI itself", tools::commands),
+        Plugin::detect(
+            "philips",
+            "Philips TV features via the JointSpace API",
+            philips::detect,
+            philips::commands,
+        ),
+        #[cfg(feature = "ui")]
+        Plugin::builtin("ui", "interactive terminal remote (ratatui)", ui::commands),
+    ]
+}

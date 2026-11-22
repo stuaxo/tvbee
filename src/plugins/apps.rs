@@ -1,0 +1,659 @@
+use super::{info, media};
+use crate::error::{failed, usage, Result};
+use crate::registry::Command;
+use crate::tv::Tv;
+use crate::Ctx;
+
+const CAT: &str = "apps";
+
+/// What an app is for; decides how `status` describes it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    Video,
+    /// Music and podcasts: "Listening to ...".
+    Music,
+    /// Plays files and links (VLC, MX Player, ...).
+    Player,
+    Store,
+    Launcher,
+    LiveTv,
+    Other,
+}
+
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Video => "video",
+            Kind::Music => "music",
+            Kind::Player => "player",
+            Kind::Store => "store",
+            Kind::Launcher => "home",
+            Kind::LiveTv => "live-tv",
+            Kind::Other => "app",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Kind> {
+        [Kind::Video, Kind::Music, Kind::Player, Kind::Store, Kind::Launcher, Kind::LiveTv, Kind::Other]
+            .into_iter()
+            .find(|k| k.as_str() == s)
+    }
+}
+
+/// An app tvbee knows about. Apps with an alias can be launched by it; the
+/// rest are only recognised in the foreground.
+pub struct App {
+    pub alias: Option<&'static str>,
+    /// Human name, e.g. "YouTube".
+    pub name: &'static str,
+    /// package, package/activity, or `@home` for the default launcher.
+    pub target: &'static str,
+    pub kind: Kind,
+    /// Turns the URL of the app's devtools page into a link to what is playing.
+    pub page_url: Option<fn(&str) -> Option<String>>,
+    /// A search-results link with `{q}` for the query, for apps that take
+    /// links but not the search intent (YouTube).
+    pub search_link: Option<&'static str>,
+}
+
+impl App {
+    pub fn package(&self) -> &'static str {
+        self.target.split('/').next().unwrap_or_default()
+    }
+}
+
+const fn app(alias: &'static str, name: &'static str, target: &'static str, kind: Kind) -> App {
+    App { alias: Some(alias), name, target, kind, page_url: None, search_link: None }
+}
+
+/// Recognised in the foreground only (no alias).
+const fn known(name: &'static str, package: &'static str, kind: Kind) -> App {
+    App { alias: None, name, target: package, kind, page_url: None, search_link: None }
+}
+
+pub const APPS: &[App] = &[
+    app("home", "the home screen", "@home", Kind::Launcher),
+    app("iplayer", "iPlayer", "org.droidtv.nettvapp4340/com.zeasn.app.linux.MainActivity", Kind::Video),
+    app("dailymotion", "Dailymotion", "org.droidtv.nettvapp1984/com.zeasn.app.linux.MainActivity", Kind::Video),
+    app("arte", "Arte", "org.droidtv.nettvapp1814/com.zeasn.app.linux.MainActivity", Kind::Video),
+    App {
+        page_url: Some(youtube_url),
+        search_link: Some("https://www.youtube.com/results?search_query={q}"),
+        ..app("youtube", "YouTube", "com.google.android.youtube.tv", Kind::Video)
+    },
+    app("kodi", "Kodi", "org.xbmc.kodi", Kind::Video),
+    app("appletv", "Apple TV", "com.apple.atve.androidtv.appletv", Kind::Video),
+    app("netflix", "Netflix", "com.netflix.ninja", Kind::Video),
+    app("mubi", "MUBI", "com.mubi", Kind::Video),
+    app("prime", "Prime Video", "com.amazon.amazonvideo.livingroom", Kind::Video),
+    app("playstore", "the Play Store", "com.android.vending", Kind::Store),
+    app("fdroid", "F-Droid", "org.fdroid.fdroid", Kind::Store),
+    app("vlc", "VLC", "org.videolan.vlc", Kind::Player),
+    app("mx", "MX Player", "com.mxtech.videoplayer.pro", Kind::Player),
+    // streaming apps installed on this TV (checked with `tvbee apps --others`)
+    app("channel4", "Channel 4", "com.channel4.ondemand", Kind::Video),
+    app("vimeo", "Vimeo", "com.vimeo.android.videoapp", Kind::Video),
+    app("twitch", "Twitch", "tv.twitch.android.app", Kind::Video),
+    // other common Android TV streaming apps, by their usual package names.
+    // Not checked on a TV: an entry whose package isn't installed never
+    // matches, and `apps` / the launcher only list installed ones.
+    app("my5", "My5", "com.mobileiq.demand5", Kind::Video),
+    app("disney", "Disney+", "com.disney.disneyplus", Kind::Video),
+    app("max", "Max", "com.wbd.stream", Kind::Video),
+    app("paramount", "Paramount+", "com.cbs.ott", Kind::Video),
+    app("peacock", "Peacock", "com.peacocktv.peacockandroid", Kind::Video),
+    app("hulu", "Hulu", "com.hulu.livingroomplus", Kind::Video),
+    app("dazn", "DAZN", "com.dazn", Kind::Video),
+    app("crunchyroll", "Crunchyroll", "com.crunchyroll.crunchyroid", Kind::Video),
+    app("rakuten", "Rakuten TV", "tv.wuaki", Kind::Video),
+    app("pluto", "Pluto TV", "tv.pluto.android", Kind::Video),
+    app("tubi", "Tubi", "com.tubitv", Kind::Video),
+    app("ytkids", "YouTube Kids", "com.google.android.youtube.tvkids", Kind::Video),
+    app("plex", "Plex", "com.plexapp.android", Kind::Video),
+    app("jellyfin", "Jellyfin", "org.jellyfin.androidtv", Kind::Video),
+    app("emby", "Emby", "tv.emby.embyatv", Kind::Video),
+    app("spotify", "Spotify", "com.spotify.tv.android", Kind::Music),
+    app("ytmusic", "YouTube Music", "com.google.android.youtube.tvmusic", Kind::Music),
+    // the NetTV webapps (iPlayer, Arte, ...) all run inside this browser
+    known("a NetTV app", "org.droidtv.nettvbrowser", Kind::Video),
+    app("livetv", "live TV", "org.droidtv.zapster", Kind::LiveTv),
+    known("the home screen", "com.spocky.projengmenu", Kind::Launcher),
+    known("the home screen", "com.google.android.tvlauncher", Kind::Launcher),
+    known("the home screen", "com.google.android.leanbacklauncher", Kind::Launcher),
+];
+
+/// "the home screen" -> "Home screen": app names are written for sentences.
+pub fn list_name(name: &str) -> String {
+    match name.strip_prefix("the ") {
+        Some(n) => {
+            let mut c = n.chars();
+            c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+        }
+        // sentence-style names ("live TV") get a capital; brand spellings
+        // ("iPlayer") are one word and are left alone
+        None if name.contains(' ') && name.starts_with(|c: char| c.is_lowercase()) => {
+            let mut c = name.chars();
+            c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+        }
+        None => name.to_string(),
+    }
+}
+
+/// `https://www.youtube.com/tv#/watch?v=ID&...` -> `https://www.youtube.com/watch?v=ID`
+pub fn youtube_url(page: &str) -> Option<String> {
+    let rest = &page[page.find("watch?v=")? + "watch?v=".len()..];
+    let id: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    (id.len() == 11).then(|| format!("https://www.youtube.com/watch?v={id}"))
+}
+
+pub fn is_alias(name: &str) -> bool {
+    by_alias(name).is_some()
+}
+
+/// An app the TV has that isn't in [`APPS`], with its kind worked out from
+/// what it declares.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Guess {
+    pub package: String,
+    pub kind: Kind,
+    /// Its TV-launcher activity, if it shows in the launcher.
+    pub component: Option<String>,
+}
+
+/// Players, app stores, home screens and TV-launcher apps, in one round trip.
+const GUESS_CMD: &str = "\
+cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME; echo @@; \
+cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.APP_MARKET; echo @@; \
+cmd package query-activities --brief -a android.intent.action.VIEW -d file:///x -t video/mp4; echo @@; \
+cmd package query-activities --brief -a android.intent.action.VIEW -d file:///x -t audio/mpeg; echo @@; \
+cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER";
+
+/// Placeholders that claim everything; never worth naming.
+const NOT_APPS: &[&str] = &["android", "com.google.android.tv.frameworkpackagestubs"];
+
+/// Work out kinds from [`GUESS_CMD`] output. A home screen that can also
+/// show videos (as a wallpaper) is still a home screen: home > store > player.
+pub fn parse_guesses(out: &str) -> Vec<Guess> {
+    let parts: Vec<Vec<String>> = out.split("@@").map(super::open::parse_candidates).collect();
+    let part = |i: usize| parts.get(i).cloned().unwrap_or_default();
+    let pkg = |c: &String| c.split('/').next().unwrap_or(c).to_string();
+    let (homes, stores) = (part(0), part(1));
+    let players: Vec<String> = part(2).into_iter().chain(part(3)).collect();
+    let mut out: Vec<Guess> = Vec::new();
+    let mut add = |p: String, kind: Kind, component: Option<String>| {
+        if NOT_APPS.contains(&p.as_str()) {
+            return;
+        }
+        match out.iter_mut().find(|g| g.package == p) {
+            Some(g) => g.component = g.component.take().or(component),
+            None => out.push(Guess { package: p, kind, component }),
+        }
+    };
+    for c in &homes {
+        add(pkg(c), Kind::Launcher, None);
+    }
+    for c in &stores {
+        add(pkg(c), Kind::Store, None);
+    }
+    for c in &players {
+        add(pkg(c), Kind::Player, None);
+    }
+    for c in part(4) {
+        add(pkg(&c), Kind::Other, Some(c.clone()));
+    }
+    out
+}
+
+fn guess_cache(ip: &str) -> Option<std::path::PathBuf> {
+    crate::plugin::cache_path(ip).map(|p| p.with_extension("apps"))
+}
+
+/// Cache lines: `kind<TAB>package<TAB>component-or--`.
+pub fn format_guesses(gs: &[Guess]) -> String {
+    gs.iter()
+        .map(|g| format!("{}\t{}\t{}\n", g.kind.as_str(), g.package, g.component.as_deref().unwrap_or("-")))
+        .collect()
+}
+
+pub fn read_guesses(s: &str) -> Vec<Guess> {
+    s.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let kind = Kind::parse(f.next()?)?;
+            let package = f.next()?.to_string();
+            let component = f.next().filter(|c| *c != "-").map(str::to_string);
+            Some(Guess { package, kind, component })
+        })
+        .collect()
+}
+
+const GUESS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// The guessed apps, from the per-TV cache when it's under a day old, else
+/// asked from the TV (and cached). Never fails: no answer means no guesses.
+pub fn guesses(tv: &Tv) -> Vec<Guess> {
+    let cache = guess_cache(&tv.ip);
+    if let Some(path) = &cache
+        && let Ok(meta) = std::fs::metadata(path)
+        && meta.modified().ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age < GUESS_MAX_AGE)
+        && let Ok(text) = std::fs::read_to_string(path)
+    {
+        return read_guesses(&text);
+    }
+    let Ok(out) = tv.shell(&[GUESS_CMD]) else { return Vec::new() };
+    let gs = parse_guesses(&out);
+    if let Some(path) = cache {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, format_guesses(&gs));
+    }
+    gs
+}
+
+/// A name and kind for `pkg`: from [`APPS`] if tvbee knows it, else guessed
+/// (named by its package).
+pub fn identify(pkg: &str, guessed: &[Guess]) -> Option<(String, Kind)> {
+    if let Some(a) = by_package(pkg) {
+        return Some((a.name.to_string(), a.kind));
+    }
+    guessed.iter().find(|g| g.package == pkg).map(|g| (pkg.to_string(), g.kind))
+}
+
+fn by_alias(alias: &str) -> Option<&'static App> {
+    APPS.iter().find(|a| a.alias == Some(alias))
+}
+
+/// The app whose package is `pkg`, if tvbee knows it.
+pub fn by_package(pkg: &str) -> Option<&'static App> {
+    APPS.iter().find(|a| a.target != "@home" && a.package() == pkg)
+}
+
+/// Idle apps that hog RAM; force-stopped by `free`.
+const HOGS: &[&str] = &[
+    "com.netflix.ninja",
+    "com.android.vending",
+    "com.mubi",
+    "com.google.android.youtube.tv",
+    "org.fdroid.fdroid",
+    "com.apple.atve.androidtv.appletv",
+    "com.amazon.amazonvideo.livingroom",
+    "com.amazon.aiv.eu",
+];
+
+/// Never force-stopped by `quit` without --force: launchers, live TV, system UI.
+const PROTECTED: &[&str] = &[
+    "com.spocky.projengmenu",
+    "com.google.android.tvlauncher",
+    "com.google.android.leanbacklauncher",
+    "org.droidtv.zapster",
+    "com.android.systemui",
+    "android",
+];
+
+const LAUNCHER: &str = "android.intent.category.LAUNCHER";
+
+/// Alias lookup; anything else is taken as a package or package/activity.
+pub fn target(app: &str) -> &str {
+    by_alias(app).map_or(app, |a| a.target)
+}
+
+pub fn pkg_of(app: &str) -> &str {
+    target(app).split('/').next().unwrap_or_default()
+}
+
+fn free_ram(tv: &Tv) -> Result<()> {
+    for p in HOGS {
+        tv.shell(&["am", "force-stop", p])?;
+    }
+    if let Some(r) = info::read_ram(tv)? {
+        println!("ram: {r}");
+    }
+    Ok(())
+}
+
+fn free(c: &Ctx, _: &[String]) -> Result<()> {
+    c.tv.connect()?;
+    free_ram(&c.tv)
+}
+
+fn launch(c: &Ctx, args: &[String]) -> Result<()> {
+    let (mut free, mut quiet) = (false, false);
+    let mut rest = args;
+    while let Some(a) = rest.first().filter(|a| a.starts_with("--")) {
+        match a.as_str() {
+            "--free" => free = true,
+            "--quiet" => quiet = true,
+            o => return usage(format!("launch: unknown option '{o}'")),
+        }
+        rest = &rest[1..];
+    }
+    let Some(app) = rest.first() else { return usage("launch: missing app") };
+    let tv = &c.tv;
+    tv.connect()?;
+    if free {
+        free_ram(tv)?;
+    }
+    if quiet {
+        media::set_mute(tv, true)?;
+    }
+    let out = start(tv, app)?;
+    print!("{out}");
+    Ok(())
+}
+
+const TV_LAUNCHER: &str = "android.intent.category.LEANBACK_LAUNCHER";
+
+/// The activity that opens `pkg`: its TV-launcher entry, else its ordinary
+/// launcher entry. Some TV apps (Prime Video, Channel 4, Vimeo) only have the
+/// first.
+pub fn launch_activity(tv: &Tv, pkg: &str) -> Result<Option<String>> {
+    for category in [TV_LAUNCHER, LAUNCHER] {
+        let out = tv.shell(&["cmd", "package", "resolve-activity", "--brief", "-c", category, pkg])?;
+        if let Some(c) = super::open::parse_resolved(&out) {
+            return Ok(Some(c));
+        }
+    }
+    Ok(None)
+}
+
+/// Start an app by alias, package or package/activity; returns what the TV
+/// said. Doesn't print, so the ui can use it too.
+pub fn start(tv: &Tv, app: &str) -> Result<String> {
+    let t = target(app);
+    let out = if t == "@home" {
+        tv.keyevent(3)?;
+        String::new()
+    } else if t.contains('/') {
+        tv.shell(&["am", "start", "-n", t])?
+    } else {
+        match launch_activity(tv, t)? {
+            Some(component) => tv.shell(&["am", "start", "-n", &component])?,
+            None => return failed(format!("launch {app}: {t} has no launcher activity (is it installed?)")),
+        }
+    };
+    // am and monkey report failure on stdout with exit status 0
+    if let Some(err) = out.lines().find(|l| l.starts_with("Error") || l.contains("No activities found")) {
+        return failed(format!("launch {app}: {}", err.trim()));
+    }
+    Ok(out)
+}
+
+/// Aliases whose app is installed (`pm list packages` output); `home` always.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn installed_aliases(pm_list: &str) -> Vec<&'static App> {
+    let installed: Vec<&str> = pm_list.lines().filter_map(|l| l.trim().strip_prefix("package:")).collect();
+    APPS.iter()
+        .filter(|a| a.alias.is_some())
+        .filter(|a| a.target == "@home" || installed.contains(&a.package()))
+        .collect()
+}
+
+fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
+    let Some(app) = args.first() else { return usage("foreground: missing app") };
+    let tv = &c.tv;
+    let t = target(app);
+    tv.connect()?;
+    if t == "@home" {
+        return tv.keyevent(3);
+    }
+    let component = if t.contains('/') {
+        t.to_string()
+    } else {
+        match launch_activity(tv, t)? {
+            Some(c) => c,
+            None => return failed(format!("foreground: no launcher activity for {app}")),
+        }
+    };
+    // REORDER_TO_FRONT: reuse the existing instance instead of recreating it
+    tv.shell_inherit(&["am", "start", "-f", "0x20000", "-n", &component])
+}
+
+/// Aliases (other than `home`) that point at `pkg`.
+pub fn aliases_for_package(pkg: &str) -> Vec<&'static str> {
+    APPS.iter()
+        .filter(|a| a.target != "@home" && a.package() == pkg)
+        .filter_map(|a| a.alias)
+        .collect()
+}
+
+fn currentapp(c: &Ctx, _: &[String]) -> Result<()> {
+    c.tv.connect()?;
+    let dump = c.tv.window_dump()?;
+    let Some(window) = info::focus_window(&dump) else {
+        return failed("currentapp: can't tell what is in the foreground");
+    };
+    let pkg = window.split('/').next().unwrap_or(&window);
+    match aliases_for_package(pkg).as_slice() {
+        [] => println!("{window}"),
+        names => println!("{} ({window})", names.join("/")),
+    }
+    Ok(())
+}
+
+fn kill(c: &Ctx, args: &[String]) -> Result<()> {
+    let Some(app) = args.first() else { return usage("kill: missing app") };
+    if target(app) == "@home" {
+        return usage("kill: 'home' is not an app");
+    }
+    c.tv.connect()?;
+    c.tv.shell(&["am", "force-stop", pkg_of(app)]).map(drop)
+}
+
+/// Whether `quit` may stop `pkg`, given the default launcher's package.
+pub fn quit_allowed(pkg: &str, home: &str, force: bool) -> bool {
+    force || !(pkg == home || PROTECTED.contains(&pkg))
+}
+
+fn quit(c: &Ctx, args: &[String]) -> Result<()> {
+    let force = match args.first().map(String::as_str) {
+        None => false,
+        Some("--force") => true,
+        Some(_) => return usage("usage: tvbee quit [--force]"),
+    };
+    let tv = &c.tv;
+    tv.connect()?;
+    let Some(pkg) = info::focus_package(&tv.window_dump()?) else {
+        return failed("quit: can't tell what is in the foreground");
+    };
+    // the default launcher may not be in PROTECTED
+    let home = tv.shell(&[
+        "cmd", "package", "resolve-activity", "--brief", "-a", "android.intent.action.MAIN",
+        "-c", "android.intent.category.HOME",
+    ])?;
+    let home = home.lines().last().unwrap_or_default().trim();
+    let home = home.split('/').next().unwrap_or_default();
+    if !quit_allowed(&pkg, home, force) {
+        return failed(format!("quit: {pkg} is the home screen / live TV, not quitting (use --force)"));
+    }
+    println!("quitting {pkg}");
+    tv.shell(&["am", "force-stop", &pkg]).map(drop)
+}
+
+fn apps(c: &Ctx, args: &[String]) -> Result<()> {
+    let mut all = match args.first().map(String::as_str) {
+        None => false,
+        Some("--all") => true,
+        Some("--others") => return others(c),
+        Some(_) => return usage("usage: tvbee apps [--all | --others]"),
+    };
+    let mut installed = Vec::new();
+    if !all {
+        c.tv.try_connect();
+        let out = c.tv.shell(&["pm", "list", "packages"]).unwrap_or_default();
+        installed = out.lines().filter_map(|l| l.strip_prefix("package:")).map(str::to_string).collect();
+        if installed.is_empty() {
+            eprintln!("tvbee apps: can't reach the TV, showing every alias");
+            all = true;
+        }
+    }
+    let mut rows: Vec<_> = APPS
+        .iter()
+        .filter_map(|a| Some((a.alias?, a.target)))
+        // home is always available; others must be installed on the TV
+        .filter(|(a, t)| all || *t == "@home" || installed.iter().any(|p| p == pkg_of(a)))
+        .collect();
+    rows.sort();
+    for (a, t) in rows {
+        println!("{a:<12} {t}");
+    }
+    Ok(())
+}
+
+/// `apps --others`: installed apps without an alias, with their guessed kind.
+fn others(c: &Ctx) -> Result<()> {
+    c.tv.connect()?;
+    let mut gs: Vec<Guess> = guesses(&c.tv).into_iter().filter(|g| by_package(&g.package).is_none_or(|a| a.alias.is_none())).collect();
+    let kind_of = |g: &Guess| by_package(&g.package).map_or(g.kind, |a| a.kind).as_str();
+    gs.sort_by(|a, b| (kind_of(a), &a.package).cmp(&(kind_of(b), &b.package)));
+    for g in gs {
+        let launchable = if g.component.is_some() { "" } else { "  (not in the TV launcher)" };
+        // tvbee's own table wins over the guess (live TV, the NetTV browser)
+        println!("{:<8} {}{launchable}", kind_of(&g), g.package);
+    }
+    Ok(())
+}
+
+/// Menu items for the ui: open a link (search has its own key, /).
+pub fn menu() -> Vec<crate::menu::MenuItem> {
+    super::open::menu()
+}
+
+pub fn commands() -> Vec<Command> {
+    let mut cmds = super::open::commands();
+    cmds.extend(super::search::commands());
+    cmds.extend([
+        Command::new(CAT, "launch", "[--free] [--quiet] <app>", "launch an app", launch).long(
+            "<app> is an alias (see 'tvbee apps'), a package name, or package/activity.\n  'home' goes to the home screen (same as 'tvbee home').\n  --free   run 'tvbee free' first\n  --quiet  mute the TV first",
+        ),
+        Command::new(CAT, "foreground", "<app>", "bring an app's existing task to the front", foreground)
+            .long("Same app naming as 'launch'. Starts the app if it is not running.")
+            .aliases(&["fg"]),
+        Command::new(CAT, "quit", "[--force]", "quit the current app", quit).long(
+            "Force-stops whatever app is in the foreground. Refuses on the home screen,\nlive TV and system UI unless --force is given.",
+        ),
+        Command::new(CAT, "currentapp", "", "show the app currently in the foreground", currentapp).long(
+            "Prints the foreground window, with the app alias first if it has one,\ne.g. 'kodi (org.xbmc.kodi/.Splash)'. The NetTV webapps (iPlayer, Arte, ...) all run\ninside org.droidtv.nettvbrowser, so they show as that package.",
+        ),
+        Command::new(CAT, "kill", "<app>", "force-stop one app", kill),
+        Command::new(CAT, "free", "", "force-stop idle RAM-hungry apps", free),
+        Command::new(CAT, "apps", "[--all | --others]", "list app aliases installed on the TV", apps).long(
+            "Queries the TV and hides aliases whose package isn't installed.\n  --all     list every alias without contacting the TV\n  --others  installed apps without an alias, with the kind tvbee guesses\n            for them (player, store, home, app); cached for a day",
+        ),
+    ]);
+    cmds
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_aliases_and_packages() {
+        assert_eq!(pkg_of("iplayer"), "org.droidtv.nettvapp4340");
+        assert_eq!(target("kodi"), "org.xbmc.kodi");
+        assert_eq!(pkg_of("com.example/.Main"), "com.example");
+        assert_eq!(target("home"), "@home");
+    }
+
+    #[test]
+    fn finds_aliases_by_package() {
+        assert_eq!(aliases_for_package("org.xbmc.kodi"), vec!["kodi"]);
+        assert_eq!(aliases_for_package("org.droidtv.nettvapp4340"), vec!["iplayer"]);
+        assert!(aliases_for_package("org.droidtv.nettvbrowser").is_empty());
+        assert!(aliases_for_package("@home").is_empty());
+    }
+
+    #[test]
+    fn finds_apps_by_package() {
+        assert_eq!(by_package("com.google.android.youtube.tv").unwrap().name, "YouTube");
+        assert_eq!(by_package("org.droidtv.zapster").unwrap().kind, Kind::LiveTv);
+        assert!(by_package("com.example.unknown").is_none());
+    }
+
+    #[test]
+    fn app_table_is_consistent() {
+        let mut aliases: Vec<_> = APPS.iter().filter_map(|a| a.alias).collect();
+        let n = aliases.len();
+        aliases.sort();
+        aliases.dedup();
+        assert_eq!(aliases.len(), n, "duplicate alias");
+        // one entry per package (several home screens share a name, not a package)
+        let mut pkgs: Vec<_> = APPS.iter().filter(|a| a.target != "@home").map(|a| a.package()).collect();
+        let n = pkgs.len();
+        pkgs.sort();
+        pkgs.dedup();
+        assert_eq!(pkgs.len(), n, "duplicate package");
+        // aliases are what people type: short, lowercase, no spaces
+        for a in APPS.iter().filter_map(|a| a.alias) {
+            assert!(a.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()), "{a}");
+        }
+        for k in [Kind::Video, Kind::Music, Kind::Player, Kind::Store, Kind::Launcher, Kind::LiveTv, Kind::Other] {
+            assert_eq!(Kind::parse(k.as_str()), Some(k));
+        }
+    }
+
+    #[test]
+    fn guesses_kinds() {
+        let out = "3 activities found:
+  Activity #0:
+    priority=0
+    com.google.android.tvlauncher/.MainActivity
+  Activity #1:
+    com.spocky.projengmenu/.ui.home.MainActivity
+@@
+    com.android.vending/com.google.android.finsky.tvmainactivity.TvMainActivity
+@@
+    com.spocky.projengmenu/.ui.launcherActivities.SetBackgroundActivity
+    nextapp.fx/.ui.player.MediaPlayerActivity
+    com.google.android.tv.frameworkpackagestubs/.Stubs$MediaStub
+@@
+    nextapp.fx/.ui.player.MediaPlayerActivity
+@@
+    nextapp.fx/.ui.Launcher
+    com.example.game/.Main
+";
+        let g = parse_guesses(out);
+        let find = |p: &str| g.iter().find(|x| x.package == p).cloned();
+        // a home screen that can also show video wallpapers is still home
+        assert_eq!(find("com.spocky.projengmenu").unwrap().kind, Kind::Launcher);
+        assert_eq!(find("com.android.vending").unwrap().kind, Kind::Store);
+        let fx = find("nextapp.fx").unwrap();
+        assert_eq!((fx.kind, fx.component.as_deref()), (Kind::Player, Some("nextapp.fx/.ui.Launcher")));
+        assert_eq!(find("com.example.game").unwrap().kind, Kind::Other);
+        assert!(find("com.google.android.tv.frameworkpackagestubs").is_none());
+        // cache round trip
+        assert_eq!(read_guesses(&format_guesses(&g)), g);
+        // known apps keep their names; others are named by package
+        assert_eq!(identify("org.videolan.vlc", &g), Some(("VLC".into(), Kind::Player)));
+        assert_eq!(identify("nextapp.fx", &g), Some(("nextapp.fx".into(), Kind::Player)));
+        assert_eq!(identify("com.nowhere", &g), None);
+    }
+
+    #[test]
+    fn lists_installed_aliases() {
+        let pm = "package:com.google.android.youtube.tv\npackage:org.videolan.vlc\npackage:org.droidtv.zapster\npackage:com.nowhere\n";
+        let names: Vec<_> = installed_aliases(pm).iter().filter_map(|a| a.alias).collect();
+        // home is always there; the rest only if installed
+        assert_eq!(names, vec!["home", "youtube", "vlc", "livetv"]);
+    }
+
+    #[test]
+    fn youtube_links() {
+        assert_eq!(
+            youtube_url("https://www.youtube.com/tv#/watch?v=nh5iCP5Ta_4&resume").as_deref(),
+            Some("https://www.youtube.com/watch?v=nh5iCP5Ta_4")
+        );
+        assert_eq!(youtube_url("https://www.youtube.com/tv#/"), None);
+        assert_eq!(youtube_url("https://www.youtube.com/tv#/watch?v=short"), None);
+    }
+
+    #[test]
+    fn quit_protects_home_and_live_tv() {
+        assert!(!quit_allowed("com.spocky.projengmenu", "x", false));
+        assert!(!quit_allowed("org.droidtv.zapster", "x", false));
+        assert!(!quit_allowed("com.custom.launcher", "com.custom.launcher", false));
+        assert!(quit_allowed("org.xbmc.kodi", "com.spocky.projengmenu", false));
+        assert!(quit_allowed("org.droidtv.zapster", "x", true));
+    }
+}

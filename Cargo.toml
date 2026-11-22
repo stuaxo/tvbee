@@ -1,0 +1,12 @@
+[package]
+name = "tvbee"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = { version = "0.30.2", optional = true, features = ["unstable-rendered-line-info"] }
+
+[features]
+default = []
+# `tvbee ui`: interactive terminal remote (pulls in ratatui + crossterm)
+ui = ["dep:ratatui"]
