@@ -58,6 +58,10 @@ pub enum Action {
     CheckRunning,
     /// Search in an app; `keys` means by typing into it (no search intent).
     Search { pkg: String, query: String, keys: bool },
+    /// Fetch the programme guide (for the guide pop-up).
+    LoadGuide,
+    /// Switch live TV to a channel.
+    Watch(crate::provider::Channel),
     Refresh,
 }
 
@@ -84,6 +88,7 @@ pub enum Input {
     OpenMenu,
     OpenApps,
     OpenSearch,
+    OpenGuide,
     Do(Action),
     Nothing,
 }
@@ -109,6 +114,7 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('.'), _) => Input::OpenMenu,
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
         (KeyCode::Char('a'), _) => Input::OpenApps,
+        (KeyCode::Char('g'), _) => Input::OpenGuide,
         (KeyCode::Char('/'), _) => Input::OpenSearch,
         (KeyCode::Char(' ') | KeyCode::Char('p'), _) => act(PlayPause),
         (KeyCode::Backspace, _) => act(Key(KEY_BACK)),
@@ -182,6 +188,11 @@ struct Snapshot {
     focus: Option<String>,
 }
 
+/// The package of the app in front in a snapshot.
+fn front_pkg(s: &Snapshot) -> Option<String> {
+    s.focus.as_deref().map(|f| f.split('/').next().unwrap_or(f).to_string())
+}
+
 enum Msg {
     Snap(Box<Snapshot>, Instant),
     /// Feedback for the status line.
@@ -195,6 +206,52 @@ enum Msg {
     Searchable(Vec<search::Searchable>),
     /// The packages with a running process.
     Running(std::collections::BTreeSet<String>),
+    /// The guide pop-up's rows, or why there aren't any.
+    Guide(std::result::Result<Guide, String>),
+}
+
+/// A channel in the guide pop-up, with what's on it now and next.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GuideRow {
+    pub channel: crate::provider::Channel,
+    pub now: Option<crate::provider::Event>,
+    pub next: Option<crate::provider::Event>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Guide {
+    pub provider: &'static str,
+    pub rows: Vec<GuideRow>,
+    /// The channel the TV is tuned to.
+    pub current: Option<u32>,
+}
+
+/// The first provider with both channels and a guide.
+fn live_provider() -> Option<&'static dyn crate::provider::Provider> {
+    crate::provider::all().iter().copied().find(|p| p.channels().is_some() && p.guide().is_some())
+}
+
+fn load_guide(tv: &Tv) -> Result<Guide> {
+    let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV guide on this TV".into())) };
+    let cx = crate::provider::Cx { tv };
+    let (chans, guide) = (p.channels().expect("checked"), p.guide().expect("checked"));
+    let list = chans.list(&cx)?;
+    let nn = guide.now_next(&cx, crate::plugins::guide::now())?;
+    let current = chans.current(&cx).ok().flatten().map(|c| c.id);
+    let rows = list
+        .into_iter()
+        .map(|channel| {
+            let n = nn.iter().find(|n| n.channel == channel.id);
+            GuideRow { now: n.and_then(|n| n.now.clone()), next: n.and_then(|n| n.next.clone()), channel }
+        })
+        .collect();
+    Ok(Guide { provider: p.name(), rows, current })
+}
+
+/// The row whose channel number starts with the digits typed so far.
+pub fn guide_jump(rows: &[GuideRow], typed: &str) -> Option<usize> {
+    let num = |r: &GuideRow| r.channel.number.clone().unwrap_or_default();
+    rows.iter().position(|r| num(r) == typed).or_else(|| rows.iter().position(|r| num(r).starts_with(typed)))
 }
 
 struct Worker {
@@ -254,8 +311,15 @@ impl Worker {
         self.pkg = pkg.clone();
         let sessions = media::parse_media_sessions(&media_dump);
         let mut exact = false;
+        // live TV: the channel and programme (when the TV can say)
+        let mut live = match (&pkg, awake) {
+            (Some(p), true) if live_provider().is_some_and(|lp| lp.hosts().contains(&p.as_str())) => nowplaying::live(&self.tv, p),
+            _ => None,
+        };
         let activity = match (&pkg, awake) {
-            (_, false) => Some(Activity { what: "In standby".into(), title: None, url: None, progress: None }),
+            (_, false) => Some(Activity::just("In standby")),
+            // live TV: the channel and programme (when the TV can say)
+            (Some(_), true) if live.is_some() => live.take(),
             (Some(pkg), true) => {
                 let pkg = pkg.clone();
                 let who = apps::identify(&pkg, &self.guesses);
@@ -301,6 +365,14 @@ impl Worker {
     fn act(&mut self, a: Action, tx: &Sender<Msg>) -> Result<String> {
         self.tv.connect()?;
         Ok(match a {
+            Action::LoadGuide => {
+                let _ = tx.send(Msg::Guide(load_guide(&self.tv).map_err(|e| e.to_string())));
+                String::new()
+            }
+            Action::Watch(ch) => {
+                let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
+                p.channels().expect("checked").tune(&crate::provider::Cx { tv: &self.tv }, &ch)?
+            }
             Action::PlayPause => {
                 self.tv.keyevent(85)?;
                 "play/pause".into()
@@ -504,6 +576,50 @@ struct App {
     searchable: Option<Vec<search::Searchable>>,
     /// The search box's app choices, made when it opens.
     search_targets: Vec<SearchTarget>,
+    /// An action still settling: its label stands in for the what line.
+    settling: Option<Settling>,
+    /// The guide pop-up's rows; None until fetched.
+    guide: Option<std::result::Result<Guide, String>>,
+}
+
+/// How long an action gets to settle before the screen shows whatever the
+/// TV last reported (see [`Settling`]).
+const SETTLE: Duration = Duration::from_millis(2500);
+
+/// An action in flight (launching, searching, ...). Apps take a moment to
+/// come up, and the snapshots in between show half-way states (the old app,
+/// the launcher), so the "what" line shows `label` instead until the
+/// expected change shows up, or [`SETTLE`] passes and the latest snapshot,
+/// buffered meanwhile, is shown as it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Settling {
+    /// e.g. "launching Netflix..."
+    pub label: String,
+    /// The package that should end up in front, if the action says.
+    pub expect: Option<String>,
+    /// What was showing when it started (package in front, what line).
+    pub before_pkg: Option<String>,
+    pub before_what: Option<String>,
+    pub since: Instant,
+}
+
+impl Settling {
+    /// Whether a snapshot showing `pkg` in front with `what` means the
+    /// action has landed: the expected app came to the front, or (when it
+    /// was in front already, or nothing in particular is expected) the
+    /// what line changed.
+    pub fn landed(&self, pkg: Option<&str>, what: Option<&str>) -> bool {
+        let changed = what != self.before_what.as_deref();
+        match self.expect.as_deref() {
+            Some(e) if pkg == Some(e) => self.before_pkg.as_deref() != Some(e) || changed,
+            Some(_) => false,
+            None => changed,
+        }
+    }
+
+    pub fn expired(&self, now: Instant) -> bool {
+        now.duration_since(self.since) >= SETTLE
+    }
 }
 
 const MEM_HISTORY: usize = 600;
@@ -527,6 +643,8 @@ pub enum Overlay {
     Search(usize),
     /// What to do with launcher row `sel` of `tab`; `at` is the highlighted choice.
     AppActions { tab: AppTab, sel: usize, at: usize },
+    /// The live TV guide, with row `sel` highlighted.
+    Guide { sel: usize },
 }
 
 /// Something the launcher's actions pop-up offers.
@@ -829,6 +947,8 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
         Overlay::Prompt(i) => (Overlay::Prompt(i), None),
         Overlay::Search(i) => (Overlay::Search(i), None),
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
+        // handled by App::guide_key
+        Overlay::Guide { sel } => (Overlay::Guide { sel }, None),
         Overlay::Confirm { item, yes } => match code {
             KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(Action::Menu(item))),
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { item, yes: !yes }, None),
@@ -863,6 +983,8 @@ pub enum Hit {
     AppTab(AppTab),
     /// Choice N in the launcher's actions pop-up.
     AppChoice(usize),
+    /// Row N of the guide.
+    GuideRow(usize),
     ConfirmYes,
     ConfirmNo,
     /// Inside a pop-up but on nothing in particular.
@@ -917,6 +1039,7 @@ fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
         button("i", "info", Input::ToggleInfo),
         button("a", "apps", Input::OpenApps),
         button("/", "search", Input::OpenSearch),
+        button("g", "guide", Input::OpenGuide),
         button(".", "more", OpenMenu),
         button("?", "help", ToggleHelp),
         button("q", "quit", Quit),
@@ -956,13 +1079,30 @@ impl App {
                         self.mem_history.remove(0);
                     }
                 }
+                // the latest snapshot is always kept; while an action
+                // settles it's only shown once it shows the action landed
+                if self.settling.as_ref().is_some_and(|st| st.landed(front_pkg(&s).as_deref(), s.activity.as_ref().map(|a| a.what.as_str()))) {
+                    self.settling = None;
+                }
                 (self.snap, self.at, self.error) = (Some(*s), at, None);
             }
             Msg::Note(n) => self.note = n,
-            Msg::Failed(e) => self.error = Some(e),
+            Msg::Failed(e) => {
+                // the action didn't happen: show what's really on
+                self.settling = None;
+                self.error = Some(e);
+            }
             Msg::Apps(list) => self.apps = Some(list),
             Msg::Searchable(list) => self.searchable = Some(list),
             Msg::Running(set) => self.running = set,
+            Msg::Guide(g) => {
+                // start on the channel that's on
+                if let (Overlay::Guide { .. }, Ok(g)) = (self.overlay, &g) {
+                    let at = g.current.and_then(|c| g.rows.iter().position(|r| r.channel.id == c));
+                    self.overlay = Overlay::Guide { sel: at.unwrap_or(0) };
+                }
+                self.guide = Some(g);
+            }
             Msg::Seeked(pos, at) => {
                 if let Some(p) = self.snap.as_mut().and_then(|s| s.activity.as_mut()).and_then(|a| a.progress.as_mut()) {
                     p.position = pos;
@@ -1002,6 +1142,72 @@ impl App {
         }
     }
 
+    /// Show `label` in place of the what line until the action lands (with
+    /// `expect` in front, if given) or it's had time to.
+    fn settle(&mut self, label: String, expect: Option<String>) {
+        let snap = self.snap.as_ref();
+        self.settling = Some(Settling {
+            label,
+            expect,
+            before_pkg: snap.and_then(front_pkg),
+            before_what: snap.and_then(|s| s.activity.as_ref()).map(|a| a.what.clone()),
+            since: Instant::now(),
+        });
+    }
+
+    /// The settling label to show now, if an action is still settling.
+    fn settling_label(&mut self) -> Option<String> {
+        if self.settling.as_ref().is_some_and(|s| s.expired(Instant::now())) {
+            self.settling = None;
+        }
+        self.settling.as_ref().map(|s| s.label.clone())
+    }
+
+    /// Keys in the guide pop-up: arrows, page up/down, home/end, digits to
+    /// jump to a channel number, Enter to watch, Esc/g/Backspace to close.
+    fn guide_key(&mut self, sel: usize, code: KeyCode, actions: &Sender<Action>) {
+        let n = self.guide.as_ref().and_then(|g| g.as_ref().ok()).map_or(0, |g| g.rows.len());
+        let at = |i: usize| Overlay::Guide { sel: i };
+        if !matches!(code, KeyCode::Char('0'..='9')) {
+            self.prompt.clear();
+        }
+        self.overlay = match code {
+            KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('g') | KeyCode::Char('q') => Overlay::None,
+            _ if n == 0 => at(0),
+            KeyCode::Up => at(sel.checked_sub(1).unwrap_or(n - 1)),
+            KeyCode::Down => at((sel + 1) % n),
+            KeyCode::PageUp => at(sel.saturating_sub(10)),
+            KeyCode::PageDown => at((sel + 10).min(n - 1)),
+            KeyCode::Home => at(0),
+            KeyCode::End => at(n - 1),
+            KeyCode::Char(d @ '0'..='9') => {
+                let rows = &self.guide.as_ref().and_then(|g| g.as_ref().ok()).map_or(&[][..], |g| &g.rows[..]);
+                self.prompt.push(d);
+                // no channel starts like that: start again from this digit
+                if guide_jump(rows, &self.prompt).is_none() {
+                    self.prompt = d.to_string();
+                }
+                at(guide_jump(rows, &self.prompt).unwrap_or(sel))
+            }
+            KeyCode::Enter => {
+                self.watch_row(sel, actions);
+                return;
+            }
+            _ => at(sel),
+        };
+    }
+
+    /// Switch to the channel on guide row `i` and close the guide.
+    fn watch_row(&mut self, i: usize, actions: &Sender<Action>) {
+        let ch = self.guide.as_ref().and_then(|g| g.as_ref().ok()).and_then(|g| g.rows.get(i)).map(|r| r.channel.clone());
+        self.overlay = Overlay::None;
+        if let Some(ch) = ch {
+            self.note = format!("switching to {}...", ch.label());
+            self.settle(self.note.clone(), None);
+            let _ = actions.send(Action::Watch(ch));
+        }
+    }
+
     /// Open the search box on `pkg` (or the app in front).
     fn open_search(&mut self, pkg: Option<String>) {
         let front = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
@@ -1025,6 +1231,14 @@ impl App {
             Input::ToggleHelp => self.overlay = Overlay::Help,
             Input::ToggleInfo => self.info = !self.info,
             Input::OpenSearch => self.open_search(None),
+            Input::OpenGuide if live_provider().is_none() => self.note = "no live TV guide on this TV".into(),
+            Input::OpenGuide => {
+                // fetched fresh each time: what's on moves on
+                self.guide = None;
+                self.prompt.clear();
+                self.overlay = Overlay::Guide { sel: 0 };
+                let _ = actions.send(Action::LoadGuide);
+            }
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
                 let standby = self.snap.as_ref().is_some_and(|s| s.standby);
@@ -1065,13 +1279,16 @@ impl App {
                 let _ = actions.send(a);
             }
             (_, _, Some(a @ Action::MenuText(i, _))) => {
+                // e.g. "open a link": something new should come up
                 self.note = format!("{}...", self.menu.get(i).map_or("", |m| m.label));
+                self.settle(self.note.clone(), None);
                 let _ = actions.send(a);
             }
             (Overlay::Prompt(_) | Overlay::Search(_), Overlay::None, None) => self.note = "cancelled".into(),
             (_, _, Some(Action::Search { pkg, query, keys })) => {
                 let name = apps::by_package(&pkg).map_or_else(|| pkg.clone(), |a| list_name(a.name));
                 self.note = if keys { format!("typing \"{query}\" into {name}...") } else { format!("searching {name}...") };
+                self.settle(self.note.clone(), Some(pkg.clone()));
                 let _ = actions.send(Action::Search { pkg, query, keys });
             }
             (_, _, Some(Action::Launch(target))) => {
@@ -1079,9 +1296,12 @@ impl App {
                 let pkg = apps::pkg_of(&target).to_string();
                 if self.running.contains(&pkg) && target != "home" {
                     self.note = format!("bringing {} to the front...", app_name(&pkg));
+                    self.settle(self.note.clone(), Some(pkg));
                     let _ = actions.send(Action::Front(target));
                 } else {
                     self.note = format!("launching {}...", app_name(&pkg));
+                    // "home" is whichever home app is set
+                    self.settle(self.note.clone(), (target != "home").then_some(pkg));
                     let _ = actions.send(Action::Launch(target));
                 }
             }
@@ -1091,6 +1311,13 @@ impl App {
                     Action::Restart { pkg, .. } => format!("restarting {}...", app_name(pkg)),
                     _ => "bringing it to the front...".into(),
                 };
+                let expect = match &a {
+                    Action::Restart { pkg, .. } => Some(pkg.clone()),
+                    Action::Front(t) => Some(apps::pkg_of(t).to_string()),
+                    // closing: whatever comes up next
+                    _ => None,
+                };
+                self.settle(self.note.clone(), expect);
                 let _ = actions.send(a);
             }
             (Overlay::Confirm { .. }, Overlay::None, None) => self.note = "cancelled".into(),
@@ -1120,6 +1347,10 @@ impl App {
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
             }
+            (Overlay::Guide { .. }, Some(Hit::GuideRow(i))) => self.watch_row(i, actions),
+            (Overlay::Guide { .. }, Some(Hit::Popup)) => {}
+            // clicking outside closes it
+            (Overlay::Guide { .. }, _) => self.overlay = Overlay::None,
             (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) => {
                 let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
                 let target = rows.get(i).map(|e| e.target.clone());
@@ -1164,6 +1395,7 @@ impl App {
                 let (next, _) = apps_key(tab, sel, if up { KeyCode::Up } else { KeyCode::Down }, &rows);
                 self.overlay = next;
             }
+            Overlay::Guide { sel } => self.guide_key(sel, if up { KeyCode::Up } else { KeyCode::Down }, actions),
             Overlay::None => {
                 let _ = actions.send(Action::Volume(if up { 1 } else { -1 }));
             }
@@ -1244,10 +1476,16 @@ impl App {
         let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(Color::DarkGray));
         // (line, what clicking it does)
         let mut lines: Vec<(Line, Option<Hit>)> = Vec::new();
+        let settling = self.settling_label();
         match &self.snap {
             None => lines.push((Line::from("waiting for the TV...").italic(), None)),
             Some(s) => {
                 match &s.activity {
+                    // still settling: the action's label, not the half-way state
+                    _ if settling.is_some() => {
+                        let label_text = settling.clone().unwrap_or_default();
+                        lines.push((Line::from(vec![label("what"), Span::raw(label_text).italic()]), None));
+                    }
                     Some(a) => {
                         lines.push((Line::from(vec![label("what"), Span::raw(a.what.clone()).bold()]), None));
                         if let Some(t) = &a.title {
@@ -1262,7 +1500,8 @@ impl App {
                             }
                             // leave room for the label and " 1:02:03 / 1:02:03 (100%)"
                             let w = width.saturating_sub(9 + 26).max(10);
-                            let hit = p.duration.map(|_| Hit::Progress {
+                            // jumping needs a video tvbee can seek in (not live TV)
+                            let hit = p.duration.filter(|_| s.exact).map(|_| Hit::Progress {
                                 x0: body.x + LABEL,
                                 width: u16::try_from(w).unwrap_or(u16::MAX),
                             });
@@ -1274,6 +1513,9 @@ impl App {
                         }
                         if let Some(u) = &a.url {
                             lines.push((Line::from(vec![label("url"), Span::raw(u.clone()).underlined()]), None));
+                        }
+                        if let Some(n) = &a.next {
+                            lines.push((Line::from(vec![label("next"), Span::raw(n.clone()).fg(Color::Gray)]), None));
                         }
                     }
                     None => lines.push((Line::from("nothing playing that tvbee recognises").italic(), None)),
@@ -1446,6 +1688,61 @@ impl App {
                     if let Some(i) = item {
                         let y = r.y + 1 + u16::try_from(row).unwrap_or(0);
                         self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::MenuItem(i)));
+                    }
+                }
+            }
+            Overlay::Guide { sel } => {
+                let area = f.area();
+                let mut text: Vec<Line> = Vec::new();
+                let mut ids: Vec<Option<usize>> = Vec::new();
+                let title = match &self.guide {
+                    None => {
+                        text.push(Line::from("reading the guide (the first time takes a few seconds)...").italic());
+                        " guide ".to_string()
+                    }
+                    Some(Err(e)) => {
+                        text.extend(textwrap(e, usize::from(area.width.saturating_sub(8)).max(20)).into_iter().map(|l| Line::from(l).fg(Color::Yellow)));
+                        " guide ".to_string()
+                    }
+                    Some(Ok(g)) => {
+                        let off = crate::plugins::guide::utc_offset();
+                        let hm = |e: &crate::provider::Event| format!("{} {}", crate::plugins::guide::hhmm(e.start, off), e.title);
+                        let total = usize::from(area.width.saturating_sub(8)).clamp(40, 140);
+                        let ch_w = 22;
+                        let now_w = (total - ch_w - 4) * 55 / 100;
+                        let next_w = total - ch_w - 4 - now_w;
+                        let fit = |s: &str, w: usize| -> String {
+                            if s.chars().count() <= w { format!("{s:<w$}") } else { format!("{}…", s.chars().take(w.saturating_sub(1)).collect::<String>()) }
+                        };
+                        let head = format!(" {}  {}  {}", fit("channel", ch_w), fit("now", now_w), fit("next", next_w));
+                        text.push(Line::from(head).fg(Color::DarkGray));
+                        let room = usize::from(area.height.saturating_sub(9)).max(3);
+                        let start = sel.saturating_sub(room / 2).min(g.rows.len().saturating_sub(room));
+                        for (i, r) in g.rows.iter().enumerate().skip(start).take(room) {
+                            let mark = if g.current == Some(r.channel.id) { "▶" } else { " " };
+                            let name = format!("{}{}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
+                            let line = Line::from(format!(
+                                "{mark}{}  {}  {}",
+                                fit(&name, ch_w),
+                                fit(&r.now.as_ref().map(hm).unwrap_or_default(), now_w),
+                                fit(&r.next.as_ref().map(hm).unwrap_or_default(), next_w)
+                            ));
+                            ids.push(Some(i));
+                            text.push(if i == sel { line.reversed() } else { line });
+                        }
+                        text.push(Line::default());
+                        let more = if g.rows.len() > room { format!("  ({} of {})", sel + 1, g.rows.len()) } else { String::new() };
+                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  digits jump to a channel  ⏎/click watch  esc closes{more}")).fg(Color::DarkGray));
+                        format!(" guide: {} ", g.provider)
+                    }
+                };
+                let r = popup(f, &title, text, Color::Magenta);
+                self.hits.push((r, Hit::Popup));
+                // rows start under the heading
+                for (row, id) in ids.into_iter().enumerate() {
+                    if let Some(i) = id {
+                        let y = r.y + 2 + u16::try_from(row).unwrap_or(0);
+                        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::GuideRow(i)));
                     }
                 }
             }
@@ -1655,6 +1952,21 @@ impl App {
 }
 
 /// A bordered box centred over the screen, sized to its text. Returns where.
+/// Break `s` into lines of at most `w` characters, at spaces.
+fn textwrap(s: &str, w: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in s.split_whitespace() {
+        match out.last_mut() {
+            Some(l) if l.chars().count() + 1 + word.chars().count() <= w => {
+                l.push(' ');
+                l.push_str(word);
+            }
+            _ => out.push(word.to_string()),
+        }
+    }
+    out
+}
+
 fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {
     let h = u16::try_from(text.len()).unwrap_or(u16::MAX).saturating_add(2);
     let widest = text.iter().map(Line::width).max().unwrap_or(0).max(title.chars().count());
@@ -1682,6 +1994,7 @@ const HELP: &str = " everywhere
    tab      switch mode      .      more (power, mirror, ...)
    i        system info      a      launch an app (space there: front / restart / close)
    /        search the app in front (tab picks another app)
+   g        live TV guide: now/next on every channel (⏎ watch, digits jump)
    . o      open a link (YouTube, Netflix, media files)
    q Esc    quit
 
@@ -1746,6 +2059,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
+                } else if let Overlay::Guide { sel } = app.overlay {
+                    app.guide_key(sel, k.code, actions);
                 } else if let Overlay::Search(at) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
                     let (next, action) = search_key(at, k.code, k.modifiers, &mut text, &app.search_targets);
@@ -1841,6 +2156,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         running: std::collections::BTreeSet::new(),
         searchable: None,
         search_targets: Vec::new(),
+        settling: None,
+        guide: None,
     };
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     let result = ratatui::run(|term| {
@@ -1891,6 +2208,51 @@ pub fn commands() -> Vec<Command> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn guide_jumps_by_number() {
+        let row = |n: &str| GuideRow {
+            channel: crate::provider::Channel { id: 1, number: Some(n.into()), name: None, radio: false },
+            now: None,
+            next: None,
+        };
+        let rows = [row("1"), row("2"), row("10"), row("101"), row("700")];
+        assert_eq!(guide_jump(&rows, "1"), Some(0));
+        assert_eq!(guide_jump(&rows, "10"), Some(2));
+        assert_eq!(guide_jump(&rows, "7"), Some(4));
+        assert_eq!(guide_jump(&rows, "9"), None);
+        assert_eq!(textwrap("needs tvbee to be paired", 12), ["needs tvbee", "to be paired"]);
+        assert_eq!(input_for(KeyCode::Char('g'), KeyModifiers::NONE, Mode::Player), Input::OpenGuide);
+    }
+
+
+    #[test]
+    fn settling_lands_on_the_expected_app() {
+        let st = |expect: Option<&str>, before: Option<&str>| Settling {
+            label: "launching Netflix...".into(),
+            expect: expect.map(str::to_string),
+            before_pkg: before.map(str::to_string),
+            before_what: Some("In Projectivy".into()),
+            since: Instant::now(),
+        };
+        // launching from the home screen: the launcher, then Netflix
+        let s = st(Some("com.netflix"), Some("projectivy"));
+        assert!(!s.landed(Some("projectivy"), Some("In Projectivy")));
+        assert!(!s.landed(Some("android"), Some("In Android"))); // half-way
+        assert!(s.landed(Some("com.netflix"), Some("In Netflix")));
+        // searching the app already in front: only once the what line changes
+        let s = st(Some("projectivy"), Some("projectivy"));
+        assert!(!s.landed(Some("projectivy"), Some("In Projectivy")));
+        assert!(s.landed(Some("projectivy"), Some("Watching something")));
+        // nothing expected (closing): any change
+        let s = st(None, Some("projectivy"));
+        assert!(!s.landed(Some("projectivy"), Some("In Projectivy")));
+        assert!(s.landed(Some("x"), Some("In X")));
+        // and it gives up after SETTLE
+        assert!(!s.expired(s.since));
+        assert!(s.expired(s.since + SETTLE));
+    }
+
     use super::*;
 
     #[test]

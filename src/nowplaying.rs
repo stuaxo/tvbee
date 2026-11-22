@@ -18,6 +18,41 @@ pub struct Activity {
     pub title: Option<String>,
     pub url: Option<String>,
     pub progress: Option<Progress>,
+    /// What's on after this (live TV): "17:55 Come Dine with Me".
+    pub next: Option<String>,
+}
+
+impl Activity {
+    /// Just a what line.
+    pub fn just(what: impl Into<String>) -> Activity {
+        Activity { what: what.into(), title: None, url: None, progress: None, next: None }
+    }
+}
+
+/// Live TV in `pkg`: the channel it's on and the programme, from the
+/// provider hosted there (None if it can't tell: not paired, say).
+pub fn live(tv: &Tv, pkg: &str) -> Option<Activity> {
+    use crate::plugins::guide::{hhmm, now, utc_offset};
+    let p = crate::provider::for_package(pkg)?;
+    let cx = crate::provider::Cx { tv };
+    let ch = p.channels()?.current(&cx).ok()??;
+    let at = now();
+    let events = p.guide().and_then(|g| g.schedule(&cx, ch.id, at, at + 6 * 3600).ok()).unwrap_or_default();
+    Some(live_activity(&ch, &events, at, utc_offset(), hhmm))
+}
+
+/// The live TV activity for channel `ch` with its `events`, at time `at`.
+pub fn live_activity(ch: &crate::provider::Channel, events: &[crate::provider::Event], at: i64, offset: i64, hhmm: fn(i64, i64) -> String) -> Activity {
+    let on = events.iter().find(|e| e.start <= at && at < e.end);
+    let next = events.iter().find(|e| e.start >= at && on.is_none_or(|o| e.start >= o.end));
+    let verb = if ch.radio { "Listening to" } else { "Watching" };
+    Activity {
+        what: format!("{verb} {}", ch.label()),
+        title: on.map(|e| e.title.clone()),
+        url: None,
+        progress: on.map(|e| Progress { position: (at - e.start) as f64, duration: Some((e.end - e.start) as f64), paused: false }),
+        next: next.map(|e| format!("{} {}", hhmm(e.start, offset), e.title)),
+    }
 }
 
 /// The session belonging to `pkg`, preferring one that is playing or paused.
@@ -88,7 +123,7 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
         Some(a) => Some((a.name.to_string(), a.kind)),
         None => apps::identify(pkg, &apps::guesses(tv)),
     };
-    activity_with(pkg, who, sessions, || devtools::pages(tv, pkg))
+    live(tv, pkg).or_else(|| activity_with(pkg, who, sessions, || devtools::pages(tv, pkg)))
 }
 
 /// The app's devtools hook, if it has one (only then is `pages` worth calling).
@@ -117,11 +152,28 @@ pub fn activity_with(
         url = pages.iter().find_map(|p| link(&p.url));
         progress = pages.iter().find_map(|p| p.progress);
     }
-    Some(Activity { what, title, url, progress })
+    Some(Activity { what, title, url, progress, next: None })
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn live_tv_line() {
+        use crate::provider::{Channel, Event};
+        let ch = Channel { id: 143, number: Some("18".into()), name: Some("More 4".into()), radio: false };
+        let ev = |t: &str, start, end| Event { channel: 143, title: t.into(), start, end, genre: None };
+        let events = [ev("Come Dine with Me", 1000, 3100), ev("Grand Designs", 3100, 6700)];
+        let hm = |t: i64, _| format!("t{t}");
+        let a = live_activity(&ch, &events, 1600, 0, hm);
+        assert_eq!(a.what, "Watching 18 More 4");
+        assert_eq!(a.title.as_deref(), Some("Come Dine with Me"));
+        assert_eq!(a.progress.map(|p| (p.position, p.duration)), Some((600.0, Some(2100.0))));
+        assert_eq!(a.next.as_deref(), Some("t3100 Grand Designs"));
+        // between programmes (gap in the guide): no title, next is next
+        let a = live_activity(&ch, &events[1..], 2000, 0, hm);
+        assert_eq!((a.title, a.next.as_deref()), (None, Some("t3100 Grand Designs")));
+    }
     use super::*;
 
     fn yt() -> (&'static str, Kind) {

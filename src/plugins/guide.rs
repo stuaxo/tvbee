@@ -8,14 +8,18 @@ use crate::Ctx;
 
 const CAT: &str = "guide";
 
-fn now() -> i64 {
+pub fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
-/// This PC's UTC offset in seconds, from `date +%z` (0 where there's no `date`).
-fn utc_offset() -> i64 {
-    let Ok(out) = std::process::Command::new("date").arg("+%z").output() else { return 0 };
-    parse_offset(String::from_utf8_lossy(&out.stdout).trim())
+/// This PC's UTC offset in seconds, from `date +%z` (0 where there's no
+/// `date`). Asked once per run.
+pub fn utc_offset() -> i64 {
+    static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *OFFSET.get_or_init(|| {
+        let Ok(out) = std::process::Command::new("date").arg("+%z").output() else { return 0 };
+        parse_offset(String::from_utf8_lossy(&out.stdout).trim())
+    })
 }
 
 /// "+0100" -> 3600, "-0530" -> -19800.

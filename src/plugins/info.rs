@@ -268,7 +268,7 @@ fn wakefulness(power: &str) -> Option<String> {
 fn activity_from(tv: &Tv, wake: Option<&str>, window: &str, media: &str) -> Option<Activity> {
     match (wake, focus_package(window)) {
         (Some(w), _) if w != "Awake" => {
-            Some(Activity { what: "In standby".into(), title: None, url: None, progress: None })
+            Some(Activity::just("In standby"))
         }
         (_, Some(pkg)) => nowplaying::activity(tv, &pkg, &super::media::parse_media_sessions(media)),
         _ => None,
@@ -291,6 +291,9 @@ fn push_activity(out: &mut String, a: &Activity) {
     }
     if let Some(u) = &a.url {
         push_line(out, "url", u);
+    }
+    if let Some(n) = &a.next {
+        push_line(out, "next", n);
     }
 }
 

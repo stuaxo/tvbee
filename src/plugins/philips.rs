@@ -235,11 +235,73 @@ pub fn parse_events(out: &str) -> Vec<crate::provider::Event> {
         .collect()
 }
 
-fn guide_query(tv: &Tv, filter: &str) -> Result<Vec<crate::provider::Event>> {
-    tv.connect()?;
-    let cmd = format!("content query --uri {GUIDE_URI} --projection {GUIDE_COLUMNS} --where '{filter}'");
-    let mut events = parse_events(&tv.shell(&[&cmd])?);
-    events.sort_by_key(|e| (e.channel, e.start));
+/// How long a copy of the guide is good for. The broadcast guide changes
+/// slowly, and reading it takes the TV a few seconds.
+const GUIDE_FRESH: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+fn guide_cache_file(ip: &str) -> Option<std::path::PathBuf> {
+    Some(crate::plugin::cache_path(ip)?.with_file_name(format!("{ip}.guide")))
+}
+
+/// One event per line: `channel start end genre title` (tab-separated).
+pub fn render_events(events: &[crate::provider::Event]) -> String {
+    events
+        .iter()
+        .map(|e| format!("{}\t{}\t{}\t{}\t{}\n", e.channel, e.start, e.end, e.genre.map_or(String::new(), |g| g.to_string()), e.title.replace(['\t', '\n'], " ")))
+        .collect()
+}
+
+pub fn parse_cached_events(text: &str) -> Vec<crate::provider::Event> {
+    text.lines()
+        .filter_map(|l| {
+            let mut f = l.splitn(5, '\t');
+            Some(crate::provider::Event {
+                channel: f.next()?.parse().ok()?,
+                start: f.next()?.parse().ok()?,
+                end: f.next()?.parse().ok()?,
+                genre: f.next()?.parse().ok(),
+                title: f.next()?.to_string(),
+            })
+        })
+        .collect()
+}
+
+type Guide = std::sync::Arc<Vec<crate::provider::Event>>;
+static GUIDE: std::sync::Mutex<Option<(String, std::time::Instant, Guide)>> = std::sync::Mutex::new(None);
+
+/// The whole guide, sorted by channel then start: from memory, else the
+/// cache file, else the TV (which ignores filters, so it's all or nothing).
+fn guide_events(tv: &Tv) -> Result<Guide> {
+    let mut mem = GUIDE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, _, events)) = mem.as_ref().filter(|(ip, at, _)| *ip == tv.ip && at.elapsed() < GUIDE_FRESH) {
+        return Ok(events.clone());
+    }
+    let file = guide_cache_file(&tv.ip);
+    let age = file.as_ref().and_then(|f| std::fs::metadata(f).ok()?.modified().ok()?.elapsed().ok());
+    let cached = match (&file, age) {
+        (Some(f), Some(age)) if age < GUIDE_FRESH => {
+            Some((parse_cached_events(&std::fs::read_to_string(f).unwrap_or_default()), std::time::Instant::now() - age))
+        }
+        _ => None,
+    };
+    let (events, at) = match cached.filter(|(e, _)| !e.is_empty()) {
+        Some(c) => c,
+        None => {
+            tv.connect()?;
+            let cmd = format!("content query --uri {GUIDE_URI} --projection {GUIDE_COLUMNS}");
+            let mut events = parse_events(&tv.shell(&[&cmd])?);
+            events.sort_by_key(|e| (e.channel, e.start));
+            if let Some(f) = &file {
+                if let Some(dir) = f.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let _ = std::fs::write(f, render_events(&events));
+            }
+            (events, std::time::Instant::now())
+        }
+    };
+    let events: Guide = std::sync::Arc::new(events);
+    *mem = Some((tv.ip.clone(), at, events.clone()));
     Ok(events)
 }
 
@@ -263,6 +325,8 @@ pub fn now_next_of(events: &[crate::provider::Event], at: i64) -> Vec<crate::pro
     out
 }
 
+const LIVE_TV: &str = "org.droidtv.zapster";
+
 impl crate::provider::Provider for Freeview {
     fn id(&self) -> &'static str {
         "freeview"
@@ -284,15 +348,13 @@ impl crate::provider::Provider for Freeview {
 impl crate::provider::Guide for Freeview {
     fn now_next(&self, cx: &crate::provider::Cx, at: i64) -> Result<Vec<crate::provider::NowNext>> {
         // what's on, and anything starting in the next six hours
-        let events = guide_query(cx.tv, &format!("endtime>{at} AND starttime<{}", at + 6 * 3600))?;
+        let events: Vec<_> = guide_events(cx.tv)?.iter().filter(|e| e.end > at && e.start < at + 6 * 3600).cloned().collect();
         Ok(now_next_of(&events, at))
     }
 
     /// The guide's `presetid` is the channel's ccid.
     fn schedule(&self, cx: &crate::provider::Cx, channel: u32, from: i64, to: i64) -> Result<Vec<crate::provider::Event>> {
-        let events = guide_query(cx.tv, &format!("presetid={channel} AND endtime>{from} AND starttime<{to}"))?;
-        // the TV ignores the filter, so apply it here too
-        Ok(events.into_iter().filter(|e| e.channel == channel && e.end > from && e.start < to).collect())
+        Ok(guide_events(cx.tv)?.iter().filter(|e| e.channel == channel && e.end > from && e.start < to).cloned().collect())
     }
 }
 
@@ -354,12 +416,19 @@ impl crate::provider::Channels for Freeview {
         Ok(parse_current(&paired_ok(cx.tv, "/6/activities/tv", "the current channel")?))
     }
 
-    /// Type the channel number, as the remote does.
+    /// Type the channel number, as the remote does, with live TV in front
+    /// first (in another app the digits would mean something else).
     fn tune(&self, cx: &crate::provider::Cx, channel: &crate::provider::Channel) -> Result<String> {
         let Some(number) = channel.number.as_deref().filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) else {
             return failed(format!("watch: {} has no channel number to type", channel.label()));
         };
         cx.tv.connect()?;
+        let front = super::info::focus_package(&cx.tv.window_dump()?);
+        if front.as_deref() != Some(LIVE_TV) {
+            super::apps::start(cx.tv, LIVE_TV)?;
+            // give it time to come up and take keys
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
         super::input::channel_keys(number).into_iter().try_for_each(|k| cx.tv.keyevent(k))?;
         Ok(format!("switching to {}", channel.label()))
     }
@@ -409,6 +478,12 @@ Row: 3 eventname=NULL, presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL
         assert_eq!(e[2].title, "News, Weather, and Sport");
         assert_eq!((e[2].channel, e[2].start, e[2].end, e[2].genre), (1, 150, 250, Some(4)));
         assert_eq!(e[1].genre, None);
+    }
+
+    #[test]
+    fn caches_guide_rows() {
+        let e = parse_events(OUT);
+        assert_eq!(parse_cached_events(&render_events(&e)), e);
     }
 
     #[test]
