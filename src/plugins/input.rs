@@ -124,6 +124,27 @@ pub fn commands() -> Vec<Command> {
     ]
 }
 
+
+macro_rules! input_item {
+    ($key:expr, $label:expr, $code:expr) => {{
+        fn run(tv: &crate::tv::Tv) -> Result<String> {
+            tv.keyevent($code)?;
+            Ok(format!("switched to {}", $label))
+        }
+        crate::menu::MenuItem::new(CAT, $key, $label, run)
+    }};
+}
+
+pub fn menu() -> Vec<crate::menu::MenuItem> {
+    vec![
+        input_item!('t', "TV tuner", 170),
+        input_item!('1', "HDMI 1", 243),
+        input_item!('2', "HDMI 2", 244),
+        input_item!('3', "HDMI 3", 245),
+        input_item!('4', "HDMI 4", 246),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,24 +176,4 @@ mod tests {
             assert_eq!(n.len(), t.len());
         }
     }
-}
-
-macro_rules! input_item {
-    ($key:expr, $label:expr, $code:expr) => {{
-        fn run(tv: &crate::tv::Tv) -> Result<String> {
-            tv.keyevent($code)?;
-            Ok(format!("switched to {}", $label))
-        }
-        crate::menu::MenuItem::new(CAT, $key, $label, run)
-    }};
-}
-
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    vec![
-        input_item!('t', "TV tuner", 170),
-        input_item!('1', "HDMI 1", 243),
-        input_item!('2', "HDMI 2", 244),
-        input_item!('3', "HDMI 3", 245),
-        input_item!('4', "HDMI 4", 246),
-    ]
 }

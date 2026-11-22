@@ -119,6 +119,17 @@ fn mirror_item(tv: &crate::tv::Tv) -> Result<String> {
     Ok("mirroring in a new window (close it to stop)".into())
 }
 
+
+pub fn commands() -> Vec<Command> {
+    vec![
+        Command::new(CAT, "screenshot", "[file]", "save a PNG of the screen", screenshot)
+            .long("Default file is ./tvbee-<unix-time>.png. The path is printed on stdout; notes go\nto stderr. TVs play video on a hardware layer that screencap can't capture, so the\npicture area comes out black (only app overlays/menus are captured); a note says\nwhen that applies."),
+        Command::new(CAT, "mirror", "[scrcpy args]", "show/control the screen on this PC with scrcpy", mirror)
+            .long("Extra arguments are passed straight to scrcpy, e.g. 'tvbee mirror --no-control'.")
+            .aliases(&["scrcpy"]),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,14 +146,4 @@ mod tests {
         assert!(has_sideband_video("    3 Layers\n      Sideband Layer  : 26  Z: 0"));
         assert!(!has_sideband_video("com.android.systemui.ImageWallpaper#0\nStatusBar#0"));
     }
-}
-
-pub fn commands() -> Vec<Command> {
-    vec![
-        Command::new(CAT, "screenshot", "[file]", "save a PNG of the screen", screenshot)
-            .long("Default file is ./tvbee-<unix-time>.png. The path is printed on stdout; notes go\nto stderr. TVs play video on a hardware layer that screencap can't capture, so the\npicture area comes out black (only app overlays/menus are captured); a note says\nwhen that applies."),
-        Command::new(CAT, "mirror", "[scrcpy args]", "show/control the screen on this PC with scrcpy", mirror)
-            .long("Extra arguments are passed straight to scrcpy, e.g. 'tvbee mirror --no-control'.")
-            .aliases(&["scrcpy"]),
-    ]
 }

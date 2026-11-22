@@ -197,8 +197,8 @@ mod tests {
     #[test]
     fn overrides_parse() {
         let o = parse_overrides("philips, -sony,,");
-        assert_eq!(o["philips"], true);
-        assert_eq!(o["sony"], false);
+        assert!(o["philips"]);
+        assert!(!o["sony"]);
         assert_eq!(o.len(), 2);
     }
 

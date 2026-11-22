@@ -34,7 +34,9 @@ jobs:
     container: debian:trixie
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends cargo
+      # ca-certificates: cargo reads the crates.io index over HTTPS to check
+      # Cargo.lock, even though the default build uses no crates
+      - run: apt-get update && apt-get install -y --no-install-recommends cargo ca-certificates
       - run: cargo --version && cargo build --locked && cargo test --locked
 
   # the oldest Rust we claim to support (Cargo.toml rust-version)
