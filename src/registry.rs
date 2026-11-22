@@ -116,7 +116,7 @@ pub fn usage_text(cmds: &[Command]) -> String {
             out.push_str(&format!("    {:<12} {}{}\n", c.name, c.desc, alias));
         }
     }
-    out.push_str("\nEnv: TV_IP (default 192.168.1.19)\n");
+    out.push_str("\nEnv: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tvbee/env\n");
     out
 }
 

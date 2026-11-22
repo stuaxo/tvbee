@@ -1,4 +1,5 @@
 mod devtools;
+mod dotenv;
 mod error;
 mod http;
 mod menu;
@@ -25,6 +26,8 @@ pub struct Ctx {
 }
 
 fn main() {
+    // before anything reads TV_IP etc. (and before any threads)
+    dotenv::load();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let tv = Tv::from_env();
     let all = plugins::all();
@@ -118,6 +121,27 @@ fn main() {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// The README's command listing must match `tvbee help` for the default
+    /// build (built-in plugins only, so `ui` and vendor plugins are left out).
+    #[test]
+    fn readme_lists_the_commands() {
+        let readme = include_str!("../README.md");
+        let start = "<!-- commands:start (checked by a test: cargo test readme) -->\n```text\n";
+        let end = "```\n<!-- commands:end -->";
+        let from = readme.find(start).expect("README: commands:start marker") + start.len();
+        let to = from + readme[from..].find(end).expect("README: commands:end marker");
+        let cmds: Vec<Command> = plugins::all()
+            .iter()
+            .filter(|p| matches!(p.enable, plugin::Enable::Always) && p.name != "ui")
+            .flat_map(|p| (p.commands)())
+            .collect();
+        let want = registry::usage_text(&cmds);
+        assert!(
+            readme[from..to] == want,
+            "README's command list is out of date; replace the block between the commands markers with:\n\n{want}"
+        );
+    }
 
     #[test]
     fn menu_keys_are_unique() {

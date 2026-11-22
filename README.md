@@ -1,7 +1,110 @@
 # tvbee
 
-Command-line remote for a Philips Android TV over ADB. A Rust port of the
-`tv` bash script (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
+🔴🟠🟡 Warning slopcoded - made to operate my own TV YMMV  🟡🟠🔴
+
+Command-line remote for Android TV over ADB. So far it has only been tested
+on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
+(`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
+
+## Compatibility
+
+Most commands use plain Android TV / ADB features and should work on any
+Android TV with network debugging on. Some parts are Philips-specific:
+
+- the `philips` plugin (the JointSpace API), enabled only when detected
+- the iPlayer, Arte and Dailymotion aliases (Philips NetTV web apps), and the
+  `livetv` alias (Philips' TV app)
+- input switching by keycode (`tvbee input hdmi1`), which depends on the
+  TV's firmware
+
+Reports from other TVs are welcome.
+
+## Commands
+
+A few examples:
+
+    tvbee np                          # what's on: app, title, progress bar, link
+    tvbee status --watch              # the same plus power, volume, memory, storage; live
+    tvbee launch youtube
+    tvbee search youtube cat videos   # or: tvbee search livetv news
+    tvbee open https://youtu.be/...   # links go to the app that claims them
+    tvbee vol 20
+    tvbee seek 50%
+    tvbee ui                          # full-screen remote (needs the ui feature)
+
+Every command takes `--help`. The full list, from `tvbee help`:
+
+<!-- commands:start (checked by a test: cargo test readme) -->
+```text
+Usage: tvbee <command> [args]
+
+Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
+
+[apps]
+    apps         list app aliases installed on the TV
+    currentapp   show the app currently in the foreground
+    foreground   bring an app's existing task to the front (alias: fg)
+    free         force-stop idle RAM-hungry apps
+    kill         force-stop one app
+    launch       launch an app
+    open         open a link in the app that handles it
+    quit         quit the current app
+    search       search inside an app (YouTube, Kodi, live TV, ...)
+
+[display]
+    mirror       show/control the screen on this PC with scrcpy (alias: scrcpy)
+    screenshot   save a PNG of the screen
+
+[info]
+    logs         recent logcat, optionally filtered
+    now          print the foreground window only
+    nowplaying   what's on: app, title, progress bar and link (alias: np)
+    status       power state, foreground app, mute and free RAM
+    time         show the TV's clock and compare it with this PC
+
+[input]
+    back         press the back button
+    channel      change TV channel (alias: ch)
+    home         go to the home screen
+    input        switch input source
+    inputs       list the TV's input sources
+    key          send any remote key
+    text         type text into the focused field
+
+[media]
+    ffw          fast-forward by an amount
+    mute         mute (no-op if already muted)
+    pause        media pause
+    play         media play
+    playpause    toggle play/pause
+    rew          rewind by an amount
+    seek         jump to a position (time or percent of the way through)
+    stop         media stop
+    unmute       unmute (no-op if not muted)
+    vol          change volume
+
+[power]
+    reboot       reboot the TV
+    shutdown     power off completely (not standby)
+    sleep        send the TV to standby
+    wake         wake from standby
+
+[tools]
+    commands     list all command names and aliases
+    completion   print a bash/zsh completion script
+    debloat      run tv-debloat.sh
+    help         show this help, or help for one command
+    plugins      list plugins and whether they are enabled
+    wait         wait until the TV is reachable and booted
+
+Env: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tvbee/env
+```
+<!-- commands:end -->
+
+Not listed above: `ui` (built with `--features ui`) and `jointspace` (from the
+`philips` plugin, on TVs where it's detected).
+
+## Plugins
 
 Commands are grouped by plugin in `tvbee help`, Django-style. A plugin is a
 module in `src/plugins/` exporting `commands()`, registered in
@@ -21,6 +124,10 @@ module in `src/plugins/` exporting `commands()`, registered in
     tvbee apps --all      # offline alias list
 
 Environment: `TVBEE_PLUGINS`, `TV_IP` (default 192.168.1.19), `TV_DEBLOAT` (path to tv-debloat.sh; otherwise `debloat` looks for `scripts/tv-debloat.sh` in the current directory. The script isn't included yet).
+
+These can also go in a `.env` file in the current directory, or in
+`~/.config/tvbee/env` for every directory (see `.env.example`). Settings
+already in the environment win, and only `TV_*` / `TVBEE_*` keys are read.
 
 Needs `adb` in PATH (and `scrcpy` for `mirror`). The default build uses no
 crates beyond std.
