@@ -121,6 +121,20 @@ pub fn string_field(obj: &str, key: &str) -> Option<String> {
     None
 }
 
+/// A JSON string literal (with its quotes) -> the string.
+pub fn json_string(lit: &str) -> Option<String> {
+    unescape(lit.trim().strip_prefix('"')?)
+}
+
+/// The number value of `"key": 12.5` in a flat JSON object.
+pub fn number_field(obj: &str, key: &str) -> Option<f64> {
+    let pat = format!("\"{key}\"");
+    let i = obj.find(&pat)?;
+    let rest = obj[i + pat.len()..].trim_start().strip_prefix(':')?.trim_start();
+    let end = rest.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | 'e' | 'E' | '+'))).unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
 /// Read a JSON string body (after the opening quote) up to its closing quote.
 fn unescape(s: &str) -> Option<String> {
     let mut out = String::new();
@@ -166,6 +180,16 @@ mod tests {
     #[test]
     fn decodes_chunks() {
         assert_eq!(dechunk("4\r\nWiki\r\n5;x=1\r\npedia\r\n0\r\n\r\n"), "Wikipedia");
+    }
+
+    #[test]
+    fn reads_values() {
+        assert_eq!(json_string("\"Everyone\\u2019s\"").as_deref(), Some("Everyone’s"));
+        assert_eq!(json_string("NA"), None);
+        let o = r#"{"start_time": 54.0, "title": "x", "end_time": 69}"#;
+        assert_eq!(number_field(o, "start_time"), Some(54.0));
+        assert_eq!(number_field(o, "end_time"), Some(69.0));
+        assert_eq!(number_field(o, "nope"), None);
     }
 
     #[test]

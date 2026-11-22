@@ -4,6 +4,7 @@ mod error;
 mod http;
 mod mdns;
 mod menu;
+mod more;
 mod nowplaying;
 mod plugin;
 mod plugins;

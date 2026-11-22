@@ -270,6 +270,15 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
         None => report(None, "scrcpy", "not found (only needed for 'tvbee mirror'; Debian/Ubuntu: sudo apt install scrcpy)"),
     }
 
+    // yt-dlp (only for YouTube details)
+    match tv::search_path("yt-dlp", env("PATH").as_deref()) {
+        Some(p) => {
+            let ver = first_line(&p, "--version").unwrap_or_else(|| "version unknown".into());
+            report(Some(true), "yt-dlp", &format!("{} - {ver}", p.display()));
+        }
+        None => report(None, "yt-dlp", "not found (only needed for 'tvbee details' on YouTube videos)"),
+    }
+
     // which TV, and where that setting came from
     let ip = c.tv.ip.clone();
     let from = match crate::dotenv::source_of("TV_IP") {

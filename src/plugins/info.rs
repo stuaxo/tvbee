@@ -1,5 +1,5 @@
 use crate::error::{failed, usage, Result};
-use crate::nowplaying::{self, Activity};
+use crate::nowplaying::{self, clock, Activity};
 use crate::tv::Tv;
 use crate::registry::Command;
 use crate::Ctx;
@@ -489,6 +489,162 @@ fn logs(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// The app in front, its table entry, and the link to what it's showing.
+fn current(tv: &Tv) -> Result<(String, Option<&'static super::apps::App>, Option<String>)> {
+    tv.connect()?;
+    let window = tv.window_dump()?;
+    let Some(pkg) = focus_package(&window) else { return failed("can't tell which app is in front") };
+    let app = super::apps::by_package(&pkg);
+    let url = if app.is_some_and(|a| a.page_url.is_some()) {
+        let sessions = super::media::parse_media_sessions(&tv.shell(&["dumpsys", "media_session"]).unwrap_or_default());
+        nowplaying::activity(tv, &pkg, &sessions).and_then(|a| a.url)
+    } else {
+        None
+    };
+    Ok((pkg, app, url))
+}
+
+fn details_cmd(c: &Ctx, args: &[String]) -> Result<()> {
+    let full = match args.first().map(String::as_str) {
+        None => false,
+        Some("--full") => true,
+        Some(x) => return usage(format!("details: unknown option '{x}' (try --full)")),
+    };
+    let (pkg, app, url) = current(&c.tv)?;
+    let name = app.map_or(pkg.clone(), |a| super::apps::list_name(a.name));
+    let Some(hook) = app.and_then(|a| a.details) else { return failed(format!("details: tvbee has no details for {name}")) };
+    let Some(url) = url else { return failed(format!("details: nothing playing in {name} that tvbee can look up")) };
+    let d = hook(&url)?;
+    println!("{:<10}{url}", "link:");
+    for (k, v) in &d.fields {
+        println!("{:<10}{v}", format!("{k}:"));
+    }
+    if !d.chapters.is_empty() {
+        println!("chapters:");
+        for (i, ch) in d.chapters.iter().enumerate() {
+            println!("  {:>2}  {:>7}  {}", i + 1, clock(ch.start), ch.title);
+        }
+    }
+    if let Some(desc) = &d.description {
+        let lines: Vec<&str> = desc.lines().collect();
+        let shown = if full { lines.len() } else { lines.len().min(8) };
+        println!("description:");
+        for l in &lines[..shown] {
+            println!("  {l}");
+        }
+        if shown < lines.len() {
+            println!("  ... ({} more lines: --full)", lines.len() - shown);
+        }
+    }
+    Ok(())
+}
+
+/// Carry out a `goto`: open a link in the app, or seek the video.
+fn go(tv: &Tv, pkg: &str, to: &crate::more::Go) -> Result<String> {
+    match to {
+        crate::more::Go::Seek(t) => {
+            let conn = crate::devtools::Conn::open(tv, pkg).map_or_else(|| failed("goto: can't reach the app's video to seek"), Ok)?;
+            let at = conn.seek(crate::devtools::SeekTo::At(*t))?;
+            Ok(format!("seeked to {}", clock(at)))
+        }
+        crate::more::Go::Link(url) => {
+            // the app's own links go to it; anything else goes wherever it belongs
+            let own = super::apps::by_package(pkg)
+                .is_some_and(|a| a.places.iter().any(|p| host(p.link) == host(url)) || a.search_link.is_some_and(|s| host(s) == host(url)));
+            if own {
+                let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(url), pkg);
+                super::apps::before_link(tv, pkg)?;
+                tv.shell(&[&cmd])?;
+                Ok(format!("opened {url}"))
+            } else {
+                super::open::open_link(tv, url)
+            }
+        }
+    }
+}
+
+fn host(url: &str) -> &str {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    rest.split('/').next().unwrap_or(rest).trim_start_matches("www.")
+}
+
+fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
+    let tv = &c.tv;
+    // `goto <app> ...` names an app; otherwise it's the app in front
+    let named = args.first().and_then(|a| super::apps::all().iter().find(|x| x.alias == Some(a.as_str()) && !x.places.is_empty()));
+    let (pkg, app, url, rest) = match named {
+        Some(a) => (a.package().to_string(), Some(a), None, &args[1..]),
+        None => {
+            let (pkg, app, url) = current(tv)?;
+            (pkg, app, url, args)
+        }
+    };
+    let name = app.map_or(pkg.clone(), |a| super::apps::list_name(a.name));
+    let places = app.map_or(&[][..], |a| a.places);
+    // links from what's on (only for the app in front)
+    let links = || -> Vec<crate::more::Link> {
+        match (app.and_then(|a| a.details), &url) {
+            (Some(hook), Some(u)) => hook(u).map(|d| d.links).unwrap_or_default(),
+            _ => Vec::new(),
+        }
+    };
+    let words: Vec<&str> = rest.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        [] => {
+            if places.is_empty() && app.and_then(|a| a.details).is_none() {
+                return failed(format!("goto: tvbee knows no places in {name}"));
+            }
+            println!("{name}:");
+            for p in places {
+                println!("  {:<14} {}", p.id, p.label);
+            }
+            let ls = links();
+            if !ls.is_empty() {
+                println!("from what's on:");
+                for (i, l) in ls.iter().enumerate() {
+                    println!("  {:>3}  {}", i + 1, l.label);
+                }
+            }
+            Ok(())
+        }
+        [w] if places.iter().any(|p| p.id == *w) => {
+            let p = places.iter().find(|p| p.id == *w).expect("checked");
+            tv.connect()?;
+            println!("{}", go(tv, &pkg, &crate::more::Go::Link(p.link.to_string()))?);
+            Ok(())
+        }
+        ["channel"] => match links().into_iter().find(|l| l.label.starts_with("channel")) {
+            Some(l) => {
+                println!("{}", go(tv, &pkg, &l.go)?);
+                Ok(())
+            }
+            None => failed(format!("goto: no channel for what's on in {name}")),
+        },
+        ["chapter", n] | [n] if n.parse::<usize>().is_ok() => {
+            let n: usize = n.parse().unwrap_or(0);
+            let chapter = rest.first().is_some_and(|w| w == "chapter");
+            let ls = links();
+            let pick = if chapter {
+                ls.iter().filter(|l| matches!(l.go, crate::more::Go::Seek(_))).nth(n.saturating_sub(1))
+            } else {
+                ls.get(n.saturating_sub(1))
+            };
+            match pick {
+                Some(l) => {
+                    println!("{}", go(tv, &pkg, &l.go)?);
+                    Ok(())
+                }
+                None => failed(format!("goto: no {}{n} (see 'tvbee goto')", if chapter { "chapter " } else { "link " })),
+            }
+        }
+        _ => usage(format!(
+            "goto: where? one of: {}{}channel, chapter N, or a number from 'tvbee goto'",
+            places.iter().map(|p| p.id).collect::<Vec<_>>().join(", "),
+            if places.is_empty() { "" } else { ", " }
+        )),
+    }
+}
+
 pub fn commands() -> Vec<Command> {
     vec![
         Command::new(CAT, "status", WATCH_USAGE, "power state, foreground app, mute and free RAM", status).long(concat!(
@@ -504,6 +660,21 @@ pub fn commands() -> Vec<Command> {
             "Prints the TV's local time, timezone and automatic-time settings, and how far\nits clock is from this PC's. Warns when the clock is off by more than 5s or the\nUTC offset differs (the usual symptom after a daylight-saving change).",
         ),
         Command::new(CAT, "now", "", "print the foreground window only", now),
+        Command::new(CAT, "details", "[--full]", "more about what's on: channel, chapters, description", details_cmd).long(
+            "For apps whose plugin knows how (YouTube, using yt-dlp; cached a day per video):\n\
+             the channel, upload date, views, likes, length, chapters and description.\n\
+             \x20 --full   the whole description, not just its first lines",
+        ),
+        Command::new(CAT, "goto", "[app] [place|channel|chapter N|N]", "go to a place in an app, or a link from what's on", goto_cmd).long(
+            "With nothing more, lists where you can go: the app's places (YouTube: home,\n\
+             subscriptions, history, library, watchlater) and, for what's on, its channel,\n\
+             chapters and the links in its description, numbered.\n\
+             \x20 tvbee goto history          a place in the app in front\n\
+             \x20 tvbee goto youtube history  in a named app (it opens it)\n\
+             \x20 tvbee goto channel          the channel of what's on\n\
+             \x20 tvbee goto chapter 3        seek to chapter 3\n\
+             \x20 tvbee goto 7                link 7 from the list",
+        ),
         Command::new(CAT, "logs", "[regex]", "recent logcat, optionally filtered", logs)
             .long("Case-insensitive extended regex; shows the last 200 matching lines."),
     ]

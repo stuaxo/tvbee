@@ -130,13 +130,14 @@ fn choose(tv: &Tv, url: &str, mime: Option<&str>, app: Option<&str>) -> Result<S
 }
 
 /// Open `url` (optionally "app url") and return what happened, without printing.
-fn open_link(tv: &Tv, line: &str) -> Result<String> {
+pub fn open_link(tv: &Tv, line: &str) -> Result<String> {
     let words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
     let (app, url, _) = parse_args(&words)?;
     let url = normalise(url);
     let mime = media_type(&url);
     tv.connect()?;
     let component = choose(tv, &url, mime, app)?;
+    super::apps::before_link(tv, component.split('/').next().unwrap_or(&component))?;
     let cmd = format!("am start -n {} {}", sh_quote(&component), intent_args(&url, mime, None));
     let out = tv.shell(&[&cmd])?;
     if let Some(err) = out.lines().find(|l| l.starts_with("Error")) {

@@ -139,6 +139,8 @@ impl Conn {
 pub enum SeekTo {
     By(f64),
     Fraction(f64),
+    /// To this many seconds from the start.
+    At(f64),
 }
 
 /// JS that seeks the longest video and returns its new position as a string
@@ -148,6 +150,7 @@ pub fn seek_expr(to: SeekTo) -> String {
     let target = match to {
         SeekTo::By(d) => format!("v.currentTime+({d})"),
         SeekTo::Fraction(f) => format!("isFinite(v.duration)?v.duration*({f}):NaN"),
+        SeekTo::At(t) => format!("({t})"),
     };
     format!(
         "(()=>{{const vs=[...document.querySelectorAll('video')].filter(v=>v.readyState>0);\

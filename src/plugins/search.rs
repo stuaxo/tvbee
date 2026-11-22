@@ -106,11 +106,13 @@ pub fn searchable(tv: &Tv) -> Result<Vec<Searchable>> {
 }
 
 /// `%`-encode a query for a link.
+/// Spaces are `%20`, not `+`: the YouTube TV app passes a `+` through as a
+/// literal plus (searching for "a+b"), which also left its player stuck
+/// behind the search page when a result was opened.
 pub fn url_encode(q: &str) -> String {
     q.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            b' ' => "+".to_string(),
             _ => format!("%{b:02X}"),
         })
         .collect()
@@ -159,6 +161,7 @@ pub fn search_package(tv: &Tv, all: &[Searchable], pkg: &str, query: &str, play:
     if dry {
         return Ok(format!("would run: {cmd}"));
     }
+    super::apps::before_link(tv, pkg)?;
     let out = tv.shell(&[&cmd])?;
     if let Some(err) = out.lines().find(|l| l.starts_with("Error")) {
         return failed(format!("search: {err}"));
@@ -343,13 +346,15 @@ mod tests {
         );
         assert_eq!(
             search_command(get("com.google.android.youtube.tv"), "cats & dogs", false).unwrap(),
-            "am start -a android.intent.action.VIEW -d 'https://www.youtube.com/results?search_query=cats+%26+dogs' -p 'com.google.android.youtube.tv'"
+            "am start -a android.intent.action.VIEW -d 'https://www.youtube.com/results?search_query=cats%20%26%20dogs' -p 'com.google.android.youtube.tv'"
         );
         assert_eq!(
             search_command(get("org.videolan.vlc"), "it's jazz", true).unwrap(),
             "am start -a android.media.action.MEDIA_PLAY_FROM_SEARCH -n 'org.videolan.vlc/.StartActivity' --es query 'it'\\''s jazz'"
         );
         assert!(search_command(get("org.xbmc.kodi"), "x", true).is_err());
-        assert_eq!(url_encode("a b/c?é"), "a+b%2Fc%3F%C3%A9");
+        assert_eq!(url_encode("a b/c?é"), "a%20b%2Fc%3F%C3%A9");
+        // a real plus stays a plus, encoded
+        assert_eq!(url_encode("c++"), "c%2B%2B");
     }
 }

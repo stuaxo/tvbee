@@ -56,6 +56,14 @@ pub struct App {
     /// A search-results link with `{q}` for the query, for apps that take
     /// links but not the search intent (YouTube).
     pub search_link: Option<&'static str>,
+    /// Fixed places in the app (`tvbee goto <id>`).
+    pub places: &'static [crate::more::Place],
+    /// Details of what's on, given the link `page_url` made for it.
+    pub details: Option<fn(&str) -> Result<crate::more::Details>>,
+    /// Close the app before sending it a link if it's running. YouTube needs
+    /// this: each link into the running app stacks another drawing surface,
+    /// and a stale one can end up covering the video (sound, no picture).
+    pub fresh_for_links: bool,
 }
 
 impl App {
@@ -65,12 +73,12 @@ impl App {
 }
 
 pub const fn app(alias: &'static str, name: &'static str, target: &'static str, kind: Kind) -> App {
-    App { alias: Some(alias), name, target, kind, page_url: None, search_link: None }
+    App { alias: Some(alias), name, target, kind, page_url: None, search_link: None, places: &[], details: None, fresh_for_links: false }
 }
 
 /// Recognised in the foreground only (no alias).
 pub const fn known(name: &'static str, package: &'static str, kind: Kind) -> App {
-    App { alias: None, name, target: package, kind, page_url: None, search_link: None }
+    App { alias: None, name, target: package, kind, page_url: None, search_link: None, places: &[], details: None, fresh_for_links: false }
 }
 
 /// The general apps. Plugins add theirs after `home` (see [`registry`]).
@@ -482,6 +490,20 @@ fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
     c.tv.connect()?;
     print!("{}", bring_to_front(&c.tv, app)?);
     Ok(())
+}
+
+/// Get `pkg` ready to be sent a link: apps that need it (`fresh_for_links`)
+/// are closed first if they're running. Returns whether it closed the app.
+pub fn before_link(tv: &Tv, pkg: &str) -> Result<bool> {
+    if !by_package(pkg).is_some_and(|a| a.fresh_for_links) {
+        return Ok(false);
+    }
+    // pidof exits 1 when the app isn't running
+    let running = tv.shell(&["pidof", pkg]).map(|o| !o.trim().is_empty()).unwrap_or(false);
+    if running {
+        tv.shell(&["am", "force-stop", pkg])?;
+    }
+    Ok(running)
 }
 
 /// Bring an app's existing task to the front (starting it if it isn't

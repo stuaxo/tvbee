@@ -69,6 +69,9 @@ A few examples:
     tvbee findtv                      # look for TVs on the network
     tvbee diagnose                    # check adb, scrcpy, TV_IP and the connection
     tvbee np                          # what's on: app, title, progress bar, link
+    tvbee details                     # channel, chapters, description (YouTube, via yt-dlp)
+    tvbee goto history                # a place in the app; 'tvbee goto' lists them
+    tvbee goto chapter 3              # seek to a chapter of the video
     tvbee status --watch              # the same plus power, volume, memory, storage; live
     tvbee launch youtube
     tvbee home --set projectivy       # choose the default home app (see --list)
@@ -110,6 +113,8 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     screenshot   save a PNG of the screen
 
 [info]
+    details      more about what's on: channel, chapters, description
+    goto         go to a place in an app, or a link from what's on
     logs         recent logcat, optionally filtered
     now          print the foreground window only
     nowplaying   what's on: app, title, progress bar and link (alias: np)
