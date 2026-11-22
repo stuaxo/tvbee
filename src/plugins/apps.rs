@@ -117,8 +117,8 @@ pub const APPS: &[App] = &[
     // the NetTV webapps (iPlayer, Arte, ...) all run inside this browser
     known("a NetTV app", "org.droidtv.nettvbrowser", Kind::Video),
     app("livetv", "live TV", "org.droidtv.zapster", Kind::LiveTv),
-    known("the home screen", "com.spocky.projengmenu", Kind::Launcher),
-    known("the home screen", "com.google.android.tvlauncher", Kind::Launcher),
+    app("projectivy", "the home screen", "com.spocky.projengmenu", Kind::Launcher),
+    app("tvlauncher", "the home screen", "com.google.android.tvlauncher", Kind::Launcher),
     known("the home screen", "com.google.android.leanbacklauncher", Kind::Launcher),
 ];
 
@@ -382,6 +382,83 @@ pub fn start(tv: &Tv, app: &str) -> Result<String> {
     Ok(out)
 }
 
+const HOME: &str = "android.intent.category.HOME";
+
+/// The installed home apps (launchers), as `package/activity`.
+pub fn home_activities(tv: &Tv) -> Result<Vec<String>> {
+    let out = tv.shell(&["cmd", "package", "query-activities", "--brief", "-a", "android.intent.action.MAIN", "-c", HOME])?;
+    Ok(super::open::parse_candidates(&out))
+}
+
+/// The default home activity, or None when there isn't one (Android then
+/// asks which to use whenever Home is pressed).
+pub fn default_home(tv: &Tv) -> Result<Option<String>> {
+    let out = tv.shell(&["cmd", "package", "resolve-activity", "--brief", "-a", "android.intent.action.MAIN", "-c", HOME])?;
+    Ok(super::open::parse_resolved(&out).filter(|c| !c.contains("ResolverActivity")))
+}
+
+/// Which of `homes` the user means by `app` (alias, package, or package/activity).
+pub fn pick_home<'a>(homes: &'a [String], app: &str) -> Option<&'a String> {
+    let t = target(app);
+    homes.iter().find(|h| h.as_str() == t).or_else(|| homes.iter().find(|h| h.split('/').next() == Some(pkg_of(app))))
+}
+
+/// A home app's name for lists: its alias and package.
+fn home_label(component: &str) -> String {
+    let pkg = component.split('/').next().unwrap_or(component);
+    match by_package(pkg).and_then(|a| a.alias) {
+        Some(alias) => format!("{alias:<12} {pkg}"),
+        None => format!("{:<12} {pkg}", "-"),
+    }
+}
+
+/// `home [--list | --set <app>]`.
+pub fn home(c: &Ctx, args: &[String]) -> Result<()> {
+    let tv = &c.tv;
+    match args.first().map(String::as_str) {
+        None => {
+            tv.key(3)?;
+            if default_home(tv)?.is_none() {
+                eprintln!("note: no default home app is set, so the TV asks which to use; set one with 'tvbee home --set <app>' (see 'tvbee home --list')");
+            }
+            Ok(())
+        }
+        Some("--list") => {
+            tv.connect()?;
+            let def = default_home(tv)?;
+            for h in home_activities(tv)? {
+                let mark = if def.as_deref() == Some(h.as_str()) { "*" } else { " " };
+                println!("{mark} {}", home_label(&h));
+            }
+            if def.is_none() {
+                println!("
+no default set: the TV asks which to use when Home is pressed ('tvbee home --set <app>')");
+            }
+            Ok(())
+        }
+        Some("--set") => {
+            let Some(app) = args.get(1) else { return usage("usage: tvbee home --set <app>  (see 'tvbee home --list')") };
+            tv.connect()?;
+            let homes = home_activities(tv)?;
+            let Some(component) = pick_home(&homes, app) else {
+                return failed(format!("home: {app} isn't a home app on this TV (see 'tvbee home --list')"));
+            };
+            let out = tv.shell(&["cmd", "package", "set-home-activity", component])?;
+            if out.contains("Error") || out.contains("Exception") {
+                return failed(format!("home: {}", out.trim()));
+            }
+            match default_home(tv)? {
+                Some(now) if now == *component => {
+                    println!("default home app is now {}", home_label(component).split_whitespace().next_back().unwrap_or(component));
+                    Ok(())
+                }
+                other => failed(format!("home: asked for {component}, but the default is {}", other.as_deref().unwrap_or("still unset"))),
+            }
+        }
+        Some(x) => usage(format!("home: unknown option '{x}' (usage: tvbee home [--list | --set <app>])")),
+    }
+}
+
 /// Aliases whose app is installed (`pm list packages` output); `home` always.
 #[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn installed_aliases(pm_list: &str) -> Vec<&'static App> {
@@ -631,6 +708,20 @@ mod tests {
         assert_eq!(identify("org.videolan.vlc", &g), Some(("VLC".into(), Kind::Player)));
         assert_eq!(identify("nextapp.fx", &g), Some(("nextapp.fx".into(), Kind::Player)));
         assert_eq!(identify("com.nowhere", &g), None);
+    }
+
+    #[test]
+    fn picks_home_apps() {
+        let homes = vec![
+            "com.google.android.tvlauncher/.MainActivity".to_string(),
+            "com.spocky.projengmenu/.ui.home.MainActivity".to_string(),
+            "com.android.tv.settings/.system.FallbackHome".to_string(),
+        ];
+        assert_eq!(pick_home(&homes, "projectivy").map(String::as_str), Some("com.spocky.projengmenu/.ui.home.MainActivity"));
+        assert_eq!(pick_home(&homes, "tvlauncher").map(String::as_str), Some("com.google.android.tvlauncher/.MainActivity"));
+        assert_eq!(pick_home(&homes, "com.android.tv.settings").map(String::as_str), Some("com.android.tv.settings/.system.FallbackHome"));
+        assert_eq!(pick_home(&homes, "com.spocky.projengmenu/.ui.home.MainActivity"), Some(&homes[1]));
+        assert_eq!(pick_home(&homes, "kodi"), None);
     }
 
     #[test]

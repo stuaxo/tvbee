@@ -71,6 +71,7 @@ A few examples:
     tvbee np                          # what's on: app, title, progress bar, link
     tvbee status --watch              # the same plus power, volume, memory, storage; live
     tvbee launch youtube
+    tvbee home --set projectivy       # choose the default home app (see --list)
     tvbee search youtube cat videos   # or: tvbee search livetv news
     tvbee open https://youtu.be/...   # links go to the app that claims them
     tvbee vol 20
@@ -118,7 +119,7 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
 [input]
     back         press the back button
     channel      change TV channel (alias: ch)
-    home         go to the home screen
+    home         go to the home screen, or choose the home app
     input        switch input source
     inputs       list the TV's input sources
     key          send any remote key

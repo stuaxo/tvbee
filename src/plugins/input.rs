@@ -114,7 +114,15 @@ pub fn commands() -> Vec<Command> {
     vec![
         Command::new(CAT, "key", "<name|code>", "send any remote key", key)
             .long("Names: up down left right ok enter back home menu info guide power wake sleep\nplay pause stop playpause next prev ff rew mute volup voldown chup chdown\nred green yellow blue, or a numeric Android keycode."),
-        Command::new(CAT, "home", "", "go to the home screen", |c, _| c.tv.key(3)),
+        Command::new(CAT, "home", "[--list | --set <app>]", "go to the home screen, or choose the home app", super::apps::home).long(
+            "With no options, presses Home.\n\
+             \x20 --list        the installed home apps (launchers); * marks the default\n\
+             \x20 --set <app>   make <app> the default home app, e.g. 'tvbee home --set projectivy'\n\
+             \x20               (an alias, a package, or package/activity)\n\
+             \n\
+             With no default set, Android asks which home app to use every time Home is\n\
+             pressed (including tvbee's 'home' and the ui's h key).",
+        ),
         Command::new(CAT, "back", "", "press the back button", |c, _| c.tv.key(4)),
         Command::new(CAT, "text", "\"<string>\"", "type text into the focused field", text),
         Command::new(CAT, "input", "<name>", "switch input source", input),
