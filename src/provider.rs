@@ -95,6 +95,10 @@ pub trait Channels {
     }
     /// Switch to a channel; returns status-line feedback.
     fn tune(&self, cx: &Cx, channel: &Channel) -> Result<String>;
+    /// Make a channel a favourite or not; returns status-line feedback.
+    fn set_favourite(&self, _cx: &Cx, channel: &Channel, _on: bool) -> Result<String> {
+        crate::error::failed(format!("favourites can't be changed here ({})", channel.label()))
+    }
 }
 
 /// More about what's playing (description, chapters, ...).

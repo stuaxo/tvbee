@@ -80,6 +80,7 @@ A few examples:
     tvbee guide                       # now/next on live TV (from the over-the-air guide)
     tvbee guide bbc two               # one channel's programmes today
     tvbee watch more 4                # switch live TV by channel number or name
+    tvbee fav add more 4              # add a favourite channel (with live TV in front)
     tvbee status --watch              # the same plus power, volume, memory, storage; live
     tvbee launch youtube
     tvbee home --set projectivy       # choose the default home app (see --list)
@@ -122,6 +123,7 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
 
 [guide]
     channels     channels you can watch, with what's on
+    fav          favourite channels: list, add, remove
     guide        programme guide: now/next, or one channel's schedule
     onnow        the channel live TV is on, and what's on it now and next
     providers    content providers and what each can do

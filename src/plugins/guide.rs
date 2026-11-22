@@ -194,6 +194,34 @@ fn on_now(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// `fav [add|remove <channel>] [--provider ID]`.
+fn fav(c: &Ctx, args: &[String]) -> Result<()> {
+    let (words, id) = provider_flag(args);
+    let p = channel_provider(id.as_deref())?;
+    let cx = Cx { tv: &c.tv };
+    let chans = p.channels().expect("checked");
+    let list = chans.list(&cx)?;
+    let (on, query) = match words.split_first() {
+        None => {
+            let favs: Vec<_> = list.iter().filter(|ch| ch.favourite).collect();
+            if favs.is_empty() {
+                println!("no favourites yet ('tvbee fav add <channel>', with live TV in front)");
+            }
+            for ch in favs {
+                println!("★ {}", ch.label());
+            }
+            return Ok(());
+        }
+        Some((cmd, rest)) if !rest.is_empty() && (cmd == "add" || cmd == "remove") => (cmd == "add", rest.join(" ")),
+        _ => return usage("usage: tvbee fav [add|remove <channel>] [--provider ID]"),
+    };
+    let Some(ch) = provider::find_channel(&list, &query) else {
+        return failed(format!("fav: no channel '{query}' (see 'tvbee channels')"));
+    };
+    println!("{}", chans.set_favourite(&cx, ch, on)?);
+    Ok(())
+}
+
 fn providers(_: &Ctx, _: &[String]) -> Result<()> {
     let all = provider::all();
     if all.is_empty() {
@@ -222,6 +250,14 @@ pub fn commands() -> Vec<Command> {
         Command::new(CAT, "watch", "<channel> [--provider ID]", "switch live TV to a channel, by number or name", watch)
             .long("  tvbee watch 4\n  tvbee watch more 4\n  tvbee watch bbc two\nNames match from the start, then anywhere; the lowest channel number wins."),
         Command::new(CAT, "onnow", "[--provider ID]", "the channel live TV is on, and what's on it now and next", on_now),
+        Command::new(CAT, "fav", "[add|remove <channel>] [--provider ID]", "favourite channels: list, add, remove", fav).long(
+            "  tvbee fav                  list them\n\
+             \x20 tvbee fav add more 4       add a channel (by number or name)\n\
+             \x20 tvbee fav remove 18        remove one\n\
+             On Philips TVs: new favourites go in the TV's Favourites 1 list, removing\n\
+             takes a channel out of every list, and the TV only allows changes while\n\
+             live TV is in front.",
+        ),
         Command::new(CAT, "providers", "", "content providers and what each can do", providers).long(
             "Providers are the sources of content tvbee knows (live TV, YouTube, ...),\n\
              registered by plugins, with their capabilities: guide, channels, details,\n\

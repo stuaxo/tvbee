@@ -58,8 +58,31 @@ pub fn split_status(out: &str) -> Option<(u16, String)> {
     Some((code.trim().parse().ok()?, body.to_string()))
 }
 
-/// Make the request; returns (status, body).
+/// How long to keep trying when the TV refuses the connection: Philips TVs
+/// restart their API for a few seconds when live TV comes up.
+const RETRY_FOR: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Make the request; returns (status, body). A refused connection is retried
+/// for a while (see [`RETRY_FOR`]).
 pub fn request(r: &Request) -> Result<(u16, String)> {
+    let start = std::time::Instant::now();
+    loop {
+        match request_once(r) {
+            Err(Refused(_)) if start.elapsed() < RETRY_FOR => std::thread::sleep(std::time::Duration::from_millis(700)),
+            Err(Refused(e)) | Err(Other(e)) => return Err(e),
+            Ok(reply) => return Ok(reply),
+        }
+    }
+}
+
+enum Fail {
+    Refused(Error),
+    Other(Error),
+}
+use Fail::{Other, Refused};
+
+fn request_once(r: &Request) -> std::result::Result<(u16, String), Fail> {
+    let fail = |e: Error| Other(e);
     let mut child = Command::new("curl")
         .args(curl_args(r))
         .stdin(Stdio::piped())
@@ -72,15 +95,18 @@ pub fn request(r: &Request) -> Result<(u16, String)> {
             } else {
                 e.into()
             }
-        })?;
-    child.stdin.take().expect("piped").write_all(curl_config(r).as_bytes())?;
-    let out = child.wait_with_output()?;
+        })
+        .map_err(fail)?;
+    child.stdin.take().expect("piped").write_all(curl_config(r).as_bytes()).map_err(|e| fail(e.into()))?;
+    let out = child.wait_with_output().map_err(|e| fail(e.into()))?;
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     match split_status(&text) {
         // curl writes 000 when it couldn't connect at all
         Some((0, _)) | None => {
             let err = String::from_utf8_lossy(&out.stderr);
-            failed(format!("https {}: {}", r.url, err.trim().lines().last().unwrap_or("no reply")))
+            let e = failed::<()>(format!("https {}: {}", r.url, err.trim().lines().last().unwrap_or("no reply"))).unwrap_err();
+            // curl exit 7: couldn't connect (refused)
+            Err(if out.status.code() == Some(7) { Refused(e) } else { Other(e) })
         }
         Some(r) => Ok(r),
     }

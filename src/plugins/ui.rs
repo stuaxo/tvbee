@@ -62,6 +62,8 @@ pub enum Action {
     LoadGuide,
     /// Switch live TV to a channel.
     Watch(crate::provider::Channel),
+    /// Make a channel a favourite (true) or not.
+    Favourite(crate::provider::Channel, bool),
     Refresh,
 }
 
@@ -410,6 +412,13 @@ impl Worker {
             Action::LoadGuide => {
                 let _ = tx.send(Msg::Guide(load_guide(&self.tv).map_err(|e| e.to_string())));
                 String::new()
+            }
+            Action::Favourite(ch, on) => {
+                let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
+                let done = p.channels().expect("checked").set_favourite(&crate::provider::Cx { tv: &self.tv }, &ch, on);
+                // either way, show the TV's own idea of the favourites
+                let _ = tx.send(Msg::Guide(load_guide(&self.tv).map_err(|e| e.to_string())));
+                done?
             }
             Action::Watch(ch) => {
                 let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
@@ -1258,6 +1267,11 @@ impl App {
                 self.watch_channel(at, actions);
                 return;
             }
+            // * isn't in any channel name, so it can't be part of a filter
+            KeyCode::Char('*') => {
+                self.toggle_favourite(at, actions);
+                return;
+            }
             KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => tab = tab.other(),
             KeyCode::Backspace => {
                 self.prompt.pop();
@@ -1268,6 +1282,17 @@ impl App {
         let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt).iter().map(|r| r.channel.id).collect();
         // keep the highlight on its channel while it's shown; else the first
         self.overlay = Overlay::Guide { tab, at: guide_move(&ids, at, code) };
+    }
+
+    /// Star or unstar channel `id`: the star changes now, and the guide is
+    /// read back from the TV once it's done (so a refusal puts it back).
+    fn toggle_favourite(&mut self, id: u32, actions: &Sender<Action>) {
+        let Some(Ok(g)) = self.guide.as_mut() else { return };
+        let Some(row) = g.rows.iter_mut().find(|r| r.channel.id == id) else { return };
+        row.channel.favourite = !row.channel.favourite;
+        let (ch, on) = (row.channel.clone(), row.channel.favourite);
+        self.note = format!("{} {}...", if on { "adding to favourites:" } else { "removing from favourites:" }, ch.label());
+        let _ = actions.send(Action::Favourite(ch, on));
     }
 
     /// Switch to channel `id` and close the guide.
@@ -1413,9 +1438,7 @@ impl App {
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
             }
-            (Overlay::Guide { .. }, Some(Hit::GuideStar(_))) => {
-                self.note = "favourites can't be changed from tvbee yet: use the TV's own channel list".into();
-            }
+            (Overlay::Guide { .. }, Some(Hit::GuideStar(id))) => self.toggle_favourite(id, actions),
             (Overlay::Guide { .. }, Some(Hit::GuideRow(id))) => self.watch_channel(id, actions),
             (Overlay::Guide { at, .. }, Some(Hit::GuideTab(t))) => self.overlay = Overlay::Guide { tab: t, at },
             (Overlay::None, Some(Hit::Open(o))) => self.open(o, actions),
@@ -1848,7 +1871,7 @@ impl App {
                         }
                         text.push(Line::default());
                         let more = if shown.len() > room { format!("  ({} of {})", sel + 1, shown.len()) } else { String::new() };
-                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  tab/←/→ switch  ⏎/click watch  ▶ on now  ★ favourite  esc closes{more}")).fg(Color::DarkGray));
+                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  tab/←/→ switch  ⏎/click watch  * or click ☆/★ favourite  ▶ on now  esc{more}")).fg(Color::DarkGray));
                         format!(" guide: {} ", g.provider)
                     }
                 };
@@ -2118,7 +2141,8 @@ const HELP: &str = " everywhere
    tab      switch mode      .      more (power, mirror, ...)
    i        system info      a      launch an app (space there: front / restart / close)
    /        search the app in front (tab picks another app)
-   g        live TV guide: now/next on every channel (type to filter, ⏎ watch);
+   g        live TV guide: now/next on every channel (type to filter, ⏎ watch,
+            * or click the star to add/remove a favourite);
             clicking the channel line opens it too
    . o      open a link (YouTube, Netflix, media files)
    q Esc    quit
