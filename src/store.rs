@@ -111,20 +111,14 @@ fn path() -> Option<std::path::PathBuf> {
     Some(crate::plugin::cache_path("x")?.with_file_name("tvbee.sqlite"))
 }
 
-// newer clippy flags the code this derive generates, not ours
-#[allow(clippy::redundant_field_names)]
-#[derive(QueryableByName)]
-struct Version {
-    #[diesel(sql_type = diesel::sql_types::Integer)]
-    user_version: i32,
-}
-
 /// Open the database at `path`, (re)building it if it's from another schema.
 fn open_at(path: &str) -> Result<SqliteConnection> {
     let mut c = SqliteConnection::establish(path).map_err(db_err)?;
     // the ui reads while its worker writes
     diesel::sql_query("PRAGMA busy_timeout = 5000").execute(&mut c).map_err(db_err)?;
-    let version = diesel::sql_query("PRAGMA user_version").get_result::<Version>(&mut c).map_err(db_err)?.user_version;
+    let version: i32 = diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>("(SELECT user_version FROM pragma_user_version())"))
+        .get_result(&mut c)
+        .map_err(db_err)?;
     if version != SCHEMA {
         // only copies of what's on TVs: start again rather than migrate
         for table in ["events", "descriptions", "fetches"] {
