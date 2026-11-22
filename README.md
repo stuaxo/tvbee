@@ -2,6 +2,9 @@
 
 🔴🟠🟡 Warning slopcoded - made to operate my own TV YMMV  🟡🟠🔴
 
+This is a rust port of [tv.sh](https://github.com/stuaxo/tv.sh) with more functinaltiy.
+
+
 Command-line remote for Android TV over ADB. So far it has only been tested
 on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
 (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
@@ -73,6 +76,7 @@ A few examples:
     tvbee vol 20
     tvbee seek 50%
     tvbee ui                          # full-screen remote (needs the ui feature)
+    tvbee debloat apply --dry-run     # what the debloat profile would change
 
 Every command takes `--help`. The full list, from `tvbee help`:
 
@@ -92,6 +96,9 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     open         open a link in the app that handles it
     quit         quit the current app
     search       search inside an app (YouTube, Kodi, live TV, ...)
+
+[debloat]
+    debloat      disable unwanted system apps (reversible)
 
 [diagnose]
     diagnose     check adb, scrcpy, TV_IP and the connection to the TV
@@ -138,7 +145,6 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
 [tools]
     commands     list all command names and aliases
     completion   print a bash/zsh completion script
-    debloat      run tv-debloat.sh
     help         show this help, or help for one command
     plugins      list plugins and whether they are enabled
     wait         wait until the TV is reachable and booted
@@ -169,7 +175,7 @@ module in `src/plugins/` exporting `commands()`, registered in
     tvbee launch --quiet iplayer
     tvbee apps --all      # offline alias list
 
-Environment: `TVBEE_PLUGINS`, `TV_IP` (default 192.168.1.19), `TV_DEBLOAT` (path to tv-debloat.sh; otherwise `debloat` looks for `scripts/tv-debloat.sh` in the current directory. The script isn't included yet).
+Environment: `TVBEE_PLUGINS`, `TV_IP` (default 192.168.1.19).
 
 These can also go in a `.env` file in the current directory, or in
 `~/.config/tvbee/env` for every directory (see `.env.example`). Settings

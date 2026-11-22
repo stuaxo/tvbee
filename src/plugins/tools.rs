@@ -8,8 +8,6 @@ use std::time::Duration;
 
 const CAT: &str = "tools";
 
-/// Where `debloat` looks for the script when TV_DEBLOAT isn't set.
-const DEBLOAT_SCRIPT: &str = "scripts/tv-debloat.sh";
 
 const COMPLETION: &str = r#"# source this from ~/.bashrc, or ~/.zshrc after: autoload -U +X bashcompinit && bashcompinit
 _tvbee() {
@@ -92,35 +90,6 @@ fn wait(c: &Ctx, args: &[String]) -> Result<()> {
     failed(format!("wait: timed out after {limit}s"))
 }
 
-/// The debloat script: `$TV_DEBLOAT` if set, else `scripts/tv-debloat.sh` in
-/// the current directory. Err says where it looked.
-pub fn find_debloat(env: Option<&str>, cwd: &std::path::Path) -> std::result::Result<std::path::PathBuf, String> {
-    match env {
-        Some(p) => {
-            let p = std::path::PathBuf::from(p);
-            if p.is_file() { Ok(p) } else { Err(format!("TV_DEBLOAT is set to {}, which doesn't exist", p.display())) }
-        }
-        None => {
-            let p = cwd.join(DEBLOAT_SCRIPT);
-            if p.is_file() {
-                Ok(p)
-            } else {
-                Err(format!(
-                    "tv-debloat.sh not found (looked for {}); run from a directory with {DEBLOAT_SCRIPT}, or set TV_DEBLOAT",
-                    p.display()
-                ))
-            }
-        }
-    }
-}
-
-fn debloat(_: &Ctx, args: &[String]) -> Result<()> {
-    let env = std::env::var("TV_DEBLOAT").ok();
-    let cwd = std::env::current_dir()?;
-    let script = find_debloat(env.as_deref(), &cwd).or_else(|why| failed(format!("debloat: {why}")))?;
-    run_replacing(Proc::new(script).args(args))
-}
-
 fn commands_list(c: &Ctx, _: &[String]) -> Result<()> {
     let mut names: Vec<&str> = c
         .commands
@@ -186,8 +155,6 @@ pub fn commands() -> Vec<Command> {
     vec![
         Command::new(CAT, "wait", "[secs]", "wait until the TV is reachable and booted", wait)
             .long("Default timeout 180s. Useful as: tvbee reboot && tvbee wait && tvbee launch iplayer"),
-        Command::new(CAT, "debloat", "<args>", "run tv-debloat.sh", debloat)
-            .long("Runs tv-debloat.sh with the given arguments. The script is TV_DEBLOAT if set,\nelse scripts/tv-debloat.sh in the current directory; tvbee doesn't ship one."),
         Command::new(CAT, "plugins", "[--refresh]", "list plugins and whether they are enabled", plugins_cmd).long(
             "Vendor plugins are enabled by detection, cached per TV in ~/.cache/tvbee.\n  --refresh  re-probe the TV now (contacts it) and update the cache\nTVBEE_PLUGINS=philips,-other forces plugins on or off.",
         ),
@@ -200,24 +167,6 @@ pub fn commands() -> Vec<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn finds_the_debloat_script() {
-        let dir = std::env::temp_dir().join(format!("tvbee-debloat-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("scripts")).unwrap();
-        // not there yet: says where it looked
-        let err = find_debloat(None, &dir).unwrap_err();
-        assert!(err.contains("scripts/tv-debloat.sh") && err.contains("TV_DEBLOAT"), "{err}");
-        std::fs::write(dir.join(DEBLOAT_SCRIPT), "#!/bin/sh\n").unwrap();
-        assert_eq!(find_debloat(None, &dir).unwrap(), dir.join(DEBLOAT_SCRIPT));
-        // TV_DEBLOAT wins, but must exist
-        let other = dir.join("other.sh");
-        assert!(find_debloat(other.to_str(), &dir).unwrap_err().contains("doesn't exist"));
-        std::fs::write(&other, "").unwrap();
-        assert_eq!(find_debloat(other.to_str(), &dir).unwrap(), other);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 
     #[test]
     fn plain_text_filter() {

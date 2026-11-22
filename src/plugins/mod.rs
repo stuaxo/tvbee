@@ -1,4 +1,5 @@
 pub mod apps;
+pub mod debloat;
 pub mod diagnose;
 pub mod display;
 pub mod info;
@@ -24,6 +25,7 @@ pub const NOT_BUILT: &[(&str, &str)] = &[
 pub fn all() -> Vec<Plugin> {
     vec![
         Plugin::builtin("apps", "launching and managing Android apps", apps::commands).with_menu(apps::menu),
+        Plugin::builtin("debloat", "disabling unwanted system apps, reversibly", debloat::commands),
         Plugin::builtin("diagnose", "finding the TV and checking the setup", diagnose::commands),
         Plugin::builtin("display", "seeing the TV screen", display::commands).with_menu(display::menu),
         Plugin::builtin("info", "querying the TV's state", info::commands),

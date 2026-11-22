@@ -1,0 +1,70 @@
+# tvbee debloat profile. One entry per line; after the fields, the rest of the
+# line is the reason, shown by `tvbee debloat list` and `status`.
+#
+#   profile   <name>
+#   model     <ro.product.model this was made for>   (warns on other TVs)
+#   disable   <tag> <package>  <reason>      pm disable-user --user 0 (restore: pm enable)
+#   uninstall <tag> <package>  <reason>      pm uninstall --user 0 (restore: install-existing)
+#   keep      <tag> <package>  <reason>      never changed; re-enabled by `apply` if found off
+#   setting   <tag> <namespace> <key> <value>  <reason>   (original recorded, restorable)
+#   note      <text>                         shown with the plan
+#
+# Tags group the entries (`--only` / `--skip` pick groups):
+#   telemetry, voice, discontinued, sync, phoneservices, games,
+#   speed          only applied on low-spec TVs (unless --only speed)
+#   system         keep: a core part of the system
+#   dependency:<package>[,<package>...]   keep: these packages need it
+#
+# Everything here is reversible: system apps are disabled or removed for
+# user 0 only, never deleted. No root needed.
+
+profile Philips QM163E (Android TV 8)
+model   QM163E
+
+disable   telemetry     org.droidtv.candeebug                     Philips "CANDEE" telemetry: collects and uploads usage
+disable   telemetry     org.droidtv.usagelogger                   Philips NetTV usage logging
+
+disable   voice         com.google.android.katniss                Google Assistant / voice search (no mic on this TV)
+disable   voice         org.droidtv.virtualassistant              Philips bridge to the voice assistant
+disable   voice         com.google.android.speech.pumpkin         on-device speech recogniser for the assistant
+
+disable   discontinued  com.google.android.music                  dead Google Play Music stub
+disable   discontinued  org.droidtv.twittershare                  Philips "Share to Twitter": dead since 2023
+uninstall discontinued  com.google.android.videos                 Google Play Movies & TV (discontinued by Google)
+
+disable   sync          com.google.android.syncadapters.calendar  syncs a Google calendar to the TV: pointless here
+disable   sync          com.google.android.syncadapters.contacts  syncs Google Contacts to the TV: pointless here
+
+disable   phoneservices com.android.mms.service                   MMS send service: inert, no telephony on this TV
+disable   phoneservices com.android.smspush                       WAP-push (carrier SMS) receiver: inert
+
+disable   games         com.google.android.play.games             Play Games and its recommendations service
+
+# Animation scales (speed: only on low-spec TVs). window/transition are already
+# 0.0 (instant) on this TV, listed only to pin them; animator_duration_scale is
+# lowered from 1.0.
+setting   speed         global window_animation_scale     0.0     instant window animations (pinned)
+setting   speed         global transition_animation_scale 0.0     instant transitions (pinned)
+setting   speed         global animator_duration_scale    0.5     faster in-app animations (was 1.0)
+
+# No phone apps exist on this TV, but these are core parts of it:
+keep      system        com.android.providers.contacts            the account framework and Telecom expect it at boot
+keep      system        com.android.providers.blockednumber       the account framework and Telecom expect it at boot
+keep      system        com.android.bluetooth                     the whole Bluetooth stack, not a phone thing
+# Decided not to disable (some guides for newer TVs do): despite the name it's
+# part of Philips' TV framework, runs as the system user (uid 1000) with
+# platform permissions, and is started at boot. Not worth the risk for ~15 MB.
+keep      system        org.droidtv.tv.frameworklogger            Philips TV framework part: runs as the system user; left on deliberately
+
+# Tried and put back (2026-09-16): disabling the first two broke the
+# Philips/Zeasn NetTV portal. Arte, iPlayer, Dailymotion etc.
+# (org.droidtv.nettvapp<NNNN>) launch via org.droidtv.nettv_launcherapp, which
+# needs nettvregistration's cloud session check; without it they bounce back to
+# live TV, and the "Philips apps" gallery (org.droidtv.nettv.market) shows a
+# blank screen.
+keep dependency:org.droidtv.nettv_launcherapp,org.droidtv.nettv.market org.droidtv.nettvregistration  its session check lets the NetTV apps (iPlayer, Arte, Dailymotion) and the app gallery open
+keep dependency:org.droidtv.nettv_launcherapp org.droidtv.nettvrecommender  disabling it with nettvregistration broke the NetTV apps; keep both
+keep dependency:com.android.bluetooth com.android.server.telecom  tangled into Bluetooth audio routing
+
+note com.mxtech.videoplayer.ad (ad-supported MX Player) was fully removed by hand; it can't be restored without the APK. MX Player Pro is still installed.
+note Not settable over adb, do these in the TV's menus: Developer options > Background process limit; Play Store > Settings > Auto-update apps; Philips "share usage data" and Google "Usage & diagnostics".
