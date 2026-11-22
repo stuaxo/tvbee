@@ -43,7 +43,7 @@ fn main() {
 
     // Only touch the TV to detect plugins when one of their commands was asked
     // for (and never just to show help).
-    let mode = if !help && plugin::needs_probe(&all, sub) { Mode::Probe } else { Mode::Cached };
+    let mode = if !help && plugin::needs_probe(&all, sub, rest) { Mode::Probe } else { Mode::Cached };
     let overrides = plugin::parse_overrides(&std::env::var("TVBEE_PLUGINS").unwrap_or_default());
     let cache_file = plugin::cache_path(&tv.ip);
     let states = plugin::resolve(&all, &tv, mode, &overrides, cache_file.as_deref());
@@ -54,6 +54,8 @@ fn main() {
         .filter(|(_, s)| s.enabled)
         .flat_map(|(p, _)| (p.commands)())
         .collect();
+    // the enabled plugins' apps join the core list, before anything looks one up
+    plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
     let menu: Vec<menu::MenuItem> = all
         .iter()
         .zip(&states)

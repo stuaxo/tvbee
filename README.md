@@ -154,14 +154,18 @@ Env: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tvbee/env
 ```
 <!-- commands:end -->
 
-Not listed above: `ui` (built with `--features ui`) and `jointspace` (from the
-`philips` plugin, on TVs where it's detected).
+Not listed above: `ui` (built with `--features ui`), and commands from plugins
+that are enabled when the TV has what they're for: `jointspace` (`philips`) and
+`youtube page` (`youtube`, when the YouTube app is installed). Those plugins
+also add their apps: iPlayer, Arte, Dailymotion and live TV (`philips`),
+YouTube (`youtube`).
 
 ## Plugins
 
 Commands are grouped by plugin in `tvbee help`, Django-style. A plugin is a
 module in `src/plugins/` exporting `commands()`, registered in
-`src/plugins/mod.rs`. Built-in plugins are always on. Vendor plugins (e.g.
+`src/plugins/mod.rs`; it can also add apps (`with_apps`) and ui menu items
+(`with_menu`). Built-in plugins are always on. Vendor plugins (e.g.
 `philips`) carry a detection check:
 
 - `TVBEE_PLUGINS=philips,-other` forces plugins on/off

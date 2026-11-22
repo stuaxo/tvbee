@@ -10,6 +10,7 @@ pub mod philips;
 pub mod power;
 pub mod search;
 pub mod tools;
+pub mod youtube;
 #[cfg(feature = "ui")]
 pub mod ui;
 
@@ -38,7 +39,10 @@ pub fn all() -> Vec<Plugin> {
             "Philips TV features via the JointSpace API",
             philips::detect,
             philips::commands,
-        ),
+        )
+        .with_apps(philips::apps),
+        Plugin::detect("youtube", "the YouTube app: what's on, search, looking inside it", youtube::detect, youtube::commands)
+            .with_apps(youtube::apps),
         #[cfg(feature = "ui")]
         Plugin::builtin("ui", "interactive terminal remote (ratatui)", ui::commands),
     ]

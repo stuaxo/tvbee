@@ -90,7 +90,7 @@ pub fn parse_searchable(out: &str, installed: Option<&str>) -> Vec<Searchable> {
     }
     if let Some(pm) = installed {
         let have: Vec<&str> = pm.lines().filter_map(|l| l.trim().strip_prefix("package:")).collect();
-        for a in apps::APPS.iter().filter(|a| a.search_link.is_some()) {
+        for a in apps::all().iter().filter(|a| a.search_link.is_some()) {
             if have.contains(&a.package()) && !out.iter().any(|s| s.package == a.package()) {
                 out.push(Searchable { package: a.package().to_string(), way: Way::Link(a.search_link.unwrap_or("")), play: None });
             }

@@ -41,7 +41,9 @@ impl Kind {
 }
 
 /// An app tvbee knows about. Apps with an alias can be launched by it; the
-/// rest are only recognised in the foreground.
+/// rest are only recognised in the foreground. The core lists general apps
+/// ([`CORE`]); plugins add their own (YouTube, Philips' NetTV apps).
+#[derive(Clone, Copy)]
 pub struct App {
     pub alias: Option<&'static str>,
     /// Human name, e.g. "YouTube".
@@ -62,25 +64,18 @@ impl App {
     }
 }
 
-const fn app(alias: &'static str, name: &'static str, target: &'static str, kind: Kind) -> App {
+pub const fn app(alias: &'static str, name: &'static str, target: &'static str, kind: Kind) -> App {
     App { alias: Some(alias), name, target, kind, page_url: None, search_link: None }
 }
 
 /// Recognised in the foreground only (no alias).
-const fn known(name: &'static str, package: &'static str, kind: Kind) -> App {
+pub const fn known(name: &'static str, package: &'static str, kind: Kind) -> App {
     App { alias: None, name, target: package, kind, page_url: None, search_link: None }
 }
 
-pub const APPS: &[App] = &[
+/// The general apps. Plugins add theirs after `home` (see [`registry`]).
+pub const CORE: &[App] = &[
     app("home", "the home screen", "@home", Kind::Launcher),
-    app("iplayer", "iPlayer", "org.droidtv.nettvapp4340/com.zeasn.app.linux.MainActivity", Kind::Video),
-    app("dailymotion", "Dailymotion", "org.droidtv.nettvapp1984/com.zeasn.app.linux.MainActivity", Kind::Video),
-    app("arte", "Arte", "org.droidtv.nettvapp1814/com.zeasn.app.linux.MainActivity", Kind::Video),
-    App {
-        page_url: Some(youtube_url),
-        search_link: Some("https://www.youtube.com/results?search_query={q}"),
-        ..app("youtube", "YouTube", "com.google.android.youtube.tv", Kind::Video)
-    },
     app("kodi", "Kodi", "org.xbmc.kodi", Kind::Video),
     app("appletv", "Apple TV", "com.apple.atve.androidtv.appletv", Kind::Video),
     app("netflix", "Netflix", "com.netflix.ninja", Kind::Video),
@@ -114,13 +109,32 @@ pub const APPS: &[App] = &[
     app("emby", "Emby", "tv.emby.embyatv", Kind::Video),
     app("spotify", "Spotify", "com.spotify.tv.android", Kind::Music),
     app("ytmusic", "YouTube Music", "com.google.android.youtube.tvmusic", Kind::Music),
-    // the NetTV webapps (iPlayer, Arte, ...) all run inside this browser
-    known("a NetTV app", "org.droidtv.nettvbrowser", Kind::Video),
-    app("livetv", "live TV", "org.droidtv.zapster", Kind::LiveTv),
     app("projectivy", "the home screen", "com.spocky.projengmenu", Kind::Launcher),
     app("tvlauncher", "the home screen", "com.google.android.tvlauncher", Kind::Launcher),
     known("the home screen", "com.google.android.leanbacklauncher", Kind::Launcher),
 ];
+
+static REGISTRY: std::sync::OnceLock<Vec<App>> = std::sync::OnceLock::new();
+
+/// The core apps with plugins' apps (`extra`) placed after `home`, so they
+/// list near the top.
+pub fn registry(extra: Vec<App>) -> Vec<App> {
+    let mut v = vec![CORE[0]];
+    v.extend(extra);
+    v.extend_from_slice(&CORE[1..]);
+    v
+}
+
+/// Set the apps of the enabled plugins. Call once, before anything looks an
+/// app up (main does).
+pub fn install(plugin_apps: Vec<App>) {
+    let _ = REGISTRY.set(registry(plugin_apps));
+}
+
+/// Every app tvbee knows. Without [`install`] (tests) that's every plugin's.
+pub fn all() -> &'static [App] {
+    REGISTRY.get_or_init(|| registry(crate::plugins::all().iter().flat_map(|p| (p.apps)()).collect()))
+}
 
 /// "the home screen" -> "Home screen": app names are written for sentences.
 pub fn list_name(name: &str) -> String {
@@ -139,18 +153,12 @@ pub fn list_name(name: &str) -> String {
     }
 }
 
-/// `https://www.youtube.com/tv#/watch?v=ID&...` -> `https://www.youtube.com/watch?v=ID`
-pub fn youtube_url(page: &str) -> Option<String> {
-    let rest = &page[page.find("watch?v=")? + "watch?v=".len()..];
-    let id: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
-    (id.len() == 11).then(|| format!("https://www.youtube.com/watch?v={id}"))
-}
 
 pub fn is_alias(name: &str) -> bool {
     by_alias(name).is_some()
 }
 
-/// An app the TV has that isn't in [`APPS`], with its kind worked out from
+/// An app the TV has that isn't in [`all`], with its kind worked out from
 /// what it declares.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Guess {
@@ -254,7 +262,7 @@ pub fn guesses(tv: &Tv) -> Vec<Guess> {
     gs
 }
 
-/// A name and kind for `pkg`: from [`APPS`] if tvbee knows it, else guessed
+/// A name and kind for `pkg`: from [`all`] if tvbee knows it, else guessed
 /// (named by its package).
 pub fn identify(pkg: &str, guessed: &[Guess]) -> Option<(String, Kind)> {
     if let Some(a) = by_package(pkg) {
@@ -264,12 +272,12 @@ pub fn identify(pkg: &str, guessed: &[Guess]) -> Option<(String, Kind)> {
 }
 
 fn by_alias(alias: &str) -> Option<&'static App> {
-    APPS.iter().find(|a| a.alias == Some(alias))
+    all().iter().find(|a| a.alias == Some(alias))
 }
 
 /// The app whose package is `pkg`, if tvbee knows it.
 pub fn by_package(pkg: &str) -> Option<&'static App> {
-    APPS.iter().find(|a| a.target != "@home" && a.package() == pkg)
+    all().iter().find(|a| a.target != "@home" && a.package() == pkg)
 }
 
 /// Idle apps that hog RAM; force-stopped by `free`.
@@ -463,7 +471,7 @@ no default set: the TV asks which to use when Home is pressed ('tvbee home --set
 #[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn installed_aliases(pm_list: &str) -> Vec<&'static App> {
     let installed: Vec<&str> = pm_list.lines().filter_map(|l| l.trim().strip_prefix("package:")).collect();
-    APPS.iter()
+    all().iter()
         .filter(|a| a.alias.is_some())
         .filter(|a| a.target == "@home" || installed.contains(&a.package()))
         .collect()
@@ -491,7 +499,7 @@ fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
 
 /// Aliases (other than `home`) that point at `pkg`.
 pub fn aliases_for_package(pkg: &str) -> Vec<&'static str> {
-    APPS.iter()
+    all().iter()
         .filter(|a| a.target != "@home" && a.package() == pkg)
         .filter_map(|a| a.alias)
         .collect()
@@ -567,7 +575,7 @@ fn apps(c: &Ctx, args: &[String]) -> Result<()> {
             all = true;
         }
     }
-    let mut rows: Vec<_> = APPS
+    let mut rows: Vec<_> = self::all()
         .iter()
         .filter_map(|a| Some((a.alias?, a.target)))
         // home is always available; others must be installed on the TV
@@ -653,19 +661,19 @@ mod tests {
 
     #[test]
     fn app_table_is_consistent() {
-        let mut aliases: Vec<_> = APPS.iter().filter_map(|a| a.alias).collect();
+        let mut aliases: Vec<_> = all().iter().filter_map(|a| a.alias).collect();
         let n = aliases.len();
         aliases.sort();
         aliases.dedup();
         assert_eq!(aliases.len(), n, "duplicate alias");
         // one entry per package (several home screens share a name, not a package)
-        let mut pkgs: Vec<_> = APPS.iter().filter(|a| a.target != "@home").map(|a| a.package()).collect();
+        let mut pkgs: Vec<_> = all().iter().filter(|a| a.target != "@home").map(|a| a.package()).collect();
         let n = pkgs.len();
         pkgs.sort();
         pkgs.dedup();
         assert_eq!(pkgs.len(), n, "duplicate package");
         // aliases are what people type: short, lowercase, no spaces
-        for a in APPS.iter().filter_map(|a| a.alias) {
+        for a in all().iter().filter_map(|a| a.alias) {
             assert!(a.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()), "{a}");
         }
         for k in [Kind::Video, Kind::Music, Kind::Player, Kind::Store, Kind::Launcher, Kind::LiveTv, Kind::Other] {
@@ -729,17 +737,8 @@ mod tests {
         let pm = "package:com.google.android.youtube.tv\npackage:org.videolan.vlc\npackage:org.droidtv.zapster\npackage:com.nowhere\n";
         let names: Vec<_> = installed_aliases(pm).iter().filter_map(|a| a.alias).collect();
         // home is always there; the rest only if installed
-        assert_eq!(names, vec!["home", "youtube", "vlc", "livetv"]);
-    }
-
-    #[test]
-    fn youtube_links() {
-        assert_eq!(
-            youtube_url("https://www.youtube.com/tv#/watch?v=nh5iCP5Ta_4&resume").as_deref(),
-            Some("https://www.youtube.com/watch?v=nh5iCP5Ta_4")
-        );
-        assert_eq!(youtube_url("https://www.youtube.com/tv#/"), None);
-        assert_eq!(youtube_url("https://www.youtube.com/tv#/watch?v=short"), None);
+        // plugin apps (livetv from philips, youtube) come right after home
+        assert_eq!(names, vec!["home", "livetv", "youtube", "vlc"]);
     }
 
     #[test]

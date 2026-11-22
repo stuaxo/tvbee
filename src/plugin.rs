@@ -10,6 +10,7 @@
 
 use crate::error::Result;
 use crate::menu::{self, MenuItem};
+use crate::plugins::apps::App;
 use crate::registry::Command;
 use crate::tv::Tv;
 use std::collections::HashMap;
@@ -27,11 +28,17 @@ pub struct Plugin {
     pub commands: fn() -> Vec<Command>,
     /// Actions for the `ui` menu.
     pub menu: fn() -> Vec<MenuItem>,
+    /// Apps this plugin knows (added to the core list when it's enabled).
+    pub apps: fn() -> Vec<App>,
+}
+
+fn no_apps() -> Vec<App> {
+    Vec::new()
 }
 
 impl Plugin {
     pub fn builtin(name: &'static str, desc: &'static str, commands: fn() -> Vec<Command>) -> Self {
-        Plugin { name, desc, enable: Enable::Always, commands, menu: menu::none }
+        Plugin { name, desc, enable: Enable::Always, commands, menu: menu::none, apps: no_apps }
     }
 
     pub fn detect(
@@ -40,7 +47,13 @@ impl Plugin {
         detect: fn(&Tv) -> Result<bool>,
         commands: fn() -> Vec<Command>,
     ) -> Self {
-        Plugin { name, desc, enable: Enable::Detect(detect), commands, menu: menu::none }
+        Plugin { name, desc, enable: Enable::Detect(detect), commands, menu: menu::none, apps: no_apps }
+    }
+
+    /// Add these apps to the app list while the plugin is enabled.
+    pub fn with_apps(mut self, apps: fn() -> Vec<App>) -> Self {
+        self.apps = apps;
+        self
     }
 
     /// Offer these actions in the `ui` menu.
@@ -183,11 +196,20 @@ pub fn resolve(
     states
 }
 
-/// Whether `sub` is a command of a detectable plugin, i.e. worth probing for.
-pub fn needs_probe(plugins: &[Plugin], sub: &str) -> bool {
-    plugins
-        .iter()
-        .any(|p| matches!(p.enable, Enable::Detect(_)) && p.command_names().contains(&sub))
+/// Commands that never need app knowledge from vendor plugins.
+const OFFLINE: &[&str] = &["help", "commands", "completion", "plugins", "findtv"];
+
+/// Whether running `sub` is worth probing the TV for vendor plugins: it's one
+/// of their commands, or it may look up apps a vendor plugin provides (so
+/// `launch iplayer` works on a TV whose plugins haven't been checked yet).
+/// Probes are cached, so this costs one adb call per plugin per TV.
+pub fn needs_probe(plugins: &[Plugin], sub: &str, args: &[String]) -> bool {
+    let detect = || plugins.iter().filter(|p| matches!(p.enable, Enable::Detect(_)));
+    if detect().any(|p| p.command_names().contains(&sub)) {
+        return true;
+    }
+    let offline = OFFLINE.contains(&sub) || (sub == "apps" && args.iter().any(|a| a == "--all"));
+    !offline && detect().any(|p| !(p.apps)().is_empty())
 }
 
 #[cfg(test)]
@@ -221,6 +243,26 @@ mod tests {
 
     fn tv() -> Tv {
         Tv { ip: "0.0.0.0".into() }
+    }
+
+    fn some_apps() -> Vec<App> {
+        vec![crate::plugins::apps::app("x", "X", "com.x", crate::plugins::apps::Kind::Video)]
+    }
+
+    #[test]
+    fn probes_only_when_useful() {
+        fn vcmds() -> Vec<Command> {
+            vec![Command::new("v", "vendorcmd", "", "", |_, _| Ok(()))]
+        }
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let quiet = [Plugin::detect("v", "", yes, vcmds)];
+        assert!(needs_probe(&quiet, "vendorcmd", &[]));
+        assert!(!needs_probe(&quiet, "launch", &a(&["x"])));
+        let with_apps = [Plugin::detect("v", "", yes, vcmds).with_apps(some_apps)];
+        assert!(needs_probe(&with_apps, "launch", &a(&["x"])));
+        assert!(!needs_probe(&with_apps, "help", &[]));
+        assert!(!needs_probe(&with_apps, "apps", &a(&["--all"])));
+        assert!(needs_probe(&with_apps, "apps", &[]));
     }
 
     #[test]

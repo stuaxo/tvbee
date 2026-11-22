@@ -3,7 +3,7 @@
 //! that have one, the page their devtools socket reports.
 //!
 //! What an app is called and how to read a link out of its page lives with the
-//! app itself (`plugins::apps::APPS`); this module only combines the clues.
+//! app itself (`plugins::apps::all`); this module only combines the clues.
 
 use crate::devtools::{self, Progress};
 use crate::plugins::apps::{self, Kind};

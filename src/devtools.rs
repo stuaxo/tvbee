@@ -108,6 +108,17 @@ impl Conn {
             .collect())
     }
 
+    /// Run `expr` on the first page that answers; returns its string result.
+    pub fn eval(&self, expr: &str) -> Result<String> {
+        for (_, ws) in self.page_list()? {
+            let Some(ws) = ws else { continue };
+            if let Ok(v) = evaluate(self.fwd.port, &ws, expr) {
+                return Ok(v);
+            }
+        }
+        failed("devtools: no page answered")
+    }
+
     /// Move the page's video: by `delta` seconds, or to `fraction` of its length.
     /// Returns the new position.
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]

@@ -31,6 +31,20 @@ fn jointspace(c: &Ctx, args: &[String]) -> Result<()> {
     }
 }
 
+/// Philips' apps: the NetTV web apps (each a small wrapper package that opens
+/// org.droidtv.nettvbrowser), the browser itself, and the TV app.
+pub fn apps() -> Vec<crate::plugins::apps::App> {
+    use crate::plugins::apps::{app, known, Kind};
+    vec![
+        app("iplayer", "iPlayer", "org.droidtv.nettvapp4340/com.zeasn.app.linux.MainActivity", Kind::Video),
+        app("dailymotion", "Dailymotion", "org.droidtv.nettvapp1984/com.zeasn.app.linux.MainActivity", Kind::Video),
+        app("arte", "Arte", "org.droidtv.nettvapp1814/com.zeasn.app.linux.MainActivity", Kind::Video),
+        // the NetTV web apps (iPlayer, Arte, ...) all run inside this browser
+        known("a NetTV app", "org.droidtv.nettvbrowser", Kind::Video),
+        app("livetv", "live TV", "org.droidtv.zapster", Kind::LiveTv),
+    ]
+}
+
 pub fn commands() -> Vec<Command> {
     vec![Command::new(CAT, "jointspace", "[/6/<path>]", "GET a JointSpace path over plain HTTP", jointspace).long(
         "Defaults to /6/system (model, API version, feature list). Only unauthenticated\nroutes work; recordings and most others need digest-auth pairing on :1926.",
