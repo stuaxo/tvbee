@@ -412,11 +412,35 @@ fn load_guide(tv: &Tv) -> Result<Guide> {
 pub enum GuideTab {
     All,
     Favourites,
+    Radio,
 }
 
 impl GuideTab {
-    pub fn other(self) -> GuideTab {
-        if self == GuideTab::All { GuideTab::Favourites } else { GuideTab::All }
+    pub const ALL: [GuideTab; 3] = [GuideTab::All, GuideTab::Favourites, GuideTab::Radio];
+
+    /// The tab after this one (Tab cycles through them).
+    pub fn next(self) -> GuideTab {
+        match self {
+            GuideTab::All => GuideTab::Favourites,
+            GuideTab::Favourites => GuideTab::Radio,
+            GuideTab::Radio => GuideTab::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GuideTab::All => "All channels",
+            GuideTab::Favourites => "Favourites",
+            GuideTab::Radio => "Radio",
+        }
+    }
+
+    pub fn holds(self, ch: &crate::provider::Channel) -> bool {
+        match self {
+            GuideTab::All => true,
+            GuideTab::Favourites => ch.favourite,
+            GuideTab::Radio => ch.radio,
+        }
     }
 }
 
@@ -437,7 +461,7 @@ pub fn guide_matches(r: &GuideRow, filter: &str, t: i64) -> bool {
 
 /// The rows a tab shows with this filter.
 pub fn guide_shown<'a>(rows: &'a [GuideRow], tab: GuideTab, filter: &str, t: i64) -> Vec<&'a GuideRow> {
-    rows.iter().filter(|r| (tab == GuideTab::All || r.channel.favourite) && guide_matches(r, filter, t)).collect()
+    rows.iter().filter(|r| tab.holds(&r.channel) && guide_matches(r, filter, t)).collect()
 }
 
 /// Where a movement key takes the highlight among `ids` (shown channel ids),
@@ -1571,7 +1595,7 @@ impl App {
                 self.toggle_favourite(at, actions);
                 return;
             }
-            KeyCode::Tab => tab = tab.other(),
+            KeyCode::Tab => tab = tab.next(),
             KeyCode::Right => self.guide_later = (self.guide_later + 1).min(GUIDE_AHEAD / GUIDE_STEP),
             KeyCode::Left => self.guide_later = self.guide_later.saturating_sub(1).max(0),
             KeyCode::Backspace => {
@@ -2158,9 +2182,9 @@ impl App {
                             if s.chars().count() <= w { format!("{s:<w$}") } else { format!("{}…", s.chars().take(w.saturating_sub(1)).collect::<String>()) }
                         };
                         // tabs, with counts
-                        for t in [GuideTab::All, GuideTab::Favourites] {
+                        for t in GuideTab::ALL {
                             let n = guide_shown(&g.rows, t, "", 0).len();
-                            let name = if t == GuideTab::All { "All channels" } else { "Favourites" };
+                            let name = t.label();
                             tabs.push((t, format!(" {name} ({n}) ")));
                         }
                         text.push(Line::from(
@@ -2202,6 +2226,7 @@ impl App {
                         if shown.is_empty() {
                             let why = match (tab, self.prompt.is_empty()) {
                                 (GuideTab::Favourites, true) => "no favourites yet: add channels to a favourites list on the TV".to_string(),
+                                (GuideTab::Radio, true) => "no radio stations in the TV's channel list".to_string(),
                                 _ => format!("nothing matches \"{}\"", self.prompt),
                             };
                             text.push(Line::from(why).italic());
@@ -2214,7 +2239,9 @@ impl App {
                             let star = if r.channel.favourite { "★" } else { "☆" };
                             // not on the TV yet: tvbee will send it when it can
                             let wait = if g.pending.contains_key(&r.channel.id) { " ·" } else { "" };
-                            let name = format!("{star} {}{}{wait}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
+                            // "(radio)" tells them apart in the other tabs; not needed in Radio
+                            let radio = if r.channel.radio && tab != GuideTab::Radio { " (radio)" } else { "" };
+                            let name = format!("{star} {}{radio}{wait}", r.channel.label());
                             let mut spans = vec![Span::raw(format!("{mark}{}  ", fit(&name, ch_w + 1)))];
                             // times and edges dimmed, so the titles stand out (not on the highlighted row)
                             // on the highlighted row, the programme the details are about is marked
@@ -2597,7 +2624,7 @@ const HELP: &str = " everywhere
    i        system info      a      launch an app (space there: front / restart / close)
    /        search the app in front (tab picks another app)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
-            or earlier, tab favourites, shift+tab programme details, ⏎ watch,
+            or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
             clicking the channel line opens it too
    . o      open a link (YouTube, Netflix, media files)
@@ -2843,19 +2870,23 @@ mod tests {
             row(158, "2", "BBC TWO", "Race Across the World", false),
             row(156, "4", "Channel 4", "50 First Dates", false),
             row(143, "18", "More 4", "Come Dine with Me", true),
+            GuideRow { channel: crate::provider::Channel { radio: true, ..row(12, "722", "BBC Essex", "Dotun Adebayo", false).channel }, events: Vec::new() },
         ];
         let ids = |tab, q| guide_shown(&rows, tab, q, 0).iter().map(|r| r.channel.id).collect::<Vec<_>>();
-        assert_eq!(ids(GuideTab::All, ""), [159, 158, 156, 143]);
+        assert_eq!(ids(GuideTab::All, ""), [159, 158, 156, 143, 12]);
+        assert_eq!(ids(GuideTab::Radio, ""), [12]);
+        assert_eq!(ids(GuideTab::Radio, "essex"), [12]);
+        assert_eq!((GuideTab::All.next(), GuideTab::Radio.next()), (GuideTab::Favourites, GuideTab::All));
         assert_eq!(ids(GuideTab::Favourites, ""), [159, 143]);
-        assert_eq!(ids(GuideTab::All, "bbc"), [159, 158]);
+        assert_eq!(ids(GuideTab::All, "bbc"), [159, 158, 12]);
         assert_eq!(ids(GuideTab::All, "1"), [159, 143]); // number starts with 1
         assert_eq!(ids(GuideTab::All, "dine"), [143]); // what's on
         assert_eq!(ids(GuideTab::All, "bbc race"), [158]); // every word
         assert_eq!(ids(GuideTab::Favourites, "two"), Vec::<u32>::new());
         let all = ids(GuideTab::All, "");
         assert_eq!(guide_move(&all, 158, KeyCode::Down), 156);
-        assert_eq!(guide_move(&all, 159, KeyCode::Up), 143);
-        assert_eq!(guide_move(&all, 159, KeyCode::End), 143);
+        assert_eq!(guide_move(&all, 159, KeyCode::Up), 12);
+        assert_eq!(guide_move(&all, 159, KeyCode::End), 12);
         assert_eq!(guide_move(&[159, 143], 158, KeyCode::Char('x')), 159); // filtered away: first
         assert_eq!(guide_move(&[], 158, KeyCode::Down), 158);
         // later in the day: what's on then, and after it
