@@ -6,6 +6,34 @@ Command-line remote for Android TV over ADB. So far it has only been tested
 on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
 (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
 
+## Install
+
+Download from the [releases page](https://github.com/stuaxo/tvbee/releases):
+
+- **Debian / Ubuntu**: `sudo apt install ./tvbee_<version>-1_amd64.deb`, which
+  also pulls in `adb` (and suggests `scrcpy` for `tvbee mirror`).
+- **Other Linux**: unpack `tvbee-<version>-x86_64-unknown-linux-gnu.tar.gz` and
+  put `tvbee` on your PATH; install `adb` from your distribution.
+- **Windows**: unzip `tvbee-<version>-x86_64-pc-windows-msvc.zip`, and install
+  Google's [platform-tools](https://developer.android.com/tools/releases/platform-tools)
+  so that `adb.exe` is on your PATH.
+
+The release builds include the full-screen remote (`tvbee ui`). From source:
+
+    cargo install --git https://github.com/stuaxo/tvbee              # plain
+    cargo install --git https://github.com/stuaxo/tvbee --features ui
+
+The plain build has no dependencies and builds with Debian 13's packaged Rust
+(`apt install cargo`); `--features ui` needs Rust 1.88 or newer.
+
+On the TV, turn on network debugging (Developer options), then point tvbee at
+it with `TV_IP` (see below) and accept the prompt on the TV the first time.
+
+On Windows a few things are more limited: `status --watch` and `nowplaying
+--watch` need a Unix terminal (use `tvbee ui` instead), `logs <pattern>`
+matches plain text rather than a regex unless `grep` is installed, and `time`
+compares the clocks without checking the time zone.
+
 ## Compatibility
 
 Most commands use plain Android TV / ADB features and should work on any
@@ -149,3 +177,7 @@ crates beyond std.
 - `status` info line for the NetTV webapps (iPlayer, Dailymotion, Arte): they all
   run inside `org.droidtv.nettvbrowser`, so telling them apart (and finding a
   title or link) still needs probing while one is playing.
+
+## Licence
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).

@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # the main target: build, lint and test both feature sets
+  linux:
+    name: Linux (${{ matrix.features || 'default' }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["", "ui"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --features "${{ matrix.features }}" -- -D warnings
+      - run: cargo test --features "${{ matrix.features }}"
+
+  # build with Debian's own packaged Rust (no rustup), as someone building
+  # from source on Debian 13 would; the default build has no dependencies
+  debian:
+    name: Debian 13, packaged Rust
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+      - run: apt-get update && apt-get install -y --no-install-recommends cargo
+      - run: cargo --version && cargo build --locked && cargo test --locked
+
+  # the oldest Rust we claim to support (Cargo.toml rust-version)
+  msrv:
+    name: Minimum Rust (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked
+
+  windows:
+    name: Windows (${{ matrix.features || 'default' }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["", "ui"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --features "${{ matrix.features }}" -- -D warnings
+      - run: cargo test --features "${{ matrix.features }}"
