@@ -48,6 +48,14 @@ pub enum Action {
     MenuText(usize, String),
     /// Start an app: an alias, package or package/activity.
     Launch(String),
+    /// Bring a running app's task to the front.
+    Front(String),
+    /// Force-stop an app (by package).
+    Close(String),
+    /// Force-stop, then start fresh.
+    Restart { pkg: String, target: String },
+    /// Find out which apps are running (for the launcher).
+    CheckRunning,
     /// Search in an app; `keys` means by typing into it (no search intent).
     Search { pkg: String, query: String, keys: bool },
     Refresh,
@@ -185,6 +193,8 @@ enum Msg {
     Apps(Vec<Entry>),
     /// The apps with a proper search (fetched once).
     Searchable(Vec<search::Searchable>),
+    /// The packages with a running process.
+    Running(std::collections::BTreeSet<String>),
 }
 
 struct Worker {
@@ -210,6 +220,13 @@ impl Worker {
             self.conn = devtools::Conn::open(&self.tv, pkg);
         }
         self.conn.as_ref()
+    }
+
+    /// Tell the ui which apps are running.
+    fn send_running(&self, tx: &Sender<Msg>) {
+        if let Ok(ps) = self.tv.shell(&["ps", "-A", "-o", "NAME"]) {
+            let _ = tx.send(Msg::Running(apps::running(&ps)));
+        }
     }
 
     fn stopping(&self) -> bool {
@@ -338,9 +355,27 @@ impl Worker {
             },
             Action::Launch(target) => {
                 apps::start(&self.tv, &target)?;
-                let pkg = apps::pkg_of(&target);
-                let name = apps::by_package(pkg).map_or(pkg, |a| a.name);
-                format!("launched {name}")
+                self.send_running(tx);
+                format!("launched {}", app_name(apps::pkg_of(&target)))
+            }
+            Action::Front(target) => {
+                apps::bring_to_front(&self.tv, &target)?;
+                format!("brought {} to the front", app_name(apps::pkg_of(&target)))
+            }
+            Action::Close(pkg) => {
+                self.tv.shell(&["am", "force-stop", &pkg])?;
+                self.send_running(tx);
+                format!("closed {}", app_name(&pkg))
+            }
+            Action::Restart { pkg, target } => {
+                self.tv.shell(&["am", "force-stop", &pkg])?;
+                apps::start(&self.tv, &target)?;
+                self.send_running(tx);
+                format!("restarted {}", app_name(&pkg))
+            }
+            Action::CheckRunning => {
+                self.send_running(tx);
+                String::new()
             }
             Action::Search { pkg, query, keys: true } => search::keys_search(&self.tv, &pkg, &query, false)?,
             Action::Search { pkg, query, keys: false } => {
@@ -400,6 +435,7 @@ impl Worker {
                     Batch::One(a) => self.act(a, tx),
                 };
                 let msg = match result {
+                    Ok(note) if note.is_empty() => continue,
                     Ok(note) => Msg::Note(note),
                     Err(e) => Msg::Failed(e.to_string()),
                 };
@@ -424,7 +460,9 @@ impl Worker {
             {
                 apps_sent = true;
                 self.guesses = apps::guesses(&self.tv);
-                let rows = launcher_entries(&apps::installed_aliases(&pm), &self.guesses);
+                let default_home = apps::default_home(&self.tv).ok().flatten();
+                let default_pkg = default_home.as_deref().map(|c| c.split('/').next().unwrap_or(c));
+                let rows = launcher_entries(&apps::installed_aliases(&pm), &self.guesses, default_pkg);
                 if tx.send(Msg::Apps(rows)).is_err() {
                     return;
                 }
@@ -460,6 +498,8 @@ struct App {
     apps_tab: AppTab,
     /// What has been typed into the open prompt.
     prompt: String,
+    /// Packages with a running process (for the launcher).
+    running: std::collections::BTreeSet<String>,
     /// Apps with a proper search; None until the worker has looked.
     searchable: Option<Vec<search::Searchable>>,
     /// The search box's app choices, made when it opens.
@@ -485,6 +525,59 @@ pub enum Overlay {
     Prompt(usize),
     /// Typing a search; N picks the app from `App::search_targets`.
     Search(usize),
+    /// What to do with launcher row `sel` of `tab`; `at` is the highlighted choice.
+    AppActions { tab: AppTab, sel: usize, at: usize },
+}
+
+/// Something the launcher's actions pop-up offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppChoice {
+    Open,
+    Front,
+    Restart,
+    Close,
+    Search,
+    Cancel,
+}
+
+impl AppChoice {
+    pub fn label(self) -> &'static str {
+        match self {
+            AppChoice::Open => "open",
+            AppChoice::Front => "bring to front",
+            AppChoice::Restart => "restart (close, then start fresh)",
+            AppChoice::Close => "close (force-stop)",
+            AppChoice::Search => "search in it",
+            AppChoice::Cancel => "cancel",
+        }
+    }
+}
+
+/// The choices for an app: running ones can be brought forward, closed or
+/// restarted; "home" can't be closed.
+pub fn app_choices(e: &Entry, running: bool) -> Vec<AppChoice> {
+    let home = e.target == "home";
+    let mut v = vec![if running { AppChoice::Front } else { AppChoice::Open }];
+    if running && !home {
+        v.extend([AppChoice::Restart, AppChoice::Close]);
+    }
+    if !home {
+        v.push(AppChoice::Search);
+    }
+    v.push(AppChoice::Cancel);
+    v
+}
+
+/// What a choice does: an action to run, or the search box (None, true).
+pub fn choice_action(c: AppChoice, e: &Entry) -> (Option<Action>, bool) {
+    match c {
+        AppChoice::Open => (Some(Action::Launch(e.target.clone())), false),
+        AppChoice::Front => (Some(Action::Front(e.target.clone())), false),
+        AppChoice::Restart => (Some(Action::Restart { pkg: e.package.clone(), target: e.target.clone() }), false),
+        AppChoice::Close => (Some(Action::Close(e.package.clone())), false),
+        AppChoice::Search => (None, true),
+        AppChoice::Cancel => (None, false),
+    }
 }
 
 /// An app the search box can search in, and how.
@@ -575,40 +668,76 @@ pub struct Entry {
     /// What to pass to `apps::start`.
     pub target: String,
     pub package: String,
-    /// For apps without an alias: what kind they look like ("player").
+    /// What kind of app it is, shown beside apps without an alias ("player").
     pub tag: Option<&'static str>,
+    pub tab: AppTab,
+    /// The heading it's listed under in the Other tab.
+    pub section: &'static str,
 }
 
-/// The aliased apps first, then other TV-launcher apps with their guessed kind.
-pub fn launcher_entries(known: &[&'static apps::App], guessed: &[apps::Guess]) -> Vec<Entry> {
-    let mut rows: Vec<Entry> = known
-        .iter()
-        .map(|a| Entry {
-            name: list_name(a.name),
+/// A package's friendly name, for the status line.
+pub fn app_name(pkg: &str) -> String {
+    apps::by_package(pkg).map_or_else(|| pkg.to_string(), |a| list_name(a.name))
+}
+
+/// Other-tab headings, in the order they're shown.
+pub const SECTIONS: &[&str] = &["Other home apps", "Video & music", "Players", "Live TV", "Stores", "Other apps"];
+
+fn section_of(kind: apps::Kind) -> &'static str {
+    match kind {
+        apps::Kind::Launcher => SECTIONS[0],
+        apps::Kind::Video | apps::Kind::Music => SECTIONS[1],
+        apps::Kind::Player => SECTIONS[2],
+        apps::Kind::LiveTv => SECTIONS[3],
+        apps::Kind::Store => SECTIONS[4],
+        apps::Kind::Other => SECTIONS[5],
+    }
+}
+
+/// The launcher's rows. Apps tab: the aliased apps, `home` standing for the
+/// default home app. Other tab: home apps that aren't the default, then the
+/// rest of the TV-launcher apps, by section.
+pub fn launcher_entries(known: &[&'static apps::App], guessed: &[apps::Guess], default_home: Option<&str>) -> Vec<Entry> {
+    let is_default = |pkg: &str| default_home == Some(pkg);
+    let mut rows: Vec<Entry> = Vec::new();
+    let mut others: Vec<Entry> = Vec::new();
+    for a in known {
+        let pkg = a.package();
+        let other_home = a.kind == apps::Kind::Launcher && a.target != "@home";
+        if other_home && is_default(pkg) {
+            // that's what "home" opens
+            continue;
+        }
+        let e = Entry {
+            // "the home screen" says nothing about which one; the package does
+            name: if other_home { pkg.to_string() } else { list_name(a.name) },
             alias: a.alias,
             target: a.alias.unwrap_or(a.target).to_string(),
-            package: a.package().to_string(),
+            package: pkg.to_string(),
             tag: None,
-        })
-        .collect();
-    let mut others: Vec<Entry> = guessed
-        .iter()
-        .filter(|g| !rows.iter().any(|r| r.package == g.package))
-        .filter_map(|g| {
-            let component = g.component.clone()?;
-            let table = apps::by_package(&g.package);
-            // generic table names ("the home screen", "a NetTV app") don't
-            // say which app this is; the package does
-            let name = match table {
-                Some(a) if !a.name.starts_with("a ") && !a.name.starts_with("the ") => list_name(a.name),
-                _ => g.package.clone(),
-            };
-            let kind = table.map_or(g.kind, |a| a.kind);
-            let tag = (kind != apps::Kind::Other).then(|| kind.as_str());
-            Some(Entry { name, alias: None, target: component, package: g.package.clone(), tag })
-        })
-        .collect();
-    others.sort_by_key(|e| e.name.to_lowercase());
+            tab: if other_home { AppTab::Other } else { AppTab::Known },
+            section: section_of(a.kind),
+        };
+        if other_home { others.push(e) } else { rows.push(e) }
+    }
+    for g in guessed {
+        if is_default(&g.package) || rows.iter().chain(&others).any(|r| r.package == g.package) {
+            continue;
+        }
+        let Some(component) = g.component.clone() else { continue };
+        let table = apps::by_package(&g.package);
+        // generic table names ("the home screen", "a NetTV app") don't say
+        // which app this is; the package does
+        let name = match table {
+            Some(a) if !a.name.starts_with("a ") && !a.name.starts_with("the ") => list_name(a.name),
+            _ => g.package.clone(),
+        };
+        let kind = table.map_or(g.kind, |a| a.kind);
+        let tag = (kind != apps::Kind::Other).then(|| kind.as_str());
+        others.push(Entry { name, alias: None, target: component, package: g.package.clone(), tag, tab: AppTab::Other, section: section_of(kind) });
+    }
+    let order = |e: &Entry| SECTIONS.iter().position(|s| *s == e.section).unwrap_or(SECTIONS.len());
+    others.sort_by_key(|e| (order(e), e.name.to_lowercase()));
     rows.extend(others);
     rows
 }
@@ -627,8 +756,21 @@ impl AppTab {
     }
 
     pub fn holds(self, e: &Entry) -> bool {
-        (self == AppTab::Known) == e.alias.is_some()
+        e.tab == self
     }
+}
+
+/// How many lines a tab draws: its entries, plus section headings on Other.
+pub fn tab_rows(all: &[Entry], tab: AppTab) -> usize {
+    let list = tab_list(all, tab);
+    let headings = if tab == AppTab::Other {
+        let mut s: Vec<&str> = list.iter().map(|e| e.section).collect();
+        s.dedup();
+        s.len()
+    } else {
+        0
+    };
+    list.len() + headings
 }
 
 /// The rows of one tab.
@@ -645,6 +787,7 @@ pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Over
     match code {
         KeyCode::Esc | KeyCode::Backspace => (Overlay::None, None),
         KeyCode::Tab | KeyCode::Left | KeyCode::Right => (Overlay::Apps { tab: tab.other(), sel: 0 }, None),
+        KeyCode::Char(' ') if n > 0 => (Overlay::AppActions { tab, sel, at: 0 }, None),
         KeyCode::Up if n > 0 => at(sel.checked_sub(1).unwrap_or(n - 1)),
         KeyCode::Down if n > 0 => at((sel + 1) % n),
         KeyCode::Enter => match list.get(sel) {
@@ -685,6 +828,7 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
         Overlay::Apps { tab, sel } => (Overlay::Apps { tab, sel }, None),
         Overlay::Prompt(i) => (Overlay::Prompt(i), None),
         Overlay::Search(i) => (Overlay::Search(i), None),
+        Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         Overlay::Confirm { item, yes } => match code {
             KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(Action::Menu(item))),
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { item, yes: !yes }, None),
@@ -717,6 +861,8 @@ pub enum Hit {
     /// Row N of the launcher's current tab.
     AppItem(usize),
     AppTab(AppTab),
+    /// Choice N in the launcher's actions pop-up.
+    AppChoice(usize),
     ConfirmYes,
     ConfirmNo,
     /// Inside a pop-up but on nothing in particular.
@@ -816,12 +962,43 @@ impl App {
             Msg::Failed(e) => self.error = Some(e),
             Msg::Apps(list) => self.apps = Some(list),
             Msg::Searchable(list) => self.searchable = Some(list),
+            Msg::Running(set) => self.running = set,
             Msg::Seeked(pos, at) => {
                 if let Some(p) = self.snap.as_mut().and_then(|s| s.activity.as_mut()).and_then(|a| a.progress.as_mut()) {
                     p.position = pos;
                     self.at = at;
                 }
             }
+        }
+    }
+
+    /// Carry out choice `at` of the actions pop-up for launcher row `sel`.
+    fn run_choice(&mut self, tab: AppTab, sel: usize, at: usize, actions: &Sender<Action>) {
+        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+        let Some(e) = rows.get(sel) else {
+            self.overlay = Overlay::None;
+            return;
+        };
+        let running = self.running.contains(&e.package);
+        let Some(choice) = app_choices(e, running).get(at).copied() else { return };
+        match choice_action(choice, e) {
+            (Some(a), _) => self.apply_overlay(Overlay::None, Some(a), actions),
+            (None, true) => self.open_search(Some(e.package.clone())),
+            // cancel: back to the list
+            (None, false) => self.overlay = Overlay::Apps { tab, sel },
+        }
+    }
+
+    /// Keys in the actions pop-up.
+    fn choice_key(&mut self, tab: AppTab, sel: usize, at: usize, code: KeyCode, actions: &Sender<Action>) {
+        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+        let n = rows.get(sel).map_or(1, |e| app_choices(e, self.running.contains(&e.package)).len());
+        match code {
+            KeyCode::Up => self.overlay = Overlay::AppActions { tab, sel, at: (at + n - 1) % n },
+            KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::AppActions { tab, sel, at: (at + 1) % n },
+            KeyCode::Enter | KeyCode::Char(' ') => self.run_choice(tab, sel, at, actions),
+            // anything else goes back to the list
+            _ => self.overlay = Overlay::Apps { tab, sel },
         }
     }
 
@@ -862,6 +1039,7 @@ impl App {
                 let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
                 let now = rows.iter().position(|a| Some(a.package.as_str()) == pkg);
                 self.overlay = Overlay::Apps { tab, sel: now.unwrap_or(0) };
+                let _ = actions.send(Action::CheckRunning);
             }
             Input::Do(a) => {
                 let _ = actions.send(a);
@@ -897,8 +1075,23 @@ impl App {
                 let _ = actions.send(Action::Search { pkg, query, keys });
             }
             (_, _, Some(Action::Launch(target))) => {
-                self.note = format!("launching {}...", apps::pkg_of(&target));
-                let _ = actions.send(Action::Launch(target));
+                // already running: resume it rather than start it again
+                let pkg = apps::pkg_of(&target).to_string();
+                if self.running.contains(&pkg) && target != "home" {
+                    self.note = format!("bringing {} to the front...", app_name(&pkg));
+                    let _ = actions.send(Action::Front(target));
+                } else {
+                    self.note = format!("launching {}...", app_name(&pkg));
+                    let _ = actions.send(Action::Launch(target));
+                }
+            }
+            (_, _, Some(a @ (Action::Front(_) | Action::Close(_) | Action::Restart { .. }))) => {
+                self.note = match &a {
+                    Action::Close(p) => format!("closing {}...", app_name(p)),
+                    Action::Restart { pkg, .. } => format!("restarting {}...", app_name(pkg)),
+                    _ => "bringing it to the front...".into(),
+                };
+                let _ = actions.send(a);
             }
             (Overlay::Confirm { .. }, Overlay::None, None) => self.note = "cancelled".into(),
             _ => {}
@@ -935,6 +1128,9 @@ impl App {
                 }
             }
             (Overlay::Apps { .. }, Some(Hit::Popup | Hit::AppTab(_))) => {}
+            (Overlay::AppActions { tab, sel, .. }, Some(Hit::AppChoice(i))) => self.run_choice(tab, sel, i, actions),
+            (Overlay::AppActions { .. }, Some(Hit::Popup)) => {}
+            (Overlay::AppActions { tab, sel, .. }, _) => self.overlay = Overlay::Apps { tab, sel },
             (Overlay::Prompt(_) | Overlay::Search(_), Some(Hit::Popup)) => {}
             // a click elsewhere closes the pop-up (cancelling a confirmation)
             (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_), _) => {
@@ -1279,29 +1475,38 @@ impl App {
                         })
                         .collect::<Vec<_>>(),
                 );
-                let mut rows: Vec<Line> = Vec::new();
+                // (line, the entry it shows); section headings show none
+                let mut rows: Vec<(Line, Option<usize>)> = Vec::new();
                 if self.apps.is_none() {
-                    rows.push(Line::from("looking for installed apps...").italic());
+                    rows.push((Line::from("looking for installed apps...").italic(), None));
                 } else if list.is_empty() {
-                    rows.push(Line::from("none on this TV").italic());
+                    rows.push((Line::from("none on this TV").italic(), None));
                 }
                 // wide enough for the other tab too, so switching doesn't resize the box
                 let wide = all.iter().map(|e| e.name.chars().count()).max().unwrap_or(0).min(40);
+                let mut section = "";
                 for (i, e) in list.iter().enumerate() {
+                    if tab == AppTab::Other && e.section != section {
+                        section = e.section;
+                        rows.push((Line::from(format!(" {section}")).bold(), None));
+                    }
                     let on = if Some(e.package.as_str()) == pkg.as_deref() { "  (on now)" } else { "" };
                     let extra = e.alias.or(e.tag).unwrap_or("");
+                    let dot = if self.running.contains(&e.package) && e.target != "home" { "●" } else { " " };
                     // fixed columns, so both tabs draw the same width
-                    let line = Line::from(format!("  {:<wide$}  {extra:<12}{on:<10}", e.name));
-                    rows.push(if i == sel { line.reversed() } else { line });
+                    let line = Line::from(format!(" {dot}{:<wide$}  {extra:<12}{on:<10}", e.name));
+                    rows.push((if i == sel { line.reversed() } else { line }, Some(i)));
                 }
                 // scroll so the highlighted row stays in view
                 let room = usize::from(f.area().height.saturating_sub(10)).max(3);
-                let start = sel.saturating_sub(room.saturating_sub(1)).min(rows.len().saturating_sub(room));
+                let at = rows.iter().position(|(_, i)| *i == Some(sel)).unwrap_or(0);
+                let start = at.saturating_sub(room.saturating_sub(1)).min(rows.len().saturating_sub(room));
                 let scrolls = rows.len() > room;
-                let mut shown: Vec<Line> = rows.into_iter().skip(start).take(room).collect();
-                let shown_n = if list.is_empty() { 0 } else { shown.len() };
+                let shown: Vec<(Line, Option<usize>)> = rows.into_iter().skip(start).take(room).collect();
+                let ids: Vec<Option<usize>> = shown.iter().map(|(_, i)| *i).collect();
+                let mut shown: Vec<Line> = shown.into_iter().map(|(l, _)| l).collect();
                 // pad to the taller tab, so switching doesn't move the box (or its tabs)
-                let tallest = [AppTab::Known, AppTab::Other].iter().map(|t| all.iter().filter(|e| t.holds(e)).count()).max().unwrap_or(0);
+                let tallest = [AppTab::Known, AppTab::Other].iter().map(|t| tab_rows(all, *t)).max().unwrap_or(0);
                 while shown.len() < tallest.min(room) {
                     shown.push(Line::default());
                 }
@@ -1309,8 +1514,8 @@ impl App {
                 text.extend(shown);
                 text.push(Line::default());
                 let more = if scrolls { "  (scrolls)" } else { "" };
-                text.push(Line::from(format!("↑/↓ choose  ⏎ launch  / search it  letter = jump  tab/←/→ switch{more}")).fg(Color::DarkGray));
-                text.push(Line::from("click a tab or an app   esc closes").fg(Color::DarkGray));
+                text.push(Line::from(format!("↑/↓ choose  ⏎ open (● running: to front)  space actions  / search{more}")).fg(Color::DarkGray));
+                text.push(Line::from("letter = jump  tab/←/→ switch  click / right-click  esc closes").fg(Color::DarkGray));
                 let r = popup(f, " launch an app ", text, Color::Green);
                 self.hits.push((r, Hit::Popup));
                 // tab labels on the first row
@@ -1321,12 +1526,34 @@ impl App {
                     x += w + 1;
                 }
                 // app rows start after the tabs and a blank line
-                {
-                    for row in 0..shown_n {
+                for (row, id) in ids.into_iter().enumerate() {
+                    if let Some(i) = id {
                         let y = r.y + 3 + u16::try_from(row).unwrap_or(0);
                         let width = r.width.saturating_sub(2);
-                        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width, height: 1 }, Hit::AppItem(start + row)));
+                        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width, height: 1 }, Hit::AppItem(i)));
                     }
+                }
+            }
+            Overlay::AppActions { tab, sel, at } => {
+                let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+                let Some(e) = rows.get(sel) else { return };
+                let running = self.running.contains(&e.package);
+                let choices = app_choices(e, running);
+                let mut text: Vec<Line> = vec![
+                    Line::from(format!("{}  {}", e.package, if running { "(running)" } else { "(not running)" })).fg(Color::DarkGray),
+                    Line::default(),
+                ];
+                for (i, c) in choices.iter().enumerate() {
+                    let line = Line::from(format!("  {}", c.label()));
+                    text.push(if i == at { line.reversed() } else { line });
+                }
+                text.push(Line::default());
+                text.push(Line::from("↑/↓ choose  ⏎ do it  esc back  or click").fg(Color::DarkGray));
+                let r = popup(f, &format!(" {} ", e.name), text, Color::Yellow);
+                self.hits.push((r, Hit::Popup));
+                for i in 0..choices.len() {
+                    let y = r.y + 3 + u16::try_from(i).unwrap_or(0);
+                    self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::AppChoice(i)));
                 }
             }
             Overlay::Search(at) => {
@@ -1453,7 +1680,7 @@ const HELP: &str = " everywhere
    0-9      jump to 0%-90%   + -    volume
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
-   i        system info      a      launch an app
+   i        system info      a      launch an app (space there: front / restart / close)
    /        search the app in front (tab picks another app)
    . o      open a link (YouTube, Netflix, media files)
    q Esc    quit
@@ -1517,7 +1744,9 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
         }
         match event::read()? {
             Event::Key(k) if k.kind != KeyEventKind::Release => {
-                if let Overlay::Search(at) = app.overlay {
+                if let Overlay::AppActions { tab, sel, at } = app.overlay {
+                    app.choice_key(tab, sel, at, k.code, actions);
+                } else if let Overlay::Search(at) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
                     let (next, action) = search_key(at, k.code, k.modifiers, &mut text, &app.search_targets);
                     app.prompt = text;
@@ -1552,6 +1781,11 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
                 MouseEventKind::Down(MouseButton::Left) => {
                     if app.click(m.column, m.row, actions) {
                         return Ok(());
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Right) => {
+                    if let (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) = (app.overlay, app.hit_at(m.column, m.row)) {
+                        app.overlay = Overlay::AppActions { tab, sel: i, at: 0 };
                     }
                 }
                 MouseEventKind::ScrollUp => app.scroll(true, actions),
@@ -1604,6 +1838,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         apps: None,
         apps_tab: AppTab::Known,
         prompt: String::new(),
+        running: std::collections::BTreeSet::new(),
         searchable: None,
         search_targets: Vec::new(),
     };
@@ -1638,7 +1873,9 @@ pub fn commands() -> Vec<Command> {
          \x20 up/down + -   volume       m      mute/unmute\n\
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
-         \x20 a  launcher: the installed apps tvbee has aliases for (see 'tvbee apps')\n\
+         \x20 a  launcher: the installed apps tvbee has aliases for (see 'tvbee apps'); ● marks\n\
+         \x20    running ones (Enter brings them to the front); Space or right-click opens\n\
+         \x20    actions: restart, close, search\n\
          \x20 /  search the app in front, or (in the launcher) the highlighted app\n\
          \x20 ?  all keys   q / Esc / Ctrl-C  quit\n\
          \n\
@@ -1831,7 +2068,7 @@ mod tests {
     }
 
     fn rows(pm: &str, guessed: &[apps::Guess]) -> Vec<Entry> {
-        launcher_entries(&apps::installed_aliases(pm), guessed)
+        launcher_entries(&apps::installed_aliases(pm), guessed, None)
     }
 
     #[test]
@@ -1868,6 +2105,43 @@ mod tests {
     }
 
     #[test]
+    fn app_actions() {
+        let all = launcher_entries(&apps::installed_aliases("package:org.videolan.vlc\n"), &[], None);
+        let home = &all[0];
+        let vlc = all.iter().find(|e| e.target == "vlc").unwrap();
+        assert_eq!(app_choices(home, true), vec![AppChoice::Front, AppChoice::Cancel]);
+        assert_eq!(app_choices(vlc, false), vec![AppChoice::Open, AppChoice::Search, AppChoice::Cancel]);
+        assert_eq!(
+            app_choices(vlc, true),
+            vec![AppChoice::Front, AppChoice::Restart, AppChoice::Close, AppChoice::Search, AppChoice::Cancel]
+        );
+        assert_eq!(choice_action(AppChoice::Close, vlc), (Some(Action::Close("org.videolan.vlc".into())), false));
+        assert_eq!(
+            choice_action(AppChoice::Restart, vlc),
+            (Some(Action::Restart { pkg: "org.videolan.vlc".into(), target: "vlc".into() }), false)
+        );
+        assert_eq!(choice_action(AppChoice::Search, vlc), (None, true));
+        // space on a row opens its actions
+        let list = tab_list(&all, AppTab::Known);
+        assert_eq!(apps_key(AppTab::Known, 1, KeyCode::Char(' '), &list), (Overlay::AppActions { tab: AppTab::Known, sel: 1, at: 0 }, None));
+    }
+
+    #[test]
+    fn non_default_home_apps_go_to_other() {
+        let pm = "package:com.spocky.projengmenu\npackage:com.google.android.tvlauncher\npackage:org.videolan.vlc\n";
+        let all = launcher_entries(&apps::installed_aliases(pm), &[], Some("com.spocky.projengmenu"));
+        let names = |tab| tab_list(&all, tab).iter().map(|e| e.name.clone()).collect::<Vec<_>>();
+        // "home" is Projectivy here, so it isn't listed again; the Google TV
+        // launcher is another home app
+        assert_eq!(names(AppTab::Known), vec!["Home screen", "VLC"]);
+        assert_eq!(names(AppTab::Other), vec!["com.google.android.tvlauncher"]);
+        assert_eq!(tab_list(&all, AppTab::Other)[0].section, "Other home apps");
+        // with no default, both are other home apps
+        let all = launcher_entries(&apps::installed_aliases(pm), &[], None);
+        assert_eq!(tab_list(&all, AppTab::Other).len(), 2);
+    }
+
+    #[test]
     fn launcher_lists_other_tv_apps() {
         let g = |p: &str, k, c: Option<&str>| apps::Guess { package: p.into(), kind: k, component: c.map(Into::into) };
         let guessed = vec![
@@ -1882,17 +2156,25 @@ mod tests {
             g("org.droidtv.nettvbrowser", apps::Kind::Other, Some("org.droidtv.nettvbrowser/.Main")),
         ];
         let all = rows("package:org.videolan.vlc\n", &guessed);
-        let shown = |tab| tab_list(&all, tab).iter().map(|e| (e.name.clone(), e.alias.or(e.tag))).collect::<Vec<_>>();
-        assert_eq!(shown(AppTab::Known), vec![("Home screen".to_string(), Some("home")), ("VLC".into(), Some("vlc"))]);
+        let shown = |tab| {
+            tab_list(&all, tab).iter().map(|e| (e.section, e.name.clone(), e.alias.or(e.tag))).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shown(AppTab::Known),
+            vec![("Other home apps", "Home screen".to_string(), Some("home")), ("Players", "VLC".into(), Some("vlc"))]
+        );
+        // by section, then name
         assert_eq!(
             shown(AppTab::Other),
             vec![
-                ("com.example.game".to_string(), None),
-                ("com.spocky.projengmenu".into(), Some("home")),
-                ("nextapp.fx".into(), Some("player")),
-                ("org.droidtv.nettvbrowser".into(), Some("video")),
+                ("Other home apps", "com.spocky.projengmenu".to_string(), Some("home")),
+                ("Video & music", "org.droidtv.nettvbrowser".into(), Some("video")),
+                ("Players", "nextapp.fx".into(), Some("player")),
+                ("Other apps", "com.example.game".into(), None),
             ]
         );
+        // 4 apps under 4 headings
+        assert_eq!(tab_rows(&all, AppTab::Other), 8);
         // other apps launch by their TV-launcher activity, and jump by name
         let other = tab_list(&all, AppTab::Other);
         assert_eq!(apps_key(AppTab::Other, 0, KeyCode::Char('n'), &other), (Overlay::Apps { tab: AppTab::Other, sel: 2 }, None));

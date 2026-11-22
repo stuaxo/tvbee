@@ -479,11 +479,18 @@ pub fn installed_aliases(pm_list: &str) -> Vec<&'static App> {
 
 fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(app) = args.first() else { return usage("foreground: missing app") };
-    let tv = &c.tv;
+    c.tv.connect()?;
+    print!("{}", bring_to_front(&c.tv, app)?);
+    Ok(())
+}
+
+/// Bring an app's existing task to the front (starting it if it isn't
+/// running); returns what the TV said. Doesn't print, so the ui can use it.
+pub fn bring_to_front(tv: &Tv, app: &str) -> Result<String> {
     let t = target(app);
-    tv.connect()?;
     if t == "@home" {
-        return tv.keyevent(3);
+        tv.keyevent(3)?;
+        return Ok(String::new());
     }
     let component = if t.contains('/') {
         t.to_string()
@@ -494,7 +501,23 @@ fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
         }
     };
     // REORDER_TO_FRONT: reuse the existing instance instead of recreating it
-    tv.shell_inherit(&["am", "start", "-f", "0x20000", "-n", &component])
+    let out = tv.shell(&["am", "start", "-f", "0x20000", "-n", &component])?;
+    if let Some(err) = out.lines().find(|l| l.starts_with("Error")) {
+        return failed(format!("foreground {app}: {}", err.trim()));
+    }
+    Ok(out)
+}
+
+/// The app packages with a running process, from `ps -A -o NAME` (an app's
+/// extra processes, `pkg:name`, count as the app).
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn running(ps: &str) -> std::collections::BTreeSet<String> {
+    ps.lines()
+        .skip(1)
+        .map(str::trim)
+        .filter(|n| n.contains('.') && !n.starts_with('[') && !n.starts_with('/'))
+        .map(|n| n.split(':').next().unwrap_or(n).to_string())
+        .collect()
 }
 
 /// Aliases (other than `home`) that point at `pkg`.
@@ -716,6 +739,15 @@ mod tests {
         assert_eq!(identify("org.videolan.vlc", &g), Some(("VLC".into(), Kind::Player)));
         assert_eq!(identify("nextapp.fx", &g), Some(("nextapp.fx".into(), Kind::Player)));
         assert_eq!(identify("com.nowhere", &g), None);
+    }
+
+    #[test]
+    fn reads_running_apps() {
+        let ps = "NAME\ninit\n[kthreadd]\n/system/bin/adbd\ncom.spocky.projengmenu\norg.droidtv.nettvbrowser:privileged_process0\ncom.netflix.ninja\n";
+        let r = running(ps);
+        assert!(r.contains("com.spocky.projengmenu") && r.contains("com.netflix.ninja"));
+        assert!(r.contains("org.droidtv.nettvbrowser"));
+        assert_eq!(r.len(), 3);
     }
 
     #[test]
