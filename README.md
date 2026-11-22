@@ -9,6 +9,11 @@ Command-line remote for Android TV over ADB. So far it has only been tested
 on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
 (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
 
+![tvbee ui: the system panel, launcher and menu, then searching YouTube and playing the video it finds](docs/tvbee-ui.gif)
+
+*`tvbee ui`: help, the system panel, the launcher (both tabs) and the menu,
+then searching YouTube for a video, playing it in remote mode, and seeking.*
+
 
 ## Dependencies:
 
