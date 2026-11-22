@@ -40,18 +40,56 @@ pub const PLACES: &[Place] = &[
 ];
 
 pub fn apps() -> Vec<crate::plugins::apps::App> {
-    use crate::plugins::apps::{app, App, Kind};
-    vec![App {
-        page_url: Some(watch_link),
-        // the TV app takes links, not the search intent
-        search_link: Some("https://www.youtube.com/results?search_query={q}"),
-        places: PLACES,
-        details: Some(details),
-        // each link into the running app stacks another drawing surface;
-        // a stale one can cover the video (you hear it but don't see it)
-        fresh_for_links: true,
-        ..app("youtube", "YouTube", PACKAGE, Kind::Video)
-    }]
+    use crate::plugins::apps::{app, Kind};
+    vec![app("youtube", "YouTube", PACKAGE, Kind::Video)]
+}
+
+/// The YouTube provider: what's playing (via the app's devtools page), its
+/// places, details via yt-dlp, and search by results link.
+pub struct YouTube;
+pub static YOUTUBE: YouTube = YouTube;
+
+impl crate::provider::Provider for YouTube {
+    fn id(&self) -> &'static str {
+        "youtube"
+    }
+    fn name(&self) -> &'static str {
+        "YouTube"
+    }
+    fn hosts(&self) -> &'static [&'static str] {
+        &[PACKAGE]
+    }
+    fn uses_devtools(&self) -> bool {
+        true
+    }
+    fn watch_link(&self, page: &str) -> Option<String> {
+        watch_link(page)
+    }
+    // the TV app takes links, not the search intent
+    fn search_link(&self) -> Option<&'static str> {
+        Some("https://www.youtube.com/results?search_query={q}")
+    }
+    // each link into the running app stacks another drawing surface; a
+    // stale one can cover the video (you hear it but don't see it)
+    fn fresh_for_links(&self) -> bool {
+        true
+    }
+    fn places(&self) -> &'static [Place] {
+        PLACES
+    }
+    fn details(&self) -> Option<&dyn crate::provider::Details> {
+        Some(self)
+    }
+}
+
+impl crate::provider::Details for YouTube {
+    fn details(&self, link: &str) -> Result<Details> {
+        details(link)
+    }
+}
+
+pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
+    vec![&YOUTUBE]
 }
 
 /// The video id in a watch link.

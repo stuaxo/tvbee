@@ -279,6 +279,15 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
         None => report(None, "yt-dlp", "not found (only needed for 'tvbee details' on YouTube videos)"),
     }
 
+    // curl (only for Philips' HTTPS API: jointspace pairing)
+    match tv::search_path("curl", env("PATH").as_deref()) {
+        Some(p) => {
+            let ver = first_line(&p, "--version").map_or_else(|| "version unknown".into(), |v| v.split_whitespace().take(2).collect::<Vec<_>>().join(" "));
+            report(Some(true), "curl", &format!("{} - {ver}", p.display()));
+        }
+        None => report(None, "curl", "not found (only needed for 'tvbee pair jointspace' on Philips TVs)"),
+    }
+
     // which TV, and where that setting came from
     let ip = c.tv.ip.clone();
     let from = match crate::dotenv::source_of("TV_IP") {
@@ -287,6 +296,12 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
         None => "the built-in default; set TV_IP in .env or ~/.config/tvbee/env (try 'tvbee findtv')".to_string(),
     };
     report(Some(true), "TV_IP", &format!("{ip} ({from})"));
+    for p in crate::pairing::all() {
+        match crate::pairing::load(p.id(), &ip) {
+            Some(_) => report(Some(true), p.id(), &format!("paired with {} ({})", p.name(), p.unlocks())),
+            None => report(None, p.id(), &format!("not paired: 'tvbee pair {}' for {}", p.id(), p.unlocks())),
+        }
+    }
 
     // can we reach it?
     let addr: Option<IpAddr> = ip.parse().ok().or_else(|| {

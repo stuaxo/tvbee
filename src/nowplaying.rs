@@ -94,7 +94,7 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
 /// The app's devtools hook, if it has one (only then is `pages` worth calling).
 #[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn has_devtools(pkg: &str) -> bool {
-    apps::by_package(pkg).is_some_and(|a| a.page_url.is_some())
+    crate::provider::for_package(pkg).is_some_and(|p| p.uses_devtools())
 }
 
 /// As [`activity`], with the devtools pages coming from `pages` (called only
@@ -105,13 +105,14 @@ pub fn activity_with(
     sessions: &[MediaInfo],
     pages: impl FnOnce() -> Vec<devtools::Page>,
 ) -> Option<Activity> {
-    let app = apps::by_package(pkg);
     let session = session_for(pkg, sessions);
     let (what, title) = describe(pkg, who.as_ref().map(|(n, k)| (n.as_str(), *k)), session)?;
     // the devtools round trip is only worth it while something is on
     let (mut url, mut progress) = (None, None);
     let on = session.filter(|s| s.playing() || s.paused());
-    if let (Some(link), Some(_)) = (app.and_then(|a| a.page_url), on) {
+    let provider = crate::provider::for_package(pkg).filter(|p| p.uses_devtools());
+    if let (Some(p), Some(_)) = (provider, on) {
+        let link = |u: &str| p.watch_link(u);
         let pages = pages();
         url = pages.iter().find_map(|p| link(&p.url));
         progress = pages.iter().find_map(|p| p.progress);

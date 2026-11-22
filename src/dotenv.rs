@@ -54,6 +54,13 @@ pub fn files(cwd: &Path) -> Vec<PathBuf> {
     std::iter::once(cwd.join(".env")).chain(config.map(|c| c.join("tvbee").join("env"))).collect()
 }
 
+/// tvbee's config folder (`~/.config/tvbee`, or the platform's equivalent),
+/// where the user-wide env file, debloat settings and pairings live.
+pub fn config_dir() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    files(&cwd).into_iter().nth(1)?.parent().map(PathBuf::from)
+}
+
 /// What to set: our keys from `files`, first file winning, skipping keys
 /// `is_set` says the real environment already has.
 pub fn settings(files: &[PathBuf], is_set: impl Fn(&str) -> bool) -> Vec<(String, String, PathBuf)> {

@@ -495,7 +495,7 @@ fn current(tv: &Tv) -> Result<(String, Option<&'static super::apps::App>, Option
     let window = tv.window_dump()?;
     let Some(pkg) = focus_package(&window) else { return failed("can't tell which app is in front") };
     let app = super::apps::by_package(&pkg);
-    let url = if app.is_some_and(|a| a.page_url.is_some()) {
+    let url = if nowplaying::has_devtools(&pkg) {
         let sessions = super::media::parse_media_sessions(&tv.shell(&["dumpsys", "media_session"]).unwrap_or_default());
         nowplaying::activity(tv, &pkg, &sessions).and_then(|a| a.url)
     } else {
@@ -512,9 +512,11 @@ fn details_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     };
     let (pkg, app, url) = current(&c.tv)?;
     let name = app.map_or(pkg.clone(), |a| super::apps::list_name(a.name));
-    let Some(hook) = app.and_then(|a| a.details) else { return failed(format!("details: tvbee has no details for {name}")) };
+    let Some(hook) = crate::provider::for_package(&pkg).and_then(|p| p.details()) else {
+        return failed(format!("details: tvbee has no details for {name}"));
+    };
     let Some(url) = url else { return failed(format!("details: nothing playing in {name} that tvbee can look up")) };
-    let d = hook(&url)?;
+    let d = hook.details(&url)?;
     println!("{:<10}{url}", "link:");
     for (k, v) in &d.fields {
         println!("{:<10}{v}", format!("{k}:"));
@@ -549,8 +551,8 @@ fn go(tv: &Tv, pkg: &str, to: &crate::more::Go) -> Result<String> {
         }
         crate::more::Go::Link(url) => {
             // the app's own links go to it; anything else goes wherever it belongs
-            let own = super::apps::by_package(pkg)
-                .is_some_and(|a| a.places.iter().any(|p| host(p.link) == host(url)) || a.search_link.is_some_and(|s| host(s) == host(url)));
+            let own = crate::provider::for_package(pkg)
+                .is_some_and(|p| p.places().iter().any(|pl| host(pl.link) == host(url)) || p.search_link().is_some_and(|s| host(s) == host(url)));
             if own {
                 let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(url), pkg);
                 super::apps::before_link(tv, pkg)?;
@@ -571,7 +573,11 @@ fn host(url: &str) -> &str {
 fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let tv = &c.tv;
     // `goto <app> ...` names an app; otherwise it's the app in front
-    let named = args.first().and_then(|a| super::apps::all().iter().find(|x| x.alias == Some(a.as_str()) && !x.places.is_empty()));
+    let named = args.first().and_then(|a| {
+        super::apps::all()
+            .iter()
+            .find(|x| x.alias == Some(a.as_str()) && crate::provider::for_package(x.package()).is_some_and(|p| !p.places().is_empty()))
+    });
     let (pkg, app, url, rest) = match named {
         Some(a) => (a.package().to_string(), Some(a), None, &args[1..]),
         None => {
@@ -580,18 +586,19 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
         }
     };
     let name = app.map_or(pkg.clone(), |a| super::apps::list_name(a.name));
-    let places = app.map_or(&[][..], |a| a.places);
+    let provider = crate::provider::for_package(&pkg);
+    let places = provider.map_or(&[][..], |p| p.places());
     // links from what's on (only for the app in front)
     let links = || -> Vec<crate::more::Link> {
-        match (app.and_then(|a| a.details), &url) {
-            (Some(hook), Some(u)) => hook(u).map(|d| d.links).unwrap_or_default(),
+        match (provider.and_then(|p| p.details()), &url) {
+            (Some(hook), Some(u)) => hook.details(u).map(|d| d.links).unwrap_or_default(),
             _ => Vec::new(),
         }
     };
     let words: Vec<&str> = rest.iter().map(String::as_str).collect();
     match words.as_slice() {
         [] => {
-            if places.is_empty() && app.and_then(|a| a.details).is_none() {
+            if places.is_empty() && provider.and_then(|p| p.details()).is_none() {
                 return failed(format!("goto: tvbee knows no places in {name}"));
             }
             println!("{name}:");

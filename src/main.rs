@@ -1,13 +1,17 @@
 mod devtools;
 mod dotenv;
+mod crypto;
 mod error;
 mod http;
+mod https;
 mod mdns;
 mod menu;
 mod more;
 mod nowplaying;
 mod plugin;
+mod pairing;
 mod plugins;
+mod provider;
 mod registry;
 mod tv;
 mod watch;
@@ -57,6 +61,8 @@ fn main() {
         .collect();
     // the enabled plugins' apps join the core list, before anything looks one up
     plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
+    provider::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.providers)()).collect());
+    pairing::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.pairings)()).collect());
     let menu: Vec<menu::MenuItem> = all
         .iter()
         .zip(&states)

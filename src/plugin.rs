@@ -30,6 +30,18 @@ pub struct Plugin {
     pub menu: fn() -> Vec<MenuItem>,
     /// Apps this plugin knows (added to the core list when it's enabled).
     pub apps: fn() -> Vec<App>,
+    /// Content sources this plugin provides (live TV, YouTube, ...).
+    pub providers: fn() -> Vec<&'static dyn crate::provider::Provider>,
+    /// Services on the TV this plugin can pair with (JointSpace, ...).
+    pub pairings: fn() -> Vec<&'static dyn crate::pairing::Pairing>,
+}
+
+fn no_pairings() -> Vec<&'static dyn crate::pairing::Pairing> {
+    Vec::new()
+}
+
+fn no_providers() -> Vec<&'static dyn crate::provider::Provider> {
+    Vec::new()
 }
 
 fn no_apps() -> Vec<App> {
@@ -38,7 +50,7 @@ fn no_apps() -> Vec<App> {
 
 impl Plugin {
     pub fn builtin(name: &'static str, desc: &'static str, commands: fn() -> Vec<Command>) -> Self {
-        Plugin { name, desc, enable: Enable::Always, commands, menu: menu::none, apps: no_apps }
+        Plugin { name, desc, enable: Enable::Always, commands, menu: menu::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
     }
 
     pub fn detect(
@@ -47,7 +59,19 @@ impl Plugin {
         detect: fn(&Tv) -> Result<bool>,
         commands: fn() -> Vec<Command>,
     ) -> Self {
-        Plugin { name, desc, enable: Enable::Detect(detect), commands, menu: menu::none, apps: no_apps }
+        Plugin { name, desc, enable: Enable::Detect(detect), commands, menu: menu::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
+    }
+
+    /// Register these providers while the plugin is enabled.
+    pub fn with_providers(mut self, providers: fn() -> Vec<&'static dyn crate::provider::Provider>) -> Self {
+        self.providers = providers;
+        self
+    }
+
+    /// Register these pairings while the plugin is enabled.
+    pub fn with_pairings(mut self, pairings: fn() -> Vec<&'static dyn crate::pairing::Pairing>) -> Self {
+        self.pairings = pairings;
+        self
     }
 
     /// Add these apps to the app list while the plugin is enabled.

@@ -77,6 +77,8 @@ A few examples:
     tvbee details                     # channel, chapters, description (YouTube, via yt-dlp)
     tvbee goto history                # a place in the app; 'tvbee goto' lists them
     tvbee goto chapter 3              # seek to a chapter of the video
+    tvbee guide                       # now/next on live TV (from the over-the-air guide)
+    tvbee guide 101                   # one channel's programmes today (by the TV's preset number)
     tvbee status --watch              # the same plus power, volume, memory, storage; live
     tvbee launch youtube
     tvbee home --set projectivy       # choose the default home app (see --list)
@@ -117,6 +119,12 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     mirror       show/control the screen on this PC with scrcpy (alias: scrcpy)
     screenshot   save a PNG of the screen
 
+[guide]
+    channels     channels you can watch, with what's on
+    guide        programme guide: now/next, or one channel's schedule
+    providers    content providers and what each can do
+    watch        switch live TV to a channel (not yet for over-the-air TV)
+
 [info]
     details      more about what's on: channel, chapters, description
     goto         go to a place in an app, or a link from what's on
@@ -146,6 +154,11 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     stop         media stop
     unmute       unmute (no-op if not muted)
     vol          change volume
+
+[pairing]
+    pair         pair tvbee with a service on the TV
+    pairings     services tvbee can pair with, and whether it has
+    unpair       forget a saved pairing
 
 [power]
     reboot       reboot the TV

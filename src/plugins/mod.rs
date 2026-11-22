@@ -1,6 +1,7 @@
 pub mod apps;
 pub mod debloat;
 pub mod diagnose;
+pub mod guide;
 pub mod display;
 pub mod info;
 pub mod input;
@@ -28,6 +29,8 @@ pub fn all() -> Vec<Plugin> {
         Plugin::builtin("apps", "launching and managing Android apps", apps::commands).with_menu(apps::menu),
         Plugin::builtin("debloat", "disabling unwanted system apps, reversibly", debloat::commands),
         Plugin::builtin("diagnose", "finding the TV and checking the setup", diagnose::commands),
+        Plugin::builtin("guide", "programme guides and content providers", guide::commands),
+        Plugin::builtin("pairing", "pairing tvbee with services on the TV", crate::pairing::commands),
         Plugin::builtin("display", "seeing the TV screen", display::commands).with_menu(display::menu),
         Plugin::builtin("info", "querying the TV's state", info::commands),
         Plugin::builtin("input", "remote-control keys, text, inputs and channels", input::commands).with_menu(input::menu),
@@ -40,9 +43,12 @@ pub fn all() -> Vec<Plugin> {
             philips::detect,
             philips::commands,
         )
-        .with_apps(philips::apps),
+        .with_apps(philips::apps)
+        .with_providers(philips::providers)
+        .with_pairings(philips::pairings),
         Plugin::detect("youtube", "the YouTube app: what's on, search, looking inside it", youtube::detect, youtube::commands)
             .with_apps(youtube::apps)
+            .with_providers(youtube::providers)
             .with_menu(youtube::menu),
         #[cfg(feature = "ui")]
         Plugin::builtin("ui", "interactive terminal remote (ratatui)", ui::commands),
