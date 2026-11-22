@@ -248,10 +248,52 @@ fn load_guide(tv: &Tv) -> Result<Guide> {
     Ok(Guide { provider: p.name(), rows, current })
 }
 
-/// The row whose channel number starts with the digits typed so far.
-pub fn guide_jump(rows: &[GuideRow], typed: &str) -> Option<usize> {
-    let num = |r: &GuideRow| r.channel.number.clone().unwrap_or_default();
-    rows.iter().position(|r| num(r) == typed).or_else(|| rows.iter().position(|r| num(r).starts_with(typed)))
+/// The guide pop-up's tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuideTab {
+    All,
+    Favourites,
+}
+
+impl GuideTab {
+    pub fn other(self) -> GuideTab {
+        if self == GuideTab::All { GuideTab::Favourites } else { GuideTab::All }
+    }
+}
+
+/// Whether a guide row matches the filter: every word is the start of the
+/// channel number or part of its name or what's on now/next (any case).
+pub fn guide_matches(r: &GuideRow, filter: &str) -> bool {
+    let num = r.channel.number.as_deref().unwrap_or("");
+    let text = [r.channel.name.as_deref(), r.now.as_ref().map(|e| e.title.as_str()), r.next.as_ref().map(|e| e.title.as_str())]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+    filter.to_lowercase().split_whitespace().all(|w| num.starts_with(w) || text.contains(w))
+}
+
+/// The rows a tab shows with this filter.
+pub fn guide_shown<'a>(rows: &'a [GuideRow], tab: GuideTab, filter: &str) -> Vec<&'a GuideRow> {
+    rows.iter().filter(|r| (tab == GuideTab::All || r.channel.favourite) && guide_matches(r, filter)).collect()
+}
+
+/// Where a movement key takes the highlight among `ids` (shown channel ids),
+/// from channel `at` (if it's not shown, the first one).
+pub fn guide_move(ids: &[u32], at: u32, code: KeyCode) -> u32 {
+    let n = ids.len();
+    let Some(i) = ids.iter().position(|&c| c == at) else { return ids.first().copied().unwrap_or(at) };
+    let to = match code {
+        KeyCode::Up => i.checked_sub(1).unwrap_or(n - 1),
+        KeyCode::Down => (i + 1) % n,
+        KeyCode::PageUp => i.saturating_sub(10),
+        KeyCode::PageDown => (i + 10).min(n - 1),
+        KeyCode::Home => 0,
+        KeyCode::End => n - 1,
+        _ => i,
+    };
+    ids[to]
 }
 
 struct Worker {
@@ -643,8 +685,9 @@ pub enum Overlay {
     Search(usize),
     /// What to do with launcher row `sel` of `tab`; `at` is the highlighted choice.
     AppActions { tab: AppTab, sel: usize, at: usize },
-    /// The live TV guide, with row `sel` highlighted.
-    Guide { sel: usize },
+    /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
+    /// the filter typed is `App::prompt`.
+    Guide { tab: GuideTab, at: u32 },
 }
 
 /// Something the launcher's actions pop-up offers.
@@ -948,7 +991,7 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
         Overlay::Search(i) => (Overlay::Search(i), None),
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
-        Overlay::Guide { sel } => (Overlay::Guide { sel }, None),
+        Overlay::Guide { tab, at } => (Overlay::Guide { tab, at }, None),
         Overlay::Confirm { item, yes } => match code {
             KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(Action::Menu(item))),
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { item, yes: !yes }, None),
@@ -983,8 +1026,11 @@ pub enum Hit {
     AppTab(AppTab),
     /// Choice N in the launcher's actions pop-up.
     AppChoice(usize),
-    /// Row N of the guide.
-    GuideRow(usize),
+    /// A channel (by id) in the guide.
+    GuideRow(u32),
+    GuideTab(GuideTab),
+    /// A field of what's on that opens something.
+    Open(nowplaying::Open),
     ConfirmYes,
     ConfirmNo,
     /// Inside a pop-up but on nothing in particular.
@@ -1081,7 +1127,8 @@ impl App {
                 }
                 // the latest snapshot is always kept; while an action
                 // settles it's only shown once it shows the action landed
-                if self.settling.as_ref().is_some_and(|st| st.landed(front_pkg(&s).as_deref(), s.activity.as_ref().map(|a| a.what.as_str()))) {
+                let headline = s.activity.as_ref().map(Activity::headline);
+                if self.settling.as_ref().is_some_and(|st| st.landed(front_pkg(&s).as_deref(), headline.as_deref())) {
                     self.settling = None;
                 }
                 (self.snap, self.at, self.error) = (Some(*s), at, None);
@@ -1096,10 +1143,10 @@ impl App {
             Msg::Searchable(list) => self.searchable = Some(list),
             Msg::Running(set) => self.running = set,
             Msg::Guide(g) => {
-                // start on the channel that's on
-                if let (Overlay::Guide { .. }, Ok(g)) = (self.overlay, &g) {
-                    let at = g.current.and_then(|c| g.rows.iter().position(|r| r.channel.id == c));
-                    self.overlay = Overlay::Guide { sel: at.unwrap_or(0) };
+                // nothing picked yet: start on the channel that's on
+                if let (Overlay::Guide { tab, at: 0 }, Ok(g)) = (self.overlay, &g) {
+                    let first = g.rows.first().map_or(0, |r| r.channel.id);
+                    self.overlay = Overlay::Guide { tab, at: g.current.unwrap_or(first) };
                 }
                 self.guide = Some(g);
             }
@@ -1150,7 +1197,7 @@ impl App {
             label,
             expect,
             before_pkg: snap.and_then(front_pkg),
-            before_what: snap.and_then(|s| s.activity.as_ref()).map(|a| a.what.clone()),
+            before_what: snap.and_then(|s| s.activity.as_ref()).map(Activity::headline),
             since: Instant::now(),
         });
     }
@@ -1163,43 +1210,67 @@ impl App {
         self.settling.as_ref().map(|s| s.label.clone())
     }
 
-    /// Keys in the guide pop-up: arrows, page up/down, home/end, digits to
-    /// jump to a channel number, Enter to watch, Esc/g/Backspace to close.
-    fn guide_key(&mut self, sel: usize, code: KeyCode, actions: &Sender<Action>) {
-        let n = self.guide.as_ref().and_then(|g| g.as_ref().ok()).map_or(0, |g| g.rows.len());
-        let at = |i: usize| Overlay::Guide { sel: i };
-        if !matches!(code, KeyCode::Char('0'..='9')) {
-            self.prompt.clear();
-        }
-        self.overlay = match code {
-            KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('g') | KeyCode::Char('q') => Overlay::None,
-            _ if n == 0 => at(0),
-            KeyCode::Up => at(sel.checked_sub(1).unwrap_or(n - 1)),
-            KeyCode::Down => at((sel + 1) % n),
-            KeyCode::PageUp => at(sel.saturating_sub(10)),
-            KeyCode::PageDown => at((sel + 10).min(n - 1)),
-            KeyCode::Home => at(0),
-            KeyCode::End => at(n - 1),
-            KeyCode::Char(d @ '0'..='9') => {
-                let rows = &self.guide.as_ref().and_then(|g| g.as_ref().ok()).map_or(&[][..], |g| &g.rows[..]);
-                self.prompt.push(d);
-                // no channel starts like that: start again from this digit
-                if guide_jump(rows, &self.prompt).is_none() {
-                    self.prompt = d.to_string();
-                }
-                at(guide_jump(rows, &self.prompt).unwrap_or(sel))
-            }
-            KeyCode::Enter => {
-                self.watch_row(sel, actions);
-                return;
-            }
-            _ => at(sel),
-        };
+    /// The guide's rows, once fetched.
+    fn guide_rows(&self) -> &[GuideRow] {
+        self.guide.as_ref().and_then(|g| g.as_ref().ok()).map_or(&[][..], |g| &g.rows[..])
     }
 
-    /// Switch to the channel on guide row `i` and close the guide.
-    fn watch_row(&mut self, i: usize, actions: &Sender<Action>) {
-        let ch = self.guide.as_ref().and_then(|g| g.as_ref().ok()).and_then(|g| g.rows.get(i)).map(|r| r.channel.clone());
+    /// Open the guide on `channel`, else the channel that's on. It's
+    /// fetched afresh each time (what's on moves on); the last copy shows
+    /// meanwhile.
+    fn open_guide(&mut self, channel: Option<u32>, actions: &Sender<Action>) {
+        if live_provider().is_none() {
+            self.note = "no live TV guide on this TV".into();
+            return;
+        }
+        let on_now = self.snap.as_ref().and_then(|s| s.activity.as_ref()).and_then(|a| a.field("channel")).and_then(|f| match f.open {
+            Some(nowplaying::Open::Guide { channel }) => channel,
+            None => None,
+        });
+        self.prompt.clear();
+        self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
+        let _ = actions.send(Action::LoadGuide);
+    }
+
+    /// Run what a clicked field opens.
+    fn open(&mut self, o: nowplaying::Open, actions: &Sender<Action>) {
+        match o {
+            nowplaying::Open::Guide { channel } => self.open_guide(channel, actions),
+        }
+    }
+
+    /// Keys in the guide: typing filters, arrows/page keys/home/end move,
+    /// Tab or ←/→ switch tabs, Enter watches, Esc closes.
+    fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Sender<Action>) {
+        let mut tab = tab;
+        match code {
+            KeyCode::Esc => {
+                self.overlay = Overlay::None;
+                return;
+            }
+            KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => {
+                self.overlay = Overlay::None;
+                return;
+            }
+            KeyCode::Enter => {
+                self.watch_channel(at, actions);
+                return;
+            }
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => tab = tab.other(),
+            KeyCode::Backspace => {
+                self.prompt.pop();
+            }
+            KeyCode::Char(c) => self.prompt.push(c),
+            _ => {}
+        }
+        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt).iter().map(|r| r.channel.id).collect();
+        // keep the highlight on its channel while it's shown; else the first
+        self.overlay = Overlay::Guide { tab, at: guide_move(&ids, at, code) };
+    }
+
+    /// Switch to channel `id` and close the guide.
+    fn watch_channel(&mut self, id: u32, actions: &Sender<Action>) {
+        let ch = self.guide_rows().iter().find(|r| r.channel.id == id).map(|r| r.channel.clone());
         self.overlay = Overlay::None;
         if let Some(ch) = ch {
             self.note = format!("switching to {}...", ch.label());
@@ -1231,14 +1302,7 @@ impl App {
             Input::ToggleHelp => self.overlay = Overlay::Help,
             Input::ToggleInfo => self.info = !self.info,
             Input::OpenSearch => self.open_search(None),
-            Input::OpenGuide if live_provider().is_none() => self.note = "no live TV guide on this TV".into(),
-            Input::OpenGuide => {
-                // fetched fresh each time: what's on moves on
-                self.guide = None;
-                self.prompt.clear();
-                self.overlay = Overlay::Guide { sel: 0 };
-                let _ = actions.send(Action::LoadGuide);
-            }
+            Input::OpenGuide => self.open_guide(None, actions),
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
                 let standby = self.snap.as_ref().is_some_and(|s| s.standby);
@@ -1347,7 +1411,9 @@ impl App {
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
             }
-            (Overlay::Guide { .. }, Some(Hit::GuideRow(i))) => self.watch_row(i, actions),
+            (Overlay::Guide { .. }, Some(Hit::GuideRow(id))) => self.watch_channel(id, actions),
+            (Overlay::Guide { at, .. }, Some(Hit::GuideTab(t))) => self.overlay = Overlay::Guide { tab: t, at },
+            (Overlay::None, Some(Hit::Open(o))) => self.open(o, actions),
             (Overlay::Guide { .. }, Some(Hit::Popup)) => {}
             // clicking outside closes it
             (Overlay::Guide { .. }, _) => self.overlay = Overlay::None,
@@ -1395,7 +1461,7 @@ impl App {
                 let (next, _) = apps_key(tab, sel, if up { KeyCode::Up } else { KeyCode::Down }, &rows);
                 self.overlay = next;
             }
-            Overlay::Guide { sel } => self.guide_key(sel, if up { KeyCode::Up } else { KeyCode::Down }, actions),
+            Overlay::Guide { tab, at } => self.guide_key(tab, at, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE, actions),
             Overlay::None => {
                 let _ = actions.send(Action::Volume(if up { 1 } else { -1 }));
             }
@@ -1488,6 +1554,13 @@ impl App {
                     }
                     Some(a) => {
                         lines.push((Line::from(vec![label("what"), Span::raw(a.what.clone()).bold()]), None));
+                        // fields that open something look like links
+                        let field = |f: &nowplaying::Field| {
+                            let v = Span::raw(f.value.clone());
+                            let v = if f.open.is_some() { v.fg(Color::Cyan).underlined() } else { v };
+                            (Line::from(vec![label(f.label), v]), f.open.map(Hit::Open))
+                        };
+                        lines.extend(a.fields.iter().filter(|f| f.place == nowplaying::Place::Top).map(field));
                         if let Some(t) = &a.title {
                             lines.push((Line::from(vec![label("title"), Span::raw(t.clone())]), None));
                         }
@@ -1514,9 +1587,7 @@ impl App {
                         if let Some(u) = &a.url {
                             lines.push((Line::from(vec![label("url"), Span::raw(u.clone()).underlined()]), None));
                         }
-                        if let Some(n) = &a.next {
-                            lines.push((Line::from(vec![label("next"), Span::raw(n.clone()).fg(Color::Gray)]), None));
-                        }
+                        lines.extend(a.fields.iter().filter(|f| f.place == nowplaying::Place::Bottom).map(field));
                     }
                     None => lines.push((Line::from("nothing playing that tvbee recognises").italic(), None)),
                 }
@@ -1691,59 +1762,105 @@ impl App {
                     }
                 }
             }
-            Overlay::Guide { sel } => {
+            Overlay::Guide { tab, at } => {
                 let area = f.area();
+                // the text, and the channel each line shows (for clicks)
                 let mut text: Vec<Line> = Vec::new();
-                let mut ids: Vec<Option<usize>> = Vec::new();
+                let mut ids: Vec<Option<u32>> = Vec::new();
+                let mut tabs: Vec<(GuideTab, String)> = Vec::new();
+                let total = usize::from(area.width.saturating_sub(8)).clamp(50, 140);
                 let title = match &self.guide {
                     None => {
                         text.push(Line::from("reading the guide (the first time takes a few seconds)...").italic());
                         " guide ".to_string()
                     }
                     Some(Err(e)) => {
-                        text.extend(textwrap(e, usize::from(area.width.saturating_sub(8)).max(20)).into_iter().map(|l| Line::from(l).fg(Color::Yellow)));
+                        text.extend(textwrap(e, total).into_iter().map(|l| Line::from(l).fg(Color::Yellow)));
                         " guide ".to_string()
                     }
                     Some(Ok(g)) => {
                         let off = crate::plugins::guide::utc_offset();
                         let hm = |e: &crate::provider::Event| format!("{} {}", crate::plugins::guide::hhmm(e.start, off), e.title);
-                        let total = usize::from(area.width.saturating_sub(8)).clamp(40, 140);
-                        let ch_w = 22;
-                        let now_w = (total - ch_w - 4) * 55 / 100;
-                        let next_w = total - ch_w - 4 - now_w;
                         let fit = |s: &str, w: usize| -> String {
                             if s.chars().count() <= w { format!("{s:<w$}") } else { format!("{}…", s.chars().take(w.saturating_sub(1)).collect::<String>()) }
                         };
-                        let head = format!(" {}  {}  {}", fit("channel", ch_w), fit("now", now_w), fit("next", next_w));
-                        text.push(Line::from(head).fg(Color::DarkGray));
-                        let room = usize::from(area.height.saturating_sub(9)).max(3);
-                        let start = sel.saturating_sub(room / 2).min(g.rows.len().saturating_sub(room));
-                        for (i, r) in g.rows.iter().enumerate().skip(start).take(room) {
+                        // tabs, with counts
+                        for t in [GuideTab::All, GuideTab::Favourites] {
+                            let n = guide_shown(&g.rows, t, "").len();
+                            let name = if t == GuideTab::All { "All channels" } else { "Favourites" };
+                            tabs.push((t, format!(" {name} ({n}) ")));
+                        }
+                        text.push(Line::from(
+                            tabs.iter()
+                                .flat_map(|(t, l)| {
+                                    let st = if *t == tab { Style::new().fg(Color::Black).bg(Color::Magenta).bold() } else { Style::new().fg(Color::Gray) };
+                                    [Span::styled(l.clone(), st), Span::raw(" ")]
+                                })
+                                .collect::<Vec<_>>(),
+                        ));
+                        ids.push(None);
+                        let filter = if self.prompt.is_empty() {
+                            Line::from("type to filter by number, name or programme").fg(Color::DarkGray)
+                        } else {
+                            Line::from(vec![Span::raw("filter: "), Span::raw(self.prompt.clone()).bold(), Span::raw("▏")])
+                        };
+                        text.push(filter);
+                        ids.push(None);
+                        let ch_w = 24;
+                        let now_w = (total - ch_w - 4) * 55 / 100;
+                        let next_w = total - ch_w - 4 - now_w;
+                        text.push(Line::from(format!("  {}  {}  {}", fit("channel", ch_w), fit("now", now_w), fit("next", next_w))).fg(Color::DarkGray));
+                        ids.push(None);
+                        let shown = guide_shown(&g.rows, tab, &self.prompt);
+                        let room = usize::from(area.height.saturating_sub(11)).max(3);
+                        if shown.is_empty() {
+                            let why = match (tab, self.prompt.is_empty()) {
+                                (GuideTab::Favourites, true) => "no favourites yet: add channels to a favourites list on the TV".to_string(),
+                                _ => format!("nothing matches \"{}\"", self.prompt),
+                            };
+                            text.push(Line::from(why).italic());
+                            ids.push(None);
+                        }
+                        let sel = shown.iter().position(|r| r.channel.id == at).unwrap_or(0);
+                        let start = sel.saturating_sub(room / 2).min(shown.len().saturating_sub(room));
+                        for (i, r) in shown.iter().enumerate().skip(start).take(room) {
                             let mark = if g.current == Some(r.channel.id) { "▶" } else { " " };
-                            let name = format!("{}{}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
+                            let star = if r.channel.favourite { "★" } else { "☆" };
+                            let name = format!("{star} {}{}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
                             let line = Line::from(format!(
                                 "{mark}{}  {}  {}",
-                                fit(&name, ch_w),
+                                fit(&name, ch_w + 1),
                                 fit(&r.now.as_ref().map(hm).unwrap_or_default(), now_w),
                                 fit(&r.next.as_ref().map(hm).unwrap_or_default(), next_w)
                             ));
-                            ids.push(Some(i));
                             text.push(if i == sel { line.reversed() } else { line });
+                            ids.push(Some(r.channel.id));
+                        }
+                        // keep the box the same height while filtering
+                        while text.len() < room + 3 {
+                            text.push(Line::default());
+                            ids.push(None);
                         }
                         text.push(Line::default());
-                        let more = if g.rows.len() > room { format!("  ({} of {})", sel + 1, g.rows.len()) } else { String::new() };
-                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  digits jump to a channel  ⏎/click watch  esc closes{more}")).fg(Color::DarkGray));
+                        let more = if shown.len() > room { format!("  ({} of {})", sel + 1, shown.len()) } else { String::new() };
+                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  tab/←/→ switch  ⏎/click watch  ▶ on now  ★ favourite  esc closes{more}")).fg(Color::DarkGray));
                         format!(" guide: {} ", g.provider)
                     }
                 };
                 let r = popup(f, &title, text, Color::Magenta);
                 self.hits.push((r, Hit::Popup));
-                // rows start under the heading
                 for (row, id) in ids.into_iter().enumerate() {
-                    if let Some(i) = id {
-                        let y = r.y + 2 + u16::try_from(row).unwrap_or(0);
-                        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::GuideRow(i)));
+                    if let Some(id) = id {
+                        let y = r.y + 1 + u16::try_from(row).unwrap_or(0);
+                        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::GuideRow(id)));
                     }
+                }
+                // tab labels on the first row
+                let mut x = r.x + 1;
+                for (t, l) in &tabs {
+                    let w = u16::try_from(l.chars().count()).unwrap_or(0);
+                    self.hits.push((ratatui::layout::Rect { x, y: r.y + 1, width: w, height: 1 }, Hit::GuideTab(*t)));
+                    x += w + 1;
                 }
             }
             Overlay::Apps { tab, sel } => {
@@ -1994,7 +2111,8 @@ const HELP: &str = " everywhere
    tab      switch mode      .      more (power, mirror, ...)
    i        system info      a      launch an app (space there: front / restart / close)
    /        search the app in front (tab picks another app)
-   g        live TV guide: now/next on every channel (⏎ watch, digits jump)
+   g        live TV guide: now/next on every channel (type to filter, ⏎ watch);
+            clicking the channel line opens it too
    . o      open a link (YouTube, Netflix, media files)
    q Esc    quit
 
@@ -2059,8 +2177,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
-                } else if let Overlay::Guide { sel } = app.overlay {
-                    app.guide_key(sel, k.code, actions);
+                } else if let Overlay::Guide { tab, at } = app.overlay {
+                    app.guide_key(tab, at, k.code, k.modifiers, actions);
                 } else if let Overlay::Search(at) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
                     let (next, action) = search_key(at, k.code, k.modifiers, &mut text, &app.search_targets);
@@ -2210,17 +2328,32 @@ pub fn commands() -> Vec<Command> {
 mod tests {
 
     #[test]
-    fn guide_jumps_by_number() {
-        let row = |n: &str| GuideRow {
-            channel: crate::provider::Channel { id: 1, number: Some(n.into()), name: None, radio: false },
-            now: None,
+    fn guide_filters_and_moves() {
+        let row = |id: u32, n: &str, name: &str, now: &str, fav: bool| GuideRow {
+            channel: crate::provider::Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: fav },
+            now: Some(crate::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None }),
             next: None,
         };
-        let rows = [row("1"), row("2"), row("10"), row("101"), row("700")];
-        assert_eq!(guide_jump(&rows, "1"), Some(0));
-        assert_eq!(guide_jump(&rows, "10"), Some(2));
-        assert_eq!(guide_jump(&rows, "7"), Some(4));
-        assert_eq!(guide_jump(&rows, "9"), None);
+        let rows = [
+            row(159, "1", "BBC ONE Lon", "Countryfile", true),
+            row(158, "2", "BBC TWO", "Race Across the World", false),
+            row(156, "4", "Channel 4", "50 First Dates", false),
+            row(143, "18", "More 4", "Come Dine with Me", true),
+        ];
+        let ids = |tab, q| guide_shown(&rows, tab, q).iter().map(|r| r.channel.id).collect::<Vec<_>>();
+        assert_eq!(ids(GuideTab::All, ""), [159, 158, 156, 143]);
+        assert_eq!(ids(GuideTab::Favourites, ""), [159, 143]);
+        assert_eq!(ids(GuideTab::All, "bbc"), [159, 158]);
+        assert_eq!(ids(GuideTab::All, "1"), [159, 143]); // number starts with 1
+        assert_eq!(ids(GuideTab::All, "dine"), [143]); // what's on
+        assert_eq!(ids(GuideTab::All, "bbc race"), [158]); // every word
+        assert_eq!(ids(GuideTab::Favourites, "two"), Vec::<u32>::new());
+        let all = ids(GuideTab::All, "");
+        assert_eq!(guide_move(&all, 158, KeyCode::Down), 156);
+        assert_eq!(guide_move(&all, 159, KeyCode::Up), 143);
+        assert_eq!(guide_move(&all, 159, KeyCode::End), 143);
+        assert_eq!(guide_move(&[159, 143], 158, KeyCode::Char('x')), 159); // filtered away: first
+        assert_eq!(guide_move(&[], 158, KeyCode::Down), 158);
         assert_eq!(textwrap("needs tvbee to be paired", 12), ["needs tvbee", "to be paired"]);
         assert_eq!(input_for(KeyCode::Char('g'), KeyModifiers::NONE, Mode::Player), Input::OpenGuide);
     }

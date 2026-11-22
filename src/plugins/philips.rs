@@ -62,14 +62,12 @@ fn https_get(tv: &Tv, saved: &crate::pairing::Saved, path: &str) -> Result<(u16,
 
 /// GET a path that needs pairing; `what` names it in the "pairing required"
 /// error ("the channel list").
-#[allow(dead_code)]
 pub fn js_get_paired(tv: &Tv, path: &str, what: &str) -> Result<(u16, String)> {
     let saved = crate::pairing::require(PAIRING, tv, what)?;
     https_get(tv, &saved, path)
 }
 
 /// POST to a path that needs pairing.
-#[allow(dead_code)]
 pub fn js_post(tv: &Tv, path: &str, body: &str, what: &str) -> Result<(u16, String)> {
     let saved = crate::pairing::require(PAIRING, tv, what)?;
     let Some(digest) = credentials(&saved) else { return Err(crate::pairing::required_error(PAIRING, what)) };
@@ -209,6 +207,12 @@ pub static FREEVIEW: Freeview = Freeview;
 const GUIDE_URI: &str = "content://org.droidtv.epgdvb/antenna/scheduletable";
 const GUIDE_COLUMNS: &str = "eventname:presetid:starttime:endtime:genre";
 
+/// Text from the TV without control characters (some guide titles are
+/// padded with NULs, which take no room on screen but count as characters).
+pub fn clean(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect::<String>().trim().to_string()
+}
+
 /// Rows of `content query --projection eventname:presetid:starttime:endtime:genre`:
 /// `Row: 0 eventname=..., presetid=12, starttime=..., endtime=..., genre=2`.
 /// Titles may contain ", ", so the other fields are found from the right.
@@ -226,7 +230,7 @@ pub fn parse_events(out: &str) -> Vec<crate::provider::Event> {
             }
             Some(crate::provider::Event {
                 channel: preset.parse().ok()?,
-                title: title.to_string(),
+                title: clean(title),
                 start: start.parse().ok()?,
                 end: end.parse().ok()?,
                 genre: genre.parse().ok(),
@@ -260,7 +264,7 @@ pub fn parse_cached_events(text: &str) -> Vec<crate::provider::Event> {
                 start: f.next()?.parse().ok()?,
                 end: f.next()?.parse().ok()?,
                 genre: f.next()?.parse().ok(),
-                title: f.next()?.to_string(),
+                title: clean(f.next()?),
             })
         })
         .collect()
@@ -325,8 +329,6 @@ pub fn now_next_of(events: &[crate::provider::Event], at: i64) -> Vec<crate::pro
     out
 }
 
-const LIVE_TV: &str = "org.droidtv.zapster";
-
 impl crate::provider::Provider for Freeview {
     fn id(&self) -> &'static str {
         "freeview"
@@ -372,8 +374,9 @@ pub fn parse_channel_list(json: &str) -> Vec<crate::provider::Channel> {
             Some(crate::provider::Channel {
                 id: crate::http::number_field(o, "ccid")? as u32,
                 number: crate::http::string_field(o, "preset"),
-                name: crate::http::string_field(o, "name"),
+                name: crate::http::string_field(o, "name").map(|n| clean(&n)),
                 radio: crate::http::string_field(o, "serviceType").is_some_and(|t| t.contains("radio") || t == "audio"),
+                favourite: false,
             })
         })
         .collect();
@@ -390,6 +393,7 @@ pub fn parse_current(json: &str) -> Option<crate::provider::Channel> {
         number: crate::http::string_field(ch, "preset"),
         name: crate::http::string_field(ch, "name"),
         radio: false,
+        favourite: false,
     })
 }
 
@@ -401,12 +405,48 @@ fn paired_ok(tv: &Tv, path: &str, what: &str) -> Result<String> {
     }
 }
 
+/// The user's favourite lists in a `/6/channeldb/tv` reply that have
+/// anything in them: the modifiable ones ("Favourites 1".."8") whose version
+/// isn't "0" (never edited).
+pub fn used_favourite_lists(json: &str) -> Vec<String> {
+    let Some(i) = json.find("\"favoriteLists\"") else { return Vec::new() };
+    let list = &json[i..];
+    let Some(open) = list.find('[') else { return Vec::new() };
+    crate::http::objects(&list[open..])
+        .into_iter()
+        .filter(|o| o.replace(' ', "").contains("\"modifiable\":true"))
+        .filter(|o| crate::http::string_field(o, "version").is_none_or(|v| v != "0"))
+        .filter_map(|o| crate::http::string_field(o, "id"))
+        .collect()
+}
+
+/// The ccids in a favourite list reply: `{"channels":[{"ccid":159,"preset":"1"},...]}`.
+pub fn favourite_ccids(json: &str) -> Vec<u32> {
+    let Some(i) = json.find("\"channels\"") else { return Vec::new() };
+    crate::http::objects(&json[i..]).into_iter().filter_map(|o| crate::http::number_field(o, "ccid")).map(|c| c as u32).collect()
+}
+
+/// Every channel in any of the user's favourite lists.
+fn favourites(tv: &Tv) -> Result<std::collections::BTreeSet<u32>> {
+    let mut out = std::collections::BTreeSet::new();
+    for id in used_favourite_lists(&paired_ok(tv, "/6/channeldb/tv", "the favourite lists")?) {
+        out.extend(favourite_ccids(&paired_ok(tv, &format!("/6/channeldb/tv/favoriteLists/{id}"), "a favourite list")?));
+    }
+    Ok(out)
+}
+
 impl crate::provider::Channels for Freeview {
-    /// From the TV's channel list (needs JointSpace pairing).
+    /// From the TV's channel list (needs JointSpace pairing), with the
+    /// favourites from its favourite lists marked.
     fn list(&self, cx: &crate::provider::Cx) -> Result<Vec<crate::provider::Channel>> {
-        let list = parse_channel_list(&paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?);
+        let mut list = parse_channel_list(&paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?);
         if list.is_empty() {
             return failed("the TV's channel list has no broadcast channels (tune them in the TV's settings)");
+        }
+        // favourites are a nicety: the list stands without them
+        let favs = favourites(cx.tv).unwrap_or_default();
+        for ch in &mut list {
+            ch.favourite = favs.contains(&ch.id);
         }
         Ok(list)
     }
@@ -416,22 +456,31 @@ impl crate::provider::Channels for Freeview {
         Ok(parse_current(&paired_ok(cx.tv, "/6/activities/tv", "the current channel")?))
     }
 
-    /// Type the channel number, as the remote does, with live TV in front
-    /// first (in another app the digits would mean something else).
+    /// Through JointSpace: the TV brings live TV to the front on that
+    /// channel, whatever app was in front (typing the digits instead would
+    /// go to that app, and loses the first digit while live TV starts).
     fn tune(&self, cx: &crate::provider::Cx, channel: &crate::provider::Channel) -> Result<String> {
-        let Some(number) = channel.number.as_deref().filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) else {
-            return failed(format!("watch: {} has no channel number to type", channel.label()));
-        };
-        cx.tv.connect()?;
-        let front = super::info::focus_package(&cx.tv.window_dump()?);
-        if front.as_deref() != Some(LIVE_TV) {
-            super::apps::start(cx.tv, LIVE_TV)?;
-            // give it time to come up and take keys
-            std::thread::sleep(std::time::Duration::from_secs(3));
+        // the channel list the TV is using, as it reports it
+        let now = paired_ok(cx.tv, "/6/activities/tv", "switching channel")?;
+        let list = now.split_once("\"channelList\"").and_then(|(_, rest)| crate::http::objects(rest).into_iter().next()).unwrap_or(r#"{"id":"allter"}"#);
+        let body = tune_body(channel, list);
+        match js_post(cx.tv, "/6/activities/tv", &body, "switching channel")? {
+            (200, _) => Ok(format!("switching to {}", channel.label())),
+            (code, reply) => failed(format!("watch: the TV refused (HTTP {code}): {}", reply.trim())),
         }
-        super::input::channel_keys(number).into_iter().try_for_each(|k| cx.tv.keyevent(k))?;
-        Ok(format!("switching to {}", channel.label()))
     }
+}
+
+/// The body for `POST /6/activities/tv`: the channel, and the channel list
+/// (a JSON object) it's in.
+pub fn tune_body(ch: &crate::provider::Channel, list: &str) -> String {
+    let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        r#"{{"channel":{{"ccid":{},"preset":"{}","name":"{}"}},"channelList":{list}}}"#,
+        ch.id,
+        q(ch.number.as_deref().unwrap_or("")),
+        q(ch.name.as_deref().unwrap_or(""))
+    )
 }
 
 pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
@@ -481,9 +530,37 @@ Row: 3 eventname=NULL, presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL
     }
 
     #[test]
+    fn builds_tune_requests() {
+        let ch = crate::provider::Channel { id: 143, number: Some("18".into()), name: Some("More \"4\"".into()), radio: false, favourite: false };
+        assert_eq!(
+            tune_body(&ch, r#"{"id":"allter","version":"1352"}"#),
+            r#"{"channel":{"ccid":143,"preset":"18","name":"More \"4\""},"channelList":{"id":"allter","version":"1352"}}"#
+        );
+    }
+
+    #[test]
+    fn cleans_titles() {
+        assert_eq!(clean("Pokémon the Movie...\u{0}\u{0}"), "Pokémon the Movie...");
+        let e = parse_events("Row: 0 eventname=Countryfile\u{0}, presetid=101, starttime=1, endtime=2, genre=NULL\n");
+        assert_eq!(e[0].title, "Countryfile");
+        assert_eq!(parse_cached_events("101\t1\t2\t\tCountryfile\u{0}\u{0}\n")[0].title, "Countryfile");
+    }
+
+    #[test]
     fn caches_guide_rows() {
         let e = parse_events(OUT);
         assert_eq!(parse_cached_events(&render_events(&e)), e);
+    }
+
+    #[test]
+    fn reads_favourite_lists() {
+        let overview = r#"{"channelLists":[{"id":"all","version":1353}],"favoriteLists":[
+            {"id":"allter","version":"1352","modifiable":false},
+            {"id":"1","version":"0","name":"Favourites  1","modifiable":true},
+            {"id":"2","version":"7","name":"Favourites  2","modifiable":true}]}"#;
+        assert_eq!(used_favourite_lists(overview), ["2"]);
+        assert_eq!(favourite_ccids(r#"{"version":"7","id":"2","channels":[{"ccid":159,"preset":"1"},{"ccid":143,"preset":"18"}]}"#), [159, 143]);
+        assert!(favourite_ccids(r#"{"id":"1","channels":[]}"#).is_empty());
     }
 
     #[test]

@@ -25,6 +25,8 @@ pub struct Channel {
     pub number: Option<String>,
     pub name: Option<String>,
     pub radio: bool,
+    /// In one of the user's favourite lists.
+    pub favourite: bool,
 }
 
 impl Channel {
@@ -206,7 +208,7 @@ mod tests {
 
     #[test]
     fn finds_channels() {
-        let ch = |id, n: &str, name: &str| Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false };
+        let ch = |id, n: &str, name: &str| Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: false };
         let list = vec![ch(159, "1", "BBC ONE Lon"), ch(158, "2", "BBC TWO"), ch(156, "4", "Channel 4"), ch(143, "18", "More 4"), ch(9, "101", "BBC ONE Lon HD")];
         let id = |q| find_channel(&list, q).map(|c| c.id);
         assert_eq!(id("4"), Some(156));

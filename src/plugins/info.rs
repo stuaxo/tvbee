@@ -283,6 +283,9 @@ fn push_line(out: &mut String, label: &str, value: &str) {
 /// The what / title / progress / url lines (those that are known).
 fn push_activity(out: &mut String, a: &Activity) {
     push_line(out, "what", &a.what);
+    for f in a.fields.iter().filter(|f| f.place == nowplaying::Place::Top) {
+        push_line(out, f.label, &f.value);
+    }
     if let Some(t) = &a.title {
         push_line(out, "title", t);
     }
@@ -292,8 +295,8 @@ fn push_activity(out: &mut String, a: &Activity) {
     if let Some(u) = &a.url {
         push_line(out, "url", u);
     }
-    if let Some(n) = &a.next {
-        push_line(out, "next", n);
+    for f in a.fields.iter().filter(|f| f.place == nowplaying::Place::Bottom) {
+        push_line(out, f.label, &f.value);
     }
 }
 

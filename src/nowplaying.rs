@@ -18,14 +18,55 @@ pub struct Activity {
     pub title: Option<String>,
     pub url: Option<String>,
     pub progress: Option<Progress>,
-    /// What's on after this (live TV): "17:55 Come Dine with Me".
-    pub next: Option<String>,
+    /// More lines a provider surfaces ("channel", "next"), each maybe with
+    /// something the UI opens when it's clicked.
+    pub fields: Vec<Field>,
+}
+
+/// Something a field opens when clicked in the UI. Plain output (status,
+/// nowplaying) just prints the field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Open {
+    /// The programme guide, on this channel (by [`crate::provider::Channel::id`]).
+    Guide { channel: Option<u32> },
+}
+
+/// Where a field goes: under the what line, or after everything else.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Place {
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Field {
+    pub label: &'static str,
+    pub value: String,
+    pub place: Place,
+    pub open: Option<Open>,
 }
 
 impl Activity {
     /// Just a what line.
     pub fn just(what: impl Into<String>) -> Activity {
-        Activity { what: what.into(), title: None, url: None, progress: None, next: None }
+        Activity { what: what.into(), title: None, url: None, progress: None, fields: Vec::new() }
+    }
+
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub fn field(&self, label: &str) -> Option<&Field> {
+        self.fields.iter().find(|f| f.label == label)
+    }
+
+    /// The what line plus the top fields: what changing means something
+    /// else is on (another app, or another channel).
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub fn headline(&self) -> String {
+        let mut s = self.what.clone();
+        for f in self.fields.iter().filter(|f| f.place == Place::Top) {
+            s.push_str(" | ");
+            s.push_str(&f.value);
+        }
+        s
     }
 }
 
@@ -45,13 +86,18 @@ pub fn live(tv: &Tv, pkg: &str) -> Option<Activity> {
 pub fn live_activity(ch: &crate::provider::Channel, events: &[crate::provider::Event], at: i64, offset: i64, hhmm: fn(i64, i64) -> String) -> Activity {
     let on = events.iter().find(|e| e.start <= at && at < e.end);
     let next = events.iter().find(|e| e.start >= at && on.is_none_or(|o| e.start >= o.end));
-    let verb = if ch.radio { "Listening to" } else { "Watching" };
+    let what = if ch.radio { "Listening to the radio" } else { "Watching live TV" };
+    let guide = Some(Open::Guide { channel: Some(ch.id) });
+    let mut fields = vec![Field { label: "channel", value: ch.label(), place: Place::Top, open: guide }];
+    if let Some(e) = next {
+        fields.push(Field { label: "next", value: format!("{} {}", hhmm(e.start, offset), e.title), place: Place::Bottom, open: guide });
+    }
     Activity {
-        what: format!("{verb} {}", ch.label()),
+        what: what.into(),
         title: on.map(|e| e.title.clone()),
         url: None,
         progress: on.map(|e| Progress { position: (at - e.start) as f64, duration: Some((e.end - e.start) as f64), paused: false }),
-        next: next.map(|e| format!("{} {}", hhmm(e.start, offset), e.title)),
+        fields,
     }
 }
 
@@ -152,7 +198,7 @@ pub fn activity_with(
         url = pages.iter().find_map(|p| link(&p.url));
         progress = pages.iter().find_map(|p| p.progress);
     }
-    Some(Activity { what, title, url, progress, next: None })
+    Some(Activity { what, title, url, progress, fields: Vec::new() })
 }
 
 #[cfg(test)]
@@ -161,18 +207,20 @@ mod tests {
     #[test]
     fn live_tv_line() {
         use crate::provider::{Channel, Event};
-        let ch = Channel { id: 143, number: Some("18".into()), name: Some("More 4".into()), radio: false };
+        let ch = Channel { id: 143, number: Some("18".into()), name: Some("More 4".into()), radio: false, favourite: false };
         let ev = |t: &str, start, end| Event { channel: 143, title: t.into(), start, end, genre: None };
         let events = [ev("Come Dine with Me", 1000, 3100), ev("Grand Designs", 3100, 6700)];
         let hm = |t: i64, _| format!("t{t}");
         let a = live_activity(&ch, &events, 1600, 0, hm);
-        assert_eq!(a.what, "Watching 18 More 4");
+        assert_eq!(a.what, "Watching live TV");
+        assert_eq!(a.field("channel").map(|f| (f.value.as_str(), f.open)), Some(("18 More 4", Some(Open::Guide { channel: Some(143) }))));
+        assert_eq!(a.headline(), "Watching live TV | 18 More 4");
         assert_eq!(a.title.as_deref(), Some("Come Dine with Me"));
         assert_eq!(a.progress.map(|p| (p.position, p.duration)), Some((600.0, Some(2100.0))));
-        assert_eq!(a.next.as_deref(), Some("t3100 Grand Designs"));
+        assert_eq!(a.field("next").map(|f| f.value.as_str()), Some("t3100 Grand Designs"));
         // between programmes (gap in the guide): no title, next is next
         let a = live_activity(&ch, &events[1..], 2000, 0, hm);
-        assert_eq!((a.title, a.next.as_deref()), (None, Some("t3100 Grand Designs")));
+        assert_eq!((a.title.as_deref(), a.field("next").map(|f| f.value.as_str())), (None, Some("t3100 Grand Designs")));
     }
     use super::*;
 
