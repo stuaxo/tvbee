@@ -62,6 +62,8 @@ pub enum Action {
     LoadGuide,
     /// Fetch a programme's description (channel, start).
     LoadInfo(u32, i64),
+    /// Start reading the guide's descriptions, ahead of the details panel.
+    PrefetchInfo,
     /// Switch live TV to a channel.
     Watch(crate::provider::Channel),
     /// Make a channel a favourite (true) or not.
@@ -336,7 +338,8 @@ pub fn details_text(e: &crate::provider::Event, ch: &crate::provider::Channel, i
             }
         }
         Some(None) => out.push(("(no description in the broadcast guide)".into(), Seg::Time)),
-        None => out.push(("reading descriptions from the TV (the first time takes half a minute)...".into(), Seg::Time)),
+        // still being read: empty, so the text just appears (the header says it's coming)
+        None => {}
     }
     out
 }
@@ -565,6 +568,17 @@ impl Worker {
     fn act(&mut self, a: Action, tx: &Sender<Msg>) -> Result<String> {
         self.tv.connect()?;
         Ok(match a {
+            Action::PrefetchInfo => {
+                let ip = self.tv.ip.clone();
+                std::thread::spawn(move || {
+                    let tv = Tv { ip };
+                    // reads (and caches) every description; any one will do to start it
+                    if let Some(g) = live_provider().and_then(|p| p.guide()) {
+                        let _ = g.info(&crate::provider::Cx { tv: &tv }, 0, 0);
+                    }
+                });
+                String::new()
+            }
             Action::LoadInfo(ch, start) => {
                 // the first read takes the TV a while: off the worker, so the screen keeps refreshing
                 let (ip, tx) = (self.tv.ip.clone(), tx.clone());
@@ -1451,6 +1465,8 @@ impl App {
         self.guide_view = self.guide_start();
         self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
         let _ = actions.send(Action::LoadGuide);
+        // the details panel's descriptions take the TV a while the first time
+        let _ = actions.send(Action::PrefetchInfo);
     }
 
     /// Run what a clicked field opens.
@@ -2242,6 +2258,11 @@ impl App {
                             (_, None) => {
                                 text.push(Line::from(vec![Span::styled("▾ details", bar_style), Span::styled("  nothing on then", dim)]));
                                 details_hits.push((panel_top, 0, total as u16, DetailsClick::Hide));
+                                // the same height as with something in it
+                                for k in 0..DETAILS_ROWS {
+                                    text.push(Line::default());
+                                    details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
+                                }
                             }
                             (_, Some((e, ch))) => {
                                 let key = (ch.id, e.start);
@@ -2257,7 +2278,9 @@ impl App {
                                 };
                                 let all = details_text(e, ch, info, total.saturating_sub(2), off);
                                 self.details_scroll = self.details_scroll.min(all.len().saturating_sub(DETAILS_ROWS));
-                                let more = if all.len() > DETAILS_ROWS {
+                                let more = if info.is_none() {
+                                    "  reading descriptions from the TV...".to_string()
+                                } else if all.len() > DETAILS_ROWS {
                                     format!("  {}-{} of {} lines", self.details_scroll + 1, (self.details_scroll + DETAILS_ROWS).min(all.len()), all.len())
                                 } else {
                                     String::new()
@@ -2870,8 +2893,9 @@ mod tests {
         let info = e.info.clone();
         let lines: Vec<String> = details_text(&e, &rows[3].channel, Some(info.as_deref()), 30, 0).into_iter().map(|(l, _)| l).collect();
         assert_eq!(lines, ["Garage Squad", "Thu 00:00–01:00 (1h00) · 18 More 4 · documentary", "", "The team restore a classic car", "for a family.", "New series."]);
+        // still loading: no body yet (the panel keeps its size with blank lines)
         let loading: Vec<String> = details_text(&e, &rows[3].channel, None, 30, 0).into_iter().map(|(l, _)| l).collect();
-        assert!(loading[3].starts_with("reading descriptions"));
+        assert_eq!(loading.len(), 3);
         // steps land on the half hour
         assert_eq!(guide_time_at(1_000, 0), 1_000);
         assert_eq!(guide_time_at(1_000, 1), 1_800);
