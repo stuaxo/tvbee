@@ -212,13 +212,32 @@ enum Msg {
     Guide(std::result::Result<Guide, String>),
 }
 
-/// A channel in the guide pop-up, with what's on it now and next.
+/// A channel in the guide pop-up, with its programmes for the next day.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GuideRow {
     pub channel: crate::provider::Channel,
-    pub now: Option<crate::provider::Event>,
-    pub next: Option<crate::provider::Event>,
+    /// Sorted by start.
+    pub events: Vec<crate::provider::Event>,
 }
+
+impl GuideRow {
+    /// What's on at time `t`, and what comes after it.
+    pub fn at(&self, t: i64) -> (Option<&crate::provider::Event>, Option<&crate::provider::Event>) {
+        let on = self.events.iter().find(|e| e.start <= t && t < e.end);
+        let after = self.events.iter().find(|e| e.start >= on.map_or(t, |o| o.end));
+        (on, after)
+    }
+}
+
+/// The time `later` steps ahead of `now`: now itself, then on the hour and
+/// half hour (19:30, 20:00, ...).
+pub fn guide_time_at(now: i64, later: i64) -> i64 {
+    if later == 0 { now } else { (now.div_euclid(GUIDE_STEP) + later) * GUIDE_STEP }
+}
+
+/// How far ahead the guide goes (← → move through it in GUIDE_STEP steps).
+const GUIDE_AHEAD: i64 = 24 * 3600;
+const GUIDE_STEP: i64 = 30 * 60;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Guide {
@@ -242,15 +261,16 @@ fn load_guide(tv: &Tv) -> Result<Guide> {
     let cx = crate::provider::Cx { tv };
     let (chans, guide) = (p.channels().expect("checked"), p.guide().expect("checked"));
     let (list, synced) = crate::favourites::channels(p, &cx)?;
-    let nn = guide.now_next(&cx, crate::plugins::guide::now())?;
+    let now = crate::plugins::guide::now();
     let current = chans.current(&cx).ok().flatten().map(|c| c.id);
     let news = synced.as_ref().and_then(|s| s.news(&list));
     let pending = synced.map(|s| s.pending).unwrap_or_default();
+    // (the guide is cached, so a schedule per channel is cheap)
     let rows = list
         .into_iter()
         .map(|channel| {
-            let n = nn.iter().find(|n| n.channel == channel.id);
-            GuideRow { now: n.and_then(|n| n.now.clone()), next: n.and_then(|n| n.next.clone()), channel }
+            let events = guide.schedule(&cx, channel.id, now, now + GUIDE_AHEAD + 3 * 3600).unwrap_or_default();
+            GuideRow { channel, events }
         })
         .collect();
     Ok(Guide { provider: p.name(), rows, current, pending, news })
@@ -270,10 +290,12 @@ impl GuideTab {
 }
 
 /// Whether a guide row matches the filter: every word is the start of the
-/// channel number or part of its name or what's on now/next (any case).
-pub fn guide_matches(r: &GuideRow, filter: &str) -> bool {
+/// channel number or part of its name or of the programmes shown (on at
+/// `t` and after), in any case.
+pub fn guide_matches(r: &GuideRow, filter: &str, t: i64) -> bool {
     let num = r.channel.number.as_deref().unwrap_or("");
-    let text = [r.channel.name.as_deref(), r.now.as_ref().map(|e| e.title.as_str()), r.next.as_ref().map(|e| e.title.as_str())]
+    let (on, after) = r.at(t);
+    let text = [r.channel.name.as_deref(), on.map(|e| e.title.as_str()), after.map(|e| e.title.as_str())]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
@@ -283,8 +305,8 @@ pub fn guide_matches(r: &GuideRow, filter: &str) -> bool {
 }
 
 /// The rows a tab shows with this filter.
-pub fn guide_shown<'a>(rows: &'a [GuideRow], tab: GuideTab, filter: &str) -> Vec<&'a GuideRow> {
-    rows.iter().filter(|r| (tab == GuideTab::All || r.channel.favourite) && guide_matches(r, filter)).collect()
+pub fn guide_shown<'a>(rows: &'a [GuideRow], tab: GuideTab, filter: &str, t: i64) -> Vec<&'a GuideRow> {
+    rows.iter().filter(|r| (tab == GuideTab::All || r.channel.favourite) && guide_matches(r, filter, t)).collect()
 }
 
 /// Where a movement key takes the highlight among `ids` (shown channel ids),
@@ -641,6 +663,8 @@ struct App {
     settling: Option<Settling>,
     /// The guide pop-up's rows; None until fetched.
     guide: Option<std::result::Result<Guide, String>>,
+    /// How many GUIDE_STEPs ahead of now the guide shows.
+    guide_later: i64,
 }
 
 /// How long an action gets to settle before the screen shows whatever the
@@ -1252,6 +1276,7 @@ impl App {
             None => None,
         });
         self.prompt.clear();
+        self.guide_later = 0;
         self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
         let _ = actions.send(Action::LoadGuide);
     }
@@ -1263,8 +1288,13 @@ impl App {
         }
     }
 
-    /// Keys in the guide: typing filters, arrows/page keys/home/end move,
-    /// Tab or ←/→ switch tabs, Enter watches, Esc closes.
+    /// The time the guide shows.
+    fn guide_time(&self) -> i64 {
+        guide_time_at(crate::plugins::guide::now(), self.guide_later)
+    }
+
+    /// Keys in the guide: typing filters, ↑/↓/page keys/home/end move, ←/→
+    /// go earlier/later in time, Tab switches tabs, Enter watches, Esc closes.
     fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Sender<Action>) {
         let mut tab = tab;
         match code {
@@ -1285,14 +1315,16 @@ impl App {
                 self.toggle_favourite(at, actions);
                 return;
             }
-            KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => tab = tab.other(),
+            KeyCode::Tab | KeyCode::BackTab => tab = tab.other(),
+            KeyCode::Right => self.guide_later = (self.guide_later + 1).min(GUIDE_AHEAD / GUIDE_STEP),
+            KeyCode::Left => self.guide_later = self.guide_later.saturating_sub(1).max(0),
             KeyCode::Backspace => {
                 self.prompt.pop();
             }
             KeyCode::Char(c) => self.prompt.push(c),
             _ => {}
         }
-        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt).iter().map(|r| r.channel.id).collect();
+        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
         // keep the highlight on its channel while it's shown; else the first
         self.overlay = Overlay::Guide { tab, at: guide_move(&ids, at, code) };
     }
@@ -1821,13 +1853,12 @@ impl App {
                     }
                     Some(Ok(g)) => {
                         let off = crate::plugins::guide::utc_offset();
-                        let hm = |e: &crate::provider::Event| format!("{} {}", crate::plugins::guide::hhmm(e.start, off), e.title);
                         let fit = |s: &str, w: usize| -> String {
                             if s.chars().count() <= w { format!("{s:<w$}") } else { format!("{}…", s.chars().take(w.saturating_sub(1)).collect::<String>()) }
                         };
                         // tabs, with counts
                         for t in [GuideTab::All, GuideTab::Favourites] {
-                            let n = guide_shown(&g.rows, t, "").len();
+                            let n = guide_shown(&g.rows, t, "", 0).len();
                             let name = if t == GuideTab::All { "All channels" } else { "Favourites" };
                             tabs.push((t, format!(" {name} ({n}) ")));
                         }
@@ -1850,9 +1881,21 @@ impl App {
                         let ch_w = 24;
                         let now_w = (total - ch_w - 4) * 55 / 100;
                         let next_w = total - ch_w - 4 - now_w;
-                        text.push(Line::from(format!("  {}  {}  {}", fit("channel", ch_w), fit("now", now_w), fit("next", next_w))).fg(Color::DarkGray));
+                        let t = self.guide_time();
+                        let (on_head, after_head) = if self.guide_later == 0 {
+                            ("now".to_string(), "next".to_string())
+                        } else {
+                            (format!("on at {}  ← earlier", crate::plugins::guide::day_hhmm(t, off)), "then  later →".to_string())
+                        };
+                        let head_style = Style::new().fg(Color::DarkGray);
+                        let on_style = if self.guide_later == 0 { head_style } else { Style::new().fg(Color::Magenta).bold() };
+                        text.push(Line::from(vec![
+                            Span::styled(format!("  {}  ", fit("channel", ch_w)), head_style),
+                            Span::styled(fit(&on_head, now_w), on_style),
+                            Span::styled(format!("  {}", fit(&after_head, next_w)), head_style),
+                        ]));
                         ids.push(None);
-                        let shown = guide_shown(&g.rows, tab, &self.prompt);
+                        let shown = guide_shown(&g.rows, tab, &self.prompt, t);
                         let room = usize::from(area.height.saturating_sub(11)).max(3);
                         if shown.is_empty() {
                             let why = match (tab, self.prompt.is_empty()) {
@@ -1870,12 +1913,23 @@ impl App {
                             // not on the TV yet: tvbee will send it when it can
                             let wait = if g.pending.contains_key(&r.channel.id) { " ·" } else { "" };
                             let name = format!("{star} {}{}{wait}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
-                            let line = Line::from(format!(
-                                "{mark}{}  {}  {}",
-                                fit(&name, ch_w + 1),
-                                fit(&r.now.as_ref().map(hm).unwrap_or_default(), now_w),
-                                fit(&r.next.as_ref().map(hm).unwrap_or_default(), next_w)
-                            ));
+                            let (on, after) = r.at(t);
+                            // times dimmed, so the titles stand out (not on the highlighted row)
+                            let time_style = if i == sel { Style::new() } else { Style::new().fg(Color::DarkGray) };
+                            let programme = |e: Option<&crate::provider::Event>, w: usize| -> Vec<Span<'static>> {
+                                match e {
+                                    Some(e) => vec![
+                                        Span::styled(format!("{} ", crate::plugins::guide::hhmm(e.start, off)), time_style),
+                                        Span::raw(fit(&e.title, w.saturating_sub(6))),
+                                    ],
+                                    None => vec![Span::raw(" ".repeat(w))],
+                                }
+                            };
+                            let mut spans = vec![Span::raw(format!("{mark}{}  ", fit(&name, ch_w + 1)))];
+                            spans.extend(programme(on, now_w));
+                            spans.push(Span::raw("  "));
+                            spans.extend(programme(after, next_w));
+                            let line = Line::from(spans);
                             text.push(if i == sel { line.reversed() } else { line });
                             ids.push(Some(r.channel.id));
                         }
@@ -1886,7 +1940,7 @@ impl App {
                         }
                         text.push(Line::default());
                         let more = if shown.len() > room { format!("  ({} of {})", sel + 1, shown.len()) } else { String::new() };
-                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  tab/←/→ switch  ⏎/click watch  * or ☆/★ favourite (· to sync)  ▶ on now  esc{more}")).fg(Color::DarkGray));
+                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  ←/→ earlier/later  tab switch  ⏎/click watch  * or ☆/★ favourite (· to sync)  ▶ on now  esc{more}")).fg(Color::DarkGray));
                         format!(" guide: {} ", g.provider)
                     }
                 };
@@ -2156,7 +2210,8 @@ const HELP: &str = " everywhere
    tab      switch mode      .      more (power, mirror, ...)
    i        system info      a      launch an app (space there: front / restart / close)
    /        search the app in front (tab picks another app)
-   g        live TV guide: now/next on every channel (type to filter, ⏎ watch,
+   g        live TV guide: now/next on every channel (type to filter, ←/→ later
+            or earlier, tab favourites, ⏎ watch,
             * or click the star to add/remove a favourite);
             clicking the channel line opens it too
    . o      open a link (YouTube, Netflix, media files)
@@ -2322,6 +2377,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         search_targets: Vec::new(),
         settling: None,
         guide: None,
+        guide_later: 0,
     };
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     let result = ratatui::run(|term| {
@@ -2377,8 +2433,7 @@ mod tests {
     fn guide_filters_and_moves() {
         let row = |id: u32, n: &str, name: &str, now: &str, fav: bool| GuideRow {
             channel: crate::provider::Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: fav },
-            now: Some(crate::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None }),
-            next: None,
+            events: vec![crate::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None }],
         };
         let rows = [
             row(159, "1", "BBC ONE Lon", "Countryfile", true),
@@ -2386,7 +2441,7 @@ mod tests {
             row(156, "4", "Channel 4", "50 First Dates", false),
             row(143, "18", "More 4", "Come Dine with Me", true),
         ];
-        let ids = |tab, q| guide_shown(&rows, tab, q).iter().map(|r| r.channel.id).collect::<Vec<_>>();
+        let ids = |tab, q| guide_shown(&rows, tab, q, 0).iter().map(|r| r.channel.id).collect::<Vec<_>>();
         assert_eq!(ids(GuideTab::All, ""), [159, 158, 156, 143]);
         assert_eq!(ids(GuideTab::Favourites, ""), [159, 143]);
         assert_eq!(ids(GuideTab::All, "bbc"), [159, 158]);
@@ -2400,6 +2455,19 @@ mod tests {
         assert_eq!(guide_move(&all, 159, KeyCode::End), 143);
         assert_eq!(guide_move(&[159, 143], 158, KeyCode::Char('x')), 159); // filtered away: first
         assert_eq!(guide_move(&[], 158, KeyCode::Down), 158);
+        // later in the day: what's on then, and after it
+        let ev = |title: &str, start, end| crate::provider::Event { channel: 1, title: title.into(), start, end, genre: None };
+        let day = GuideRow { channel: rows[0].channel.clone(), events: vec![ev("Apple", 0, 100), ev("Banana", 100, 200), ev("Cherry", 250, 300)] };
+        let titles = |t| { let (a, b) = day.at(t); (a.map(|e| e.title.clone()), b.map(|e| e.title.clone())) };
+        assert_eq!(titles(50), (Some("Apple".into()), Some("Banana".into())));
+        assert_eq!(titles(150), (Some("Banana".into()), Some("Cherry".into())));
+        assert_eq!(titles(220), (None, Some("Cherry".into()))); // a gap
+        assert_eq!(titles(400), (None, None));
+        assert!(guide_matches(&day, "banana", 150) && !guide_matches(&day, "banana", 260));
+        // steps land on the half hour
+        assert_eq!(guide_time_at(1_000, 0), 1_000);
+        assert_eq!(guide_time_at(1_000, 1), 1_800);
+        assert_eq!(guide_time_at(1_800, 2), 5_400);
         assert_eq!(textwrap("needs tvbee to be paired", 12), ["needs tvbee", "to be paired"]);
         assert_eq!(input_for(KeyCode::Char('g'), KeyModifiers::NONE, Mode::Player), Input::OpenGuide);
     }
