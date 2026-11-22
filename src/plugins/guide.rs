@@ -50,16 +50,16 @@ fn fit(s: &str, w: usize) -> String {
     }
 }
 
-/// `guide [--provider ID] [<channel> [--hours N]]`.
+/// `guide [<channel>] [--hours N] [--provider ID]`.
 fn guide(c: &Ctx, args: &[String]) -> Result<()> {
-    let (mut id, mut hours, mut channel) = (None, 24i64, None);
+    let (mut id, mut hours, mut words) = (None, 24i64, Vec::new());
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--provider" => id = it.next().cloned(),
             "--hours" => hours = it.next().and_then(|h| h.parse().ok()).filter(|h| *h > 0).map_or_else(|| usage("guide: --hours needs a number"), Ok)?,
-            n if n.parse::<u32>().is_ok() => channel = n.parse().ok(),
-            x => return usage(format!("guide: unexpected '{x}' (usage: tvbee guide [<channel>] [--hours N] [--provider ID])")),
+            x if x.starts_with("--") => return usage(format!("guide: unknown option '{x}' (usage: tvbee guide [<channel>] [--hours N] [--provider ID])")),
+            x => words.push(x.to_string()),
         }
     }
     let Some(p) = provider::with_guide(id.as_deref()) else {
@@ -68,36 +68,46 @@ fn guide(c: &Ctx, args: &[String]) -> Result<()> {
     let g = p.guide().expect("with_guide checked");
     let cx = Cx { tv: &c.tv };
     let (at, off) = (now(), utc_offset());
-    match channel {
-        // one channel's schedule
-        Some(preset) => {
-            let events = g.schedule(&cx, preset, at, at + hours * 3600)?;
-            if events.is_empty() {
-                return failed(format!(
-                    "guide: nothing in the {} guide for preset {preset} in the next {hours}h (presets are the TV's internal numbers; 'tvbee guide' lists them)",
-                    p.name()
-                ));
-            }
-            println!("preset {preset} ({}):", p.name());
-            for e in events {
-                let on = if e.start <= at { "  <- on now" } else { "" };
-                println!("  {}-{}  {}{on}", day_hhmm(e.start, off), hhmm(e.end, off), e.title);
-            }
+    // the channel list gives numbers and names; without it, ids only
+    let channels = p.channels().map(|ch| ch.list(&cx));
+    if words.is_empty() {
+        let mut rows = g.now_next(&cx, at)?;
+        if rows.is_empty() {
+            return failed(format!("guide: the {} guide is empty (the TV collects it while tuned to live TV)", p.name()));
         }
-        // now and next on every channel
-        None => {
-            let rows = g.now_next(&cx, at)?;
-            if rows.is_empty() {
-                return failed(format!("guide: the {} guide is empty (the TV collects it while tuned to live TV)", p.name()));
+        let list = match channels {
+            Some(Ok(list)) => list,
+            Some(Err(e)) => {
+                eprintln!("(no channel names or numbers: {e})");
+                Vec::new()
             }
-            // presets are the TV's internal service numbers, not channel numbers
-            println!("{:>6}  {:<44}  next", "preset", format!("now ({})", p.name()));
-            for r in rows {
-                let now = r.now.as_ref().map_or_else(|| "-".to_string(), |e: &Event| format!("{} {}", hhmm(e.start, off), e.title));
-                let next = r.next.as_ref().map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
-                println!("{:>6}  {}  {}", r.preset, fit(&now, 44), fit(&next, 40));
-            }
+            None => Vec::new(),
+        };
+        let find = |id| list.iter().find(|ch| ch.id == id);
+        rows.sort_by_key(|r| find(r.channel).map_or((u32::MAX, r.channel), provider::Channel::order));
+        println!("{:<24}  {:<44}  next", "channel", format!("now ({})", p.name()));
+        for r in rows {
+            let label = find(r.channel).map_or_else(|| format!("#{}", r.channel), provider::Channel::label);
+            let now = r.now.as_ref().map_or_else(|| "-".to_string(), |e: &Event| format!("{} {}", hhmm(e.start, off), e.title));
+            let next = r.next.as_ref().map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
+            println!("{}  {}  {}", fit(&label, 24), fit(&now, 44), fit(&next, 40));
         }
+        return Ok(());
+    }
+    // one channel's schedule: needs the channel list to find it
+    let query = words.join(" ");
+    let list = channels.unwrap_or_else(|| failed(format!("guide: {} has no channel list to find '{query}' in", p.name())))?;
+    let Some(ch) = provider::find_channel(&list, &query) else {
+        return failed(format!("guide: no channel '{query}' (see 'tvbee channels')"));
+    };
+    let events = g.schedule(&cx, ch.id, at, at + hours * 3600)?;
+    if events.is_empty() {
+        return failed(format!("guide: nothing in the guide for {} in the next {hours}h", ch.label()));
+    }
+    println!("{}:", ch.label());
+    for e in events {
+        let on = if e.start <= at { "  <- on now" } else { "" };
+        println!("  {}-{}  {}{on}", day_hhmm(e.start, off), hhmm(e.end, off), e.title);
     }
     Ok(())
 }
@@ -111,36 +121,72 @@ fn channel_provider(id: Option<&str>) -> Result<&'static dyn provider::Provider>
         .map_or_else(|| failed("no provider with channels here (see 'tvbee providers')"), Ok)
 }
 
+/// Split off a trailing `--provider ID`.
+fn provider_flag(args: &[String]) -> (Vec<String>, Option<String>) {
+    match args.iter().position(|a| a == "--provider") {
+        Some(i) => (args[..i].iter().chain(args.get(i + 2..).unwrap_or(&[])).cloned().collect(), args.get(i + 1).cloned()),
+        None => (args.to_vec(), None),
+    }
+}
+
+/// `channels [--tv | --radio] [--provider ID]`.
 fn channels(c: &Ctx, args: &[String]) -> Result<()> {
-    let id = match args {
+    let (rest, id) = provider_flag(args);
+    let kind = match rest.as_slice() {
         [] => None,
-        [flag, id] if flag == "--provider" => Some(id.as_str()),
-        _ => return usage("usage: tvbee channels [--provider ID]"),
+        [k] if k == "--tv" => Some(false),
+        [k] if k == "--radio" => Some(true),
+        _ => return usage("usage: tvbee channels [--tv | --radio] [--provider ID]"),
     };
-    let p = channel_provider(id)?;
+    let p = channel_provider(id.as_deref())?;
     let cx = Cx { tv: &c.tv };
-    let list = p.channels().expect("checked").list(&cx)?;
-    let current = p.channels().expect("checked").current(&cx).ok().flatten().map(|ch| ch.preset);
+    let chans = p.channels().expect("checked");
+    let list = chans.list(&cx)?;
+    let current = chans.current(&cx).ok().flatten().map(|ch| ch.id);
     // what's on each, if there's a guide too
     let (at, off) = (now(), utc_offset());
-    let on: Vec<provider::NowNext> = p.guide().map(|g| g.now_next(&cx, at)).transpose()?.unwrap_or_default();
-    for ch in list {
-        let title = on.iter().find(|n| n.preset == ch.preset).and_then(|n| n.now.as_ref()).map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
-        let mark = if current == Some(ch.preset) { "  <- watching" } else { "" };
-        println!("{:>4}  {}{mark}", ch.preset, ch.name.as_deref().map_or(title.clone(), |n| format!("{n}  {title}")));
+    let on: Vec<provider::NowNext> = p.guide().and_then(|g| g.now_next(&cx, at).ok()).unwrap_or_default();
+    for ch in list.iter().filter(|ch| kind.is_none_or(|r| ch.radio == r)) {
+        let title = on.iter().find(|n| n.channel == ch.id).and_then(|n| n.now.as_ref()).map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
+        let radio = if ch.radio { " (radio)" } else { "" };
+        let mark = if current == Some(ch.id) { "  <- on now" } else { "" };
+        println!("{}  {}{mark}", fit(&format!("{}{radio}", ch.label()), 30), title);
     }
     Ok(())
 }
 
+/// `watch <number|name> [--provider ID]`.
 fn watch(c: &Ctx, args: &[String]) -> Result<()> {
-    let (preset, id) = match args {
-        [n] => (n, None),
-        [n, flag, id] if flag == "--provider" => (n, Some(id.as_str())),
-        _ => return usage("usage: tvbee watch <channel> [--provider ID]"),
+    let (words, id) = provider_flag(args);
+    if words.is_empty() {
+        return usage("usage: tvbee watch <channel number or name> [--provider ID]");
+    }
+    let query = words.join(" ");
+    let p = channel_provider(id.as_deref())?;
+    let cx = Cx { tv: &c.tv };
+    let chans = p.channels().expect("checked");
+    let list = chans.list(&cx)?;
+    let Some(ch) = provider::find_channel(&list, &query) else {
+        return failed(format!("watch: no channel '{query}' (see 'tvbee channels')"));
     };
-    let Ok(preset) = preset.parse::<u32>() else { return usage(format!("watch: '{preset}' isn't a channel number")) };
-    let p = channel_provider(id)?;
-    println!("{}", p.channels().expect("checked").tune(&Cx { tv: &c.tv }, preset)?);
+    println!("{}", chans.tune(&cx, ch)?);
+    Ok(())
+}
+
+/// `channel now`: what live TV is tuned to, and what's on it.
+fn on_now(c: &Ctx, args: &[String]) -> Result<()> {
+    let (_, id) = provider_flag(args);
+    let p = channel_provider(id.as_deref())?;
+    let cx = Cx { tv: &c.tv };
+    let Some(ch) = p.channels().expect("checked").current(&cx)? else {
+        return failed(format!("{} can't tell which channel is on", p.name()));
+    };
+    let (at, off) = (now(), utc_offset());
+    let events = p.guide().map(|g| g.schedule(&cx, ch.id, at, at + 6 * 3600)).transpose()?.unwrap_or_default();
+    println!("{}", ch.label());
+    for (e, when) in events.iter().zip(["now ", "next"]) {
+        println!("  {when}  {}-{}  {}", hhmm(e.start, off), hhmm(e.end, off), e.title);
+    }
     Ok(())
 }
 
@@ -157,20 +203,21 @@ fn providers(_: &Ctx, _: &[String]) -> Result<()> {
 
 pub fn commands() -> Vec<Command> {
     vec![
-        Command::new(CAT, "guide", "[<preset>] [--hours N] [--provider ID]", "programme guide: now/next, or one channel's schedule", guide).long(
+        Command::new(CAT, "guide", "[<channel>] [--hours N] [--provider ID]", "programme guide: now/next, or one channel's schedule", guide).long(
             "From the first provider with a guide (live TV over the air on Philips TVs,\n\
              from the broadcast EPG the TV collects).\n\
-             \x20 tvbee guide              now and next on every channel\n\
-             \x20 tvbee guide 101          preset 101's programmes for the next 24 hours\n\
-             \x20 tvbee guide 101 --hours 6  ... for the next 6\n\
-             Presets are the TV's internal service numbers (as listed by 'tvbee guide'),\n\
-             not the channel numbers typed on the remote; mapping them needs the TV's\n\
-             channel list (JointSpace pairing).",
+             \x20 tvbee guide                now and next on every channel\n\
+             \x20 tvbee guide 4              channel 4's programmes for the next 24 hours\n\
+             \x20 tvbee guide bbc two --hours 6  ... by name, for the next 6\n\
+             Channel numbers and names come from the TV's channel list, which on\n\
+             Philips TVs needs pairing ('tvbee pair'); without it the guide shows the\n\
+             TV's internal channel ids.",
         ),
-        Command::new(CAT, "channels", "[--provider ID]", "channels you can watch, with what's on", channels)
-            .long("The channels of the first provider that has them (live TV over the air on\nPhilips TVs: those with something in the guide), with the programme on now."),
-        Command::new(CAT, "watch", "<preset> [--provider ID]", "switch live TV to a channel (not yet for over-the-air TV)", watch)
-            .long("Switches to a channel from the guide. Over-the-air TV can't do this yet: the\nguide's presets aren't channel numbers. 'tvbee channel <number>' types a channel\nnumber on the remote instead."),
+        Command::new(CAT, "channels", "[--tv | --radio] [--provider ID]", "channels you can watch, with what's on", channels)
+            .long("The live TV channel list with what's on each now, marking the one the TV is\ntuned to. On Philips TVs it needs pairing ('tvbee pair')."),
+        Command::new(CAT, "watch", "<channel> [--provider ID]", "switch live TV to a channel, by number or name", watch)
+            .long("  tvbee watch 4\n  tvbee watch more 4\n  tvbee watch bbc two\nNames match from the start, then anywhere; the lowest channel number wins."),
+        Command::new(CAT, "onnow", "[--provider ID]", "the channel live TV is on, and what's on it now and next", on_now),
         Command::new(CAT, "providers", "", "content providers and what each can do", providers).long(
             "Providers are the sources of content tvbee knows (live TV, YouTube, ...),\n\
              registered by plugins, with their capabilities: guide, channels, details,\n\

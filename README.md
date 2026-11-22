@@ -78,7 +78,8 @@ A few examples:
     tvbee goto history                # a place in the app; 'tvbee goto' lists them
     tvbee goto chapter 3              # seek to a chapter of the video
     tvbee guide                       # now/next on live TV (from the over-the-air guide)
-    tvbee guide 101                   # one channel's programmes today (by the TV's preset number)
+    tvbee guide bbc two               # one channel's programmes today
+    tvbee watch more 4                # switch live TV by channel number or name
     tvbee status --watch              # the same plus power, volume, memory, storage; live
     tvbee launch youtube
     tvbee home --set projectivy       # choose the default home app (see --list)
@@ -122,8 +123,9 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
 [guide]
     channels     channels you can watch, with what's on
     guide        programme guide: now/next, or one channel's schedule
+    onnow        the channel live TV is on, and what's on it now and next
     providers    content providers and what each can do
-    watch        switch live TV to a channel (not yet for over-the-air TV)
+    watch        switch live TV to a channel, by number or name
 
 [info]
     details      more about what's on: channel, chapters, description

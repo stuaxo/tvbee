@@ -17,17 +17,51 @@ pub struct Cx<'a> {
     pub tv: &'a Tv,
 }
 
-/// A channel, by the number you'd type on the remote.
+/// A channel. `id` is the provider's own id for it (what guide events refer
+/// to); `number` is what you'd type on the remote.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Channel {
-    pub preset: u32,
+    pub id: u32,
+    pub number: Option<String>,
     pub name: Option<String>,
+    pub radio: bool,
+}
+
+impl Channel {
+    /// "4 Channel 4", or the id when that's all there is.
+    pub fn label(&self) -> String {
+        match (&self.number, &self.name) {
+            (Some(n), Some(name)) => format!("{n} {name}"),
+            (None, Some(name)) => name.clone(),
+            (Some(n), None) => n.clone(),
+            (None, None) => format!("#{}", self.id),
+        }
+    }
+
+    /// Sort key: by channel number, then id.
+    pub fn order(&self) -> (u32, u32) {
+        let n = self.number.as_deref().and_then(|n| n.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok());
+        (n.unwrap_or(u32::MAX), self.id)
+    }
+}
+
+/// Find a channel by what someone typed: its number, its name, or the start
+/// (then any part) of its name, ignoring case.
+pub fn find_channel<'a>(list: &'a [Channel], query: &str) -> Option<&'a Channel> {
+    let q = query.trim().to_lowercase();
+    let name = |c: &Channel| c.name.as_deref().unwrap_or("").to_lowercase();
+    list.iter()
+        .find(|c| c.number.as_deref() == Some(q.as_str()))
+        .or_else(|| list.iter().find(|c| name(c) == q))
+        .or_else(|| list.iter().filter(|c| name(c).starts_with(&q)).min_by_key(|c| c.order()))
+        .or_else(|| list.iter().filter(|c| name(c).contains(&q)).min_by_key(|c| c.order()))
 }
 
 /// A programme in a guide. Times are Unix seconds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {
-    pub preset: u32,
+    /// The [`Channel::id`] it's on.
+    pub channel: u32,
     pub title: String,
     pub start: i64,
     pub end: i64,
@@ -37,7 +71,7 @@ pub struct Event {
 /// What's on a channel now, and what's next.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NowNext {
-    pub preset: u32,
+    pub channel: u32,
     pub now: Option<Event>,
     pub next: Option<Event>,
 }
@@ -46,8 +80,8 @@ pub struct NowNext {
 pub trait Guide {
     /// Now and next on every channel that has guide data, at time `at`.
     fn now_next(&self, cx: &Cx, at: i64) -> Result<Vec<NowNext>>;
-    /// One channel's programmes between `from` and `to`.
-    fn schedule(&self, cx: &Cx, preset: u32, from: i64, to: i64) -> Result<Vec<Event>>;
+    /// One channel's (by [`Channel::id`]) programmes between `from` and `to`.
+    fn schedule(&self, cx: &Cx, channel: u32, from: i64, to: i64) -> Result<Vec<Event>>;
 }
 
 /// Channels you can switch between.
@@ -58,7 +92,7 @@ pub trait Channels {
         Ok(None)
     }
     /// Switch to a channel; returns status-line feedback.
-    fn tune(&self, cx: &Cx, preset: u32) -> Result<String>;
+    fn tune(&self, cx: &Cx, channel: &Channel) -> Result<String>;
 }
 
 /// More about what's playing (description, chapters, ...).
@@ -168,5 +202,19 @@ mod tests {
         assert_eq!(tv.id(), "freeview");
         assert_eq!(capabilities(tv), vec!["guide", "channels"]);
         assert!(with_guide(Some("youtube")).is_none());
+    }
+
+    #[test]
+    fn finds_channels() {
+        let ch = |id, n: &str, name: &str| Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false };
+        let list = vec![ch(159, "1", "BBC ONE Lon"), ch(158, "2", "BBC TWO"), ch(156, "4", "Channel 4"), ch(143, "18", "More 4"), ch(9, "101", "BBC ONE Lon HD")];
+        let id = |q| find_channel(&list, q).map(|c| c.id);
+        assert_eq!(id("4"), Some(156));
+        assert_eq!(id("more 4"), Some(143));
+        assert_eq!(id("bbc one"), Some(159)); // the lower number wins
+        assert_eq!(id("two"), Some(158));
+        assert_eq!(id("nope"), None);
+        assert_eq!(list[3].label(), "18 More 4");
+        assert!(list[0].order() < list[4].order());
     }
 }

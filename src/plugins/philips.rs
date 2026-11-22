@@ -175,7 +175,10 @@ fn jointspace(c: &Ctx, args: &[String]) -> Result<()> {
         }
         // unpaired, the plain-HTTP port answers 404 for anything not public
         _ if !paired(&c.tv) => Err(crate::pairing::required_error(PAIRING, &path)),
-        401 => failed(format!("jointspace: the TV rejected the saved pairing for {path}; pair again: 'tvbee pair jointspace'")),
+        // the TV says 401 for paths it doesn't have, too
+        401 => failed(format!(
+            "jointspace: the TV refused {path} (HTTP 401): it may not have that path; if every path fails, pair again ('tvbee pair jointspace')"
+        )),
         _ => {
             println!("{body}");
             failed(format!("jointspace: HTTP {status} for {path}"))
@@ -222,7 +225,7 @@ pub fn parse_events(out: &str) -> Vec<crate::provider::Event> {
                 return None;
             }
             Some(crate::provider::Event {
-                preset: preset.parse().ok()?,
+                channel: preset.parse().ok()?,
                 title: title.to_string(),
                 start: start.parse().ok()?,
                 end: end.parse().ok()?,
@@ -236,7 +239,7 @@ fn guide_query(tv: &Tv, filter: &str) -> Result<Vec<crate::provider::Event>> {
     tv.connect()?;
     let cmd = format!("content query --uri {GUIDE_URI} --projection {GUIDE_COLUMNS} --where '{filter}'");
     let mut events = parse_events(&tv.shell(&[&cmd])?);
-    events.sort_by_key(|e| (e.preset, e.start));
+    events.sort_by_key(|e| (e.channel, e.start));
     Ok(events)
 }
 
@@ -245,9 +248,9 @@ pub fn now_next_of(events: &[crate::provider::Event], at: i64) -> Vec<crate::pro
     let mut out: Vec<crate::provider::NowNext> = Vec::new();
     for e in events {
         let slot = match out.last_mut() {
-            Some(n) if n.preset == e.preset => n,
+            Some(n) if n.channel == e.channel => n,
             _ => {
-                out.push(crate::provider::NowNext { preset: e.preset, now: None, next: None });
+                out.push(crate::provider::NowNext { channel: e.channel, now: None, next: None });
                 out.last_mut().expect("just pushed")
             }
         };
@@ -285,29 +288,80 @@ impl crate::provider::Guide for Freeview {
         Ok(now_next_of(&events, at))
     }
 
-    fn schedule(&self, cx: &crate::provider::Cx, preset: u32, from: i64, to: i64) -> Result<Vec<crate::provider::Event>> {
-        guide_query(cx.tv, &format!("presetid={preset} AND endtime>{from} AND starttime<{to}"))
+    /// The guide's `presetid` is the channel's ccid.
+    fn schedule(&self, cx: &crate::provider::Cx, channel: u32, from: i64, to: i64) -> Result<Vec<crate::provider::Event>> {
+        let events = guide_query(cx.tv, &format!("presetid={channel} AND endtime>{from} AND starttime<{to}"))?;
+        // the TV ignores the filter, so apply it here too
+        Ok(events.into_iter().filter(|e| e.channel == channel && e.end > from && e.start < to).collect())
+    }
+}
+
+/// The channels in a JointSpace `channelLists/all` reply: broadcast ones
+/// only (not the apps' "channels" or analogue inputs). The ccid is what the
+/// broadcast guide calls `presetid`.
+pub fn parse_channel_list(json: &str) -> Vec<crate::provider::Channel> {
+    let Some(i) = json.find("\"Channel\"") else { return Vec::new() };
+    let list = &json[i..];
+    let Some(open) = list.find('[') else { return Vec::new() };
+    let mut out: Vec<crate::provider::Channel> = crate::http::objects(&list[open..])
+        .into_iter()
+        .filter(|o| crate::http::string_field(o, "type").is_some_and(|t| t.starts_with("DVB")))
+        .filter_map(|o| {
+            Some(crate::provider::Channel {
+                id: crate::http::number_field(o, "ccid")? as u32,
+                number: crate::http::string_field(o, "preset"),
+                name: crate::http::string_field(o, "name"),
+                radio: crate::http::string_field(o, "serviceType").is_some_and(|t| t.contains("radio") || t == "audio"),
+            })
+        })
+        .collect();
+    out.sort_by_key(crate::provider::Channel::order);
+    out
+}
+
+/// The channel in a `/6/activities/tv` reply:
+/// `{"channel":{"ccid":143,"preset":"18","name":"More 4"},"channelList":{...}}`.
+pub fn parse_current(json: &str) -> Option<crate::provider::Channel> {
+    let ch = crate::http::objects(json.split_once("\"channel\"")?.1).into_iter().next()?;
+    Some(crate::provider::Channel {
+        id: crate::http::number_field(ch, "ccid")? as u32,
+        number: crate::http::string_field(ch, "preset"),
+        name: crate::http::string_field(ch, "name"),
+        radio: false,
+    })
+}
+
+fn paired_ok(tv: &Tv, path: &str, what: &str) -> Result<String> {
+    match js_get_paired(tv, path, what)? {
+        (200, body) => Ok(body),
+        (401, _) => failed(format!("{what}: the TV refused the saved pairing (HTTP 401); if this keeps happening, pair again: 'tvbee pair jointspace'")),
+        (code, _) => failed(format!("{what}: the TV answered HTTP {code} for {path}")),
     }
 }
 
 impl crate::provider::Channels for Freeview {
-    /// The channels with something in the guide in the next hour.
+    /// From the TV's channel list (needs JointSpace pairing).
     fn list(&self, cx: &crate::provider::Cx) -> Result<Vec<crate::provider::Channel>> {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-        let mut presets: Vec<u32> = guide_query(cx.tv, &format!("endtime>{now} AND starttime<{}", now + 3600))?.iter().map(|e| e.preset).collect();
-        presets.dedup();
-        Ok(presets.into_iter().map(|preset| crate::provider::Channel { preset, name: None }).collect())
+        let list = parse_channel_list(&paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?);
+        if list.is_empty() {
+            return failed("the TV's channel list has no broadcast channels (tune them in the TV's settings)");
+        }
+        Ok(list)
     }
 
-    /// Not yet: the guide's preset numbers are the TV's internal service
-    /// numbers, not the channel numbers typed on the remote, so typing one
-    /// would land on the wrong channel. Needs the preset -> channel mapping
-    /// (JointSpace's channel list, after pairing).
-    fn tune(&self, _cx: &crate::provider::Cx, preset: u32) -> Result<String> {
-        failed(format!(
-            "watch: can't switch to preset {preset} yet: the guide's presets are the TV's internal numbers, not \
-             channel numbers. Use 'tvbee channel <number>' with the number from the TV's own channel list."
-        ))
+    /// What the TV app is tuned to (it stays tuned while other apps are in front).
+    fn current(&self, cx: &crate::provider::Cx) -> Result<Option<crate::provider::Channel>> {
+        Ok(parse_current(&paired_ok(cx.tv, "/6/activities/tv", "the current channel")?))
+    }
+
+    /// Type the channel number, as the remote does.
+    fn tune(&self, cx: &crate::provider::Cx, channel: &crate::provider::Channel) -> Result<String> {
+        let Some(number) = channel.number.as_deref().filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) else {
+            return failed(format!("watch: {} has no channel number to type", channel.label()));
+        };
+        cx.tv.connect()?;
+        super::input::channel_keys(number).into_iter().try_for_each(|k| cx.tv.keyevent(k))?;
+        Ok(format!("switching to {}", channel.label()))
     }
 }
 
@@ -353,17 +407,32 @@ Row: 3 eventname=NULL, presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL
         let e = parse_events(OUT);
         assert_eq!(e.len(), 3);
         assert_eq!(e[2].title, "News, Weather, and Sport");
-        assert_eq!((e[2].preset, e[2].start, e[2].end, e[2].genre), (1, 150, 250, Some(4)));
+        assert_eq!((e[2].channel, e[2].start, e[2].end, e[2].genre), (1, 150, 250, Some(4)));
         assert_eq!(e[1].genre, None);
+    }
+
+    #[test]
+    fn reads_channel_lists() {
+        let json = r#"{"version":1353,"id":"all","Channel":[
+            {"ccid":3,"preset":"1-1","name":"Play Movies & TV","type":"analog","serviceType":"audio_video"},
+            {"ccid":157,"preset":"3","name":"ITV1","onid":9018,"type":"DVB_T","serviceType":"audio_video"},
+            {"ccid":159,"preset":"1","name":"BBC ONE Lon","type":"DVB_T","serviceType":"audio_video"},
+            {"ccid":12,"preset":"722","name":"BBC Essex","type":"DVB_T","serviceType":"radio"}]}"#;
+        let list = parse_channel_list(json);
+        let labels: Vec<_> = list.iter().map(|c| c.label()).collect();
+        assert_eq!(labels, ["1 BBC ONE Lon", "3 ITV1", "722 BBC Essex"]);
+        assert_eq!((list[0].id, list[2].radio), (159, true));
+        let now = parse_current(r#"{"channel":{"ccid":143,"preset":"18","name":"More 4"},"channelList":{"id":"allter","version":"1352"}}"#).unwrap();
+        assert_eq!((now.id, now.number.as_deref(), now.name.as_deref()), (143, Some("18"), Some("More 4")));
     }
 
     #[test]
     fn works_out_now_and_next() {
         let mut e = parse_events(OUT);
-        e.sort_by_key(|x| (x.preset, x.start));
+        e.sort_by_key(|x| (x.channel, x.start));
         let nn = now_next_of(&e, 160);
         assert_eq!(nn.len(), 2);
-        assert_eq!(nn[0].preset, 1);
+        assert_eq!(nn[0].channel, 1);
         assert_eq!(nn[0].now.as_ref().map(|x| x.title.as_str()), Some("News, Weather, and Sport"));
         assert_eq!(nn[0].next, None);
         assert_eq!(nn[1].now.as_ref().map(|x| x.title.as_str()), Some("The Make a Difference Show"));
