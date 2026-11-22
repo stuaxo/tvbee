@@ -226,6 +226,10 @@ pub struct Guide {
     pub rows: Vec<GuideRow>,
     /// The channel the TV is tuned to.
     pub current: Option<u32>,
+    /// Favourite changes not on the TV yet.
+    pub pending: std::collections::BTreeMap<u32, bool>,
+    /// What syncing favourites found, for the status line.
+    pub news: Option<String>,
 }
 
 /// The first provider with both channels and a guide.
@@ -237,9 +241,11 @@ fn load_guide(tv: &Tv) -> Result<Guide> {
     let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV guide on this TV".into())) };
     let cx = crate::provider::Cx { tv };
     let (chans, guide) = (p.channels().expect("checked"), p.guide().expect("checked"));
-    let list = chans.list(&cx)?;
+    let (list, synced) = crate::favourites::channels(p, &cx)?;
     let nn = guide.now_next(&cx, crate::plugins::guide::now())?;
     let current = chans.current(&cx).ok().flatten().map(|c| c.id);
+    let news = synced.as_ref().and_then(|s| s.news(&list));
+    let pending = synced.map(|s| s.pending).unwrap_or_default();
     let rows = list
         .into_iter()
         .map(|channel| {
@@ -247,7 +253,7 @@ fn load_guide(tv: &Tv) -> Result<Guide> {
             GuideRow { now: n.and_then(|n| n.now.clone()), next: n.and_then(|n| n.next.clone()), channel }
         })
         .collect();
-    Ok(Guide { provider: p.name(), rows, current })
+    Ok(Guide { provider: p.name(), rows, current, pending, news })
 }
 
 /// The guide pop-up's tabs.
@@ -415,10 +421,14 @@ impl Worker {
             }
             Action::Favourite(ch, on) => {
                 let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
-                let done = p.channels().expect("checked").set_favourite(&crate::provider::Cx { tv: &self.tv }, &ch, on);
-                // either way, show the TV's own idea of the favourites
-                let _ = tx.send(Msg::Guide(load_guide(&self.tv).map_err(|e| e.to_string())));
-                done?
+                let done = crate::favourites::set(p, &crate::provider::Cx { tv: &self.tv }, ch.id, on);
+                // the guide as synced (a failure puts the star back)
+                let mut g = load_guide(&self.tv).map_err(|e| e.to_string());
+                if let Ok(g) = &mut g {
+                    g.news = None;
+                }
+                let _ = tx.send(Msg::Guide(g));
+                crate::plugins::guide::fav_message(&ch, on, &done?)
             }
             Action::Watch(ch) => {
                 let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
@@ -1154,6 +1164,9 @@ impl App {
             Msg::Searchable(list) => self.searchable = Some(list),
             Msg::Running(set) => self.running = set,
             Msg::Guide(g) => {
+                if let Some(news) = g.as_ref().ok().and_then(|g| g.news.clone()) {
+                    self.note = news;
+                }
                 // nothing picked yet: start on the channel that's on
                 if let (Overlay::Guide { tab, at: 0 }, Ok(g)) = (self.overlay, &g) {
                     let first = g.rows.first().map_or(0, |r| r.channel.id);
@@ -1854,7 +1867,9 @@ impl App {
                         for (i, r) in shown.iter().enumerate().skip(start).take(room) {
                             let mark = if g.current == Some(r.channel.id) { "▶" } else { " " };
                             let star = if r.channel.favourite { "★" } else { "☆" };
-                            let name = format!("{star} {}{}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
+                            // not on the TV yet: tvbee will send it when it can
+                            let wait = if g.pending.contains_key(&r.channel.id) { " ·" } else { "" };
+                            let name = format!("{star} {}{}{wait}", r.channel.label(), if r.channel.radio { " (radio)" } else { "" });
                             let line = Line::from(format!(
                                 "{mark}{}  {}  {}",
                                 fit(&name, ch_w + 1),
@@ -1871,7 +1886,7 @@ impl App {
                         }
                         text.push(Line::default());
                         let more = if shown.len() > room { format!("  ({} of {})", sel + 1, shown.len()) } else { String::new() };
-                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  tab/←/→ switch  ⏎/click watch  * or click ☆/★ favourite  ▶ on now  esc{more}")).fg(Color::DarkGray));
+                        text.push(Line::from(format!("↑/↓ pgup/pgdn choose  tab/←/→ switch  ⏎/click watch  * or ☆/★ favourite (· to sync)  ▶ on now  esc{more}")).fg(Color::DarkGray));
                         format!(" guide: {} ", g.provider)
                     }
                 };

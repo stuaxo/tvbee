@@ -2,6 +2,7 @@ mod devtools;
 mod dotenv;
 mod crypto;
 mod error;
+mod favourites;
 mod http;
 mod https;
 mod mdns;

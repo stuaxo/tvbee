@@ -95,9 +95,15 @@ pub trait Channels {
     }
     /// Switch to a channel; returns status-line feedback.
     fn tune(&self, cx: &Cx, channel: &Channel) -> Result<String>;
-    /// Make a channel a favourite or not; returns status-line feedback.
-    fn set_favourite(&self, _cx: &Cx, channel: &Channel, _on: bool) -> Result<String> {
-        crate::error::failed(format!("favourites can't be changed here ({})", channel.label()))
+    /// The favourite channels (by id) as the TV has them; None if this
+    /// provider has no favourites. tvbee syncs with these (`favourites`).
+    fn favourites(&self, _cx: &Cx) -> Option<Result<std::collections::BTreeSet<u32>>> {
+        None
+    }
+    /// Make channel `id` a favourite or not on the TV. Ok(false): it can't
+    /// right now (try again later).
+    fn write_favourite(&self, _cx: &Cx, _id: u32, _on: bool) -> Result<bool> {
+        crate::error::failed("favourites can't be changed here")
     }
 }
 

@@ -438,50 +438,48 @@ fn favourite_lists(tv: &Tv) -> Result<Vec<(String, Vec<u32>)>> {
 }
 
 /// Every channel in any of the user's favourite lists.
-fn favourites(tv: &Tv) -> Result<std::collections::BTreeSet<u32>> {
+fn tv_favourites(tv: &Tv) -> Result<std::collections::BTreeSet<u32>> {
     Ok(favourite_lists(tv)?.into_iter().flat_map(|(_, c)| c).collect())
 }
 
 /// The list new favourites go in ("Favourites 1").
 const FAVOURITE_LIST: &str = "1";
 
-/// Add (or remove) a channel in favourite list `list`.
+/// Add (or remove) a channel in favourite list `list`. Ok(false): not now.
 /// The TV only edits favourites while it's showing live TV (else HTTP 503),
 /// and for a few seconds after live TV comes up it still says 503: so with
 /// live TV in front, keep trying a while.
-fn modify_favourite(tv: &Tv, list: &str, ccid: u32, add: bool) -> Result<()> {
+fn modify_favourite(tv: &Tv, list: &str, ccid: u32, add: bool) -> Result<bool> {
     const LIVE_TV: &str = "org.droidtv.zapster";
-    let not_live = || failed("the TV only changes favourites while live TV is in front: switch to live TV first ('tvbee watch <channel>')");
     tv.connect()?;
     if super::info::focus_package(&tv.window_dump()?).as_deref() != Some(LIVE_TV) {
-        return not_live();
+        return Ok(false);
     }
     let body = format!(r#"{{"{}":{{"id":[{ccid}]}}}}"#, if add { "add" } else { "remove" });
     let start = std::time::Instant::now();
     loop {
         match js_post(tv, &format!("/6/channeldb/tv/modifyfavourite/{list}"), &body, "changing favourites")? {
-            (200, _) => return Ok(()),
+            (200, _) => return Ok(true),
             (503, _) if start.elapsed() < std::time::Duration::from_secs(8) => std::thread::sleep(std::time::Duration::from_secs(1)),
-            (503, _) => return not_live(),
+            (503, _) => return Ok(false),
             (code, reply) => return failed(format!("favourites: the TV refused (HTTP {code}): {}", reply.trim())),
         }
     }
 }
 
 impl crate::provider::Channels for Freeview {
-    /// From the TV's channel list (needs JointSpace pairing), with the
-    /// favourites from its favourite lists marked.
+    /// From the TV's channel list (needs JointSpace pairing).
     fn list(&self, cx: &crate::provider::Cx) -> Result<Vec<crate::provider::Channel>> {
-        let mut list = parse_channel_list(&paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?);
+        let list = parse_channel_list(&paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?);
         if list.is_empty() {
             return failed("the TV's channel list has no broadcast channels (tune them in the TV's settings)");
         }
-        // favourites are a nicety: the list stands without them
-        let favs = favourites(cx.tv).unwrap_or_default();
-        for ch in &mut list {
-            ch.favourite = favs.contains(&ch.id);
-        }
         Ok(list)
+    }
+
+    /// Every channel in any of the TV's favourite lists.
+    fn favourites(&self, cx: &crate::provider::Cx) -> Option<Result<std::collections::BTreeSet<u32>>> {
+        Some(tv_favourites(cx.tv))
     }
 
     /// What the TV app is tuned to (it stays tuned while other apps are in front).
@@ -490,20 +488,17 @@ impl crate::provider::Channels for Freeview {
     }
 
     /// Adding puts it in Favourites 1; removing takes it out of every list
-    /// it's in, so it stops showing as a favourite.
-    fn set_favourite(&self, cx: &crate::provider::Cx, channel: &crate::provider::Channel, on: bool) -> Result<String> {
+    /// it's in, so it stops being a favourite.
+    fn write_favourite(&self, cx: &crate::provider::Cx, id: u32, on: bool) -> Result<bool> {
         if on {
-            modify_favourite(cx.tv, FAVOURITE_LIST, channel.id, true)?;
-            return Ok(format!("added {} to Favourites {FAVOURITE_LIST}", channel.label()));
+            return modify_favourite(cx.tv, FAVOURITE_LIST, id, true);
         }
-        let lists: Vec<String> = favourite_lists(cx.tv)?.into_iter().filter(|(_, c)| c.contains(&channel.id)).map(|(id, _)| id).collect();
-        if lists.is_empty() {
-            return Ok(format!("{} isn't a favourite", channel.label()));
+        for (list, ccids) in favourite_lists(cx.tv)? {
+            if ccids.contains(&id) && !modify_favourite(cx.tv, &list, id, false)? {
+                return Ok(false);
+            }
         }
-        for list in &lists {
-            modify_favourite(cx.tv, list, channel.id, false)?;
-        }
-        Ok(format!("removed {} from favourites", channel.label()))
+        Ok(true)
     }
 
     /// Through JointSpace: the TV brings live TV to the front on that

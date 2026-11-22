@@ -145,7 +145,7 @@ fn channels(c: &Ctx, args: &[String]) -> Result<()> {
     let p = channel_provider(id.as_deref())?;
     let cx = Cx { tv: &c.tv };
     let chans = p.channels().expect("checked");
-    let list = chans.list(&cx)?;
+    let (list, _) = crate::favourites::channels(p, &cx)?;
     let current = chans.current(&cx).ok().flatten().map(|ch| ch.id);
     // what's on each, if there's a guide too
     let (at, off) = (now(), utc_offset());
@@ -154,7 +154,8 @@ fn channels(c: &Ctx, args: &[String]) -> Result<()> {
         let title = on.iter().find(|n| n.channel == ch.id).and_then(|n| n.now.as_ref()).map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
         let radio = if ch.radio { " (radio)" } else { "" };
         let mark = if current == Some(ch.id) { "  <- on now" } else { "" };
-        println!("{}  {}{mark}", fit(&format!("{}{radio}", ch.label()), 30), title);
+        let star = if ch.favourite { "★" } else { " " };
+        println!("{star} {}  {}{mark}", fit(&format!("{}{radio}", ch.label()), 30), title);
     }
     Ok(())
 }
@@ -199,16 +200,28 @@ fn fav(c: &Ctx, args: &[String]) -> Result<()> {
     let (words, id) = provider_flag(args);
     let p = channel_provider(id.as_deref())?;
     let cx = Cx { tv: &c.tv };
-    let chans = p.channels().expect("checked");
-    let list = chans.list(&cx)?;
+    let (list, synced) = crate::favourites::channels(p, &cx)?;
+    let Some(synced) = synced else { return failed(format!("{} has no favourites", p.name())) };
     let (on, query) = match words.split_first() {
         None => {
+            if let Some(news) = synced.news(&list) {
+                println!("({news})");
+            }
+            if let Some(why) = &synced.problem {
+                println!("(couldn't sync with the TV: {why})");
+            }
             let favs: Vec<_> = list.iter().filter(|ch| ch.favourite).collect();
             if favs.is_empty() {
-                println!("no favourites yet ('tvbee fav add <channel>', with live TV in front)");
+                println!("no favourites yet ('tvbee fav add <channel>')");
             }
             for ch in favs {
-                println!("★ {}", ch.label());
+                let wait = if synced.pending.contains_key(&ch.id) { "  (not on the TV yet)" } else { "" };
+                println!("★ {}{wait}", ch.label());
+            }
+            for (gone, _) in synced.pending.iter().filter(|(_, on)| !**on) {
+                if let Some(ch) = list.iter().find(|c| c.id == *gone) {
+                    println!("  {}  (being removed: still on the TV)", ch.label());
+                }
             }
             return Ok(());
         }
@@ -218,8 +231,23 @@ fn fav(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(ch) = provider::find_channel(&list, &query) else {
         return failed(format!("fav: no channel '{query}' (see 'tvbee channels')"));
     };
-    println!("{}", chans.set_favourite(&cx, ch, on)?);
+    let s = crate::favourites::set(p, &cx, ch.id, on)?;
+    println!("{}", fav_message(ch, on, &s));
+    if let Some(news) = s.news(&list).filter(|_| s.sent.iter().any(|(id, _)| *id != ch.id) || !s.on_tv.is_empty()) {
+        println!("({news})");
+    }
     Ok(())
+}
+
+/// What happened to a favourite change, for the status line.
+pub fn fav_message(ch: &provider::Channel, on: bool, s: &crate::favourites::Sync) -> String {
+    let what = if on { "added" } else { "removed" };
+    match (s.pending.contains_key(&ch.id), &s.problem) {
+        (false, _) => format!("{what} {}", ch.label()),
+        (true, Some(why)) => format!("saved: {} will be {what} on the TV later (now: {why})", ch.label()),
+        // Philips TVs only take changes with live TV in front
+        (true, None) => format!("saved: {} will be {what} on the TV next time live TV is in front", ch.label()),
+    }
 }
 
 fn providers(_: &Ctx, _: &[String]) -> Result<()> {
@@ -254,9 +282,11 @@ pub fn commands() -> Vec<Command> {
             "  tvbee fav                  list them\n\
              \x20 tvbee fav add more 4       add a channel (by number or name)\n\
              \x20 tvbee fav remove 18        remove one\n\
-             On Philips TVs: new favourites go in the TV's Favourites 1 list, removing\n\
-             takes a channel out of every list, and the TV only allows changes while\n\
-             live TV is in front.",
+             Changes are kept by tvbee and synced with the TV: they go to it as soon\n\
+             as it takes them (Philips TVs: only with live TV in front), and changes\n\
+             made on the TV itself are noticed. If both sides changed a channel, the\n\
+             later change wins. On Philips TVs new favourites go in Favourites 1, and\n\
+             removing takes a channel out of every list.",
         ),
         Command::new(CAT, "providers", "", "content providers and what each can do", providers).long(
             "Providers are the sources of content tvbee knows (live TV, YouTube, ...),\n\

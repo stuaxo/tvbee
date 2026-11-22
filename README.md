@@ -80,7 +80,7 @@ A few examples:
     tvbee guide                       # now/next on live TV (from the over-the-air guide)
     tvbee guide bbc two               # one channel's programmes today
     tvbee watch more 4                # switch live TV by channel number or name
-    tvbee fav add more 4              # add a favourite channel (with live TV in front)
+    tvbee fav add more 4              # add a favourite (synced with the TV)
     tvbee status --watch              # the same plus power, volume, memory, storage; live
     tvbee launch youtube
     tvbee home --set projectivy       # choose the default home app (see --list)
