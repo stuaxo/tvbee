@@ -295,13 +295,10 @@ type Infos = std::sync::Arc<std::collections::HashMap<(u32, i64), String>>;
 static INFOS: std::sync::Mutex<Option<(String, std::time::Instant, Infos)>> = std::sync::Mutex::new(None);
 /// Rows a page: about 1MB with descriptions, well inside the 2MB a query can return.
 const INFO_PAGE: usize = 4000;
-/// Where this guide comes from, as the cache records it: the TV's own
-/// broadcast (over the air) guide.
-const SOURCE: &str = "broadcast";
 
 /// How long ago `what` was read from the TV into the cache, if it was.
 fn cache_age(c: &mut diesel::sqlite::SqliteConnection, tv: &Tv, what: &str) -> Option<std::time::Duration> {
-    let at = crate::store::fetched_at(c, &tv.ip, SOURCE, what).ok()??;
+    let at = crate::store::fetched_at(c, &tv.ip, &guide_source(tv), what).ok()??;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
     Some(std::time::Duration::from_secs(now.saturating_sub(at).max(0) as u64))
 }
@@ -318,7 +315,7 @@ fn guide_infos(tv: &Tv) -> Result<Infos> {
     let mut db = crate::store::open().ok();
     let cached = db.as_mut().and_then(|c| {
         let age = cache_age(c, tv, "descriptions").filter(|a| *a < GUIDE_FRESH)?;
-        Some((crate::store::load_descriptions(c, &tv.ip, SOURCE).ok()?, std::time::Instant::now() - age))
+        Some((crate::store::load_descriptions(c, &tv.ip, &guide_source(tv)).ok()?, std::time::Instant::now() - age))
     });
     let (map, at) = match cached {
         Some(c) => c,
@@ -337,7 +334,7 @@ fn guide_infos(tv: &Tv) -> Result<Infos> {
                 }
             }
             if let Some(c) = db.as_mut() {
-                let _ = crate::store::save_descriptions(c, &tv.ip, SOURCE, &all);
+                let _ = crate::store::save_descriptions(c, &tv.ip, &guide_source(tv), &all);
             }
             (all.into_iter().map(|(ch, start, info)| ((ch, start), info)).collect(), std::time::Instant::now())
         }
@@ -360,7 +357,7 @@ fn guide_events(tv: &Tv) -> Result<Guide> {
     let mut db = crate::store::open().ok();
     let cached = db.as_mut().and_then(|c| {
         let age = cache_age(c, tv, "events").filter(|a| *a < GUIDE_FRESH)?;
-        let events = crate::store::load_events(c, &tv.ip, SOURCE).ok().filter(|e| !e.is_empty())?;
+        let events = crate::store::load_events(c, &tv.ip, &guide_source(tv)).ok().filter(|e| !e.is_empty())?;
         Some((events, std::time::Instant::now() - age))
     });
     let (events, at) = match cached {
@@ -371,7 +368,7 @@ fn guide_events(tv: &Tv) -> Result<Guide> {
             let mut events = parse_events(&tv.shell(&[&cmd])?);
             events.sort_by_key(|e| (e.channel, e.start));
             if let Some(c) = db.as_mut() {
-                let _ = crate::store::save_events(c, &tv.ip, SOURCE, &events);
+                let _ = crate::store::save_events(c, &tv.ip, &guide_source(tv), &events);
             }
             (events, std::time::Instant::now())
         }
@@ -453,6 +450,11 @@ pub fn parse_channel_list(json: &str) -> Vec<crate::provider::Channel> {
                 name: crate::http::string_field(o, "name").map(|n| clean(&n)),
                 radio: crate::http::string_field(o, "serviceType").is_some_and(|t| t.contains("radio") || t == "audio"),
                 favourite: false,
+                delivery: crate::http::string_field(o, "type").map(|t| crate::provider::Delivery::parse(&t)),
+                dvb: match (crate::http::number_field(o, "onid"), crate::http::number_field(o, "tsid"), crate::http::number_field(o, "sid")) {
+                    (Some(on), Some(ts), Some(s)) => Some((on as u16, ts as u16, s as u16)),
+                    _ => None,
+                },
             })
         })
         .collect();
@@ -468,9 +470,33 @@ pub fn parse_current(json: &str) -> Option<crate::provider::Channel> {
         id: crate::http::number_field(ch, "ccid")? as u32,
         number: crate::http::string_field(ch, "preset"),
         name: crate::http::string_field(ch, "name"),
-        radio: false,
-        favourite: false,
+        ..Default::default()
     })
+}
+
+/// The country the TV was set up for, from a `channelLists/all` reply.
+pub fn parse_list_country(json: &str) -> Option<String> {
+    crate::http::string_field(json, "installCountry").filter(|c| !c.is_empty())
+}
+
+/// The network the last channel list read showed, per TV.
+static NETWORK: std::sync::Mutex<Option<(String, crate::provider::Network)>> = std::sync::Mutex::new(None);
+
+fn remembered_network(tv: &Tv) -> Option<crate::provider::Network> {
+    let n = NETWORK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    n.as_ref().filter(|(ip, _)| *ip == tv.ip).map(|(_, net)| net.clone())
+}
+
+/// Where this guide's data comes from, for the cache: the TV's broadcast
+/// guide for its aerial, and the DVB network the channel list shows
+/// (`broadcast:antenna:9018` is Freeview's). Paired, the list is read for
+/// that if it hasn't been yet; else it's just `broadcast:antenna`.
+fn guide_source(tv: &Tv) -> String {
+    let net = remembered_network(tv).or_else(|| paired(tv).then(|| crate::provider::Channels::network(&FREEVIEW, &crate::provider::Cx { tv })).flatten());
+    match net.and_then(|n| n.onid) {
+        Some(onid) => format!("broadcast:antenna:{onid}"),
+        None => "broadcast:antenna".into(),
+    }
 }
 
 fn paired_ok(tv: &Tv, path: &str, what: &str) -> Result<String> {
@@ -544,13 +570,25 @@ fn modify_favourite(tv: &Tv, list: &str, ccid: u32, add: bool) -> Result<bool> {
 }
 
 impl crate::provider::Channels for Freeview {
-    /// From the TV's channel list (needs JointSpace pairing).
+    /// From the TV's channel list (needs JointSpace pairing); notes the
+    /// network it shows, for [`Channels::network`].
     fn list(&self, cx: &crate::provider::Cx) -> Result<Vec<crate::provider::Channel>> {
-        let list = parse_channel_list(&paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?);
+        let json = paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?;
+        let list = parse_channel_list(&json);
         if list.is_empty() {
             return failed("the TV's channel list has no broadcast channels (tune them in the TV's settings)");
         }
+        let net = crate::provider::Network::of(&list, parse_list_country(&json));
+        *NETWORK.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((cx.tv.ip.clone(), net));
         Ok(list)
+    }
+
+    /// From the channel list (read now if it hasn't been yet).
+    fn network(&self, cx: &crate::provider::Cx) -> Option<crate::provider::Network> {
+        remembered_network(cx.tv).or_else(|| {
+            self.list(cx).ok()?;
+            remembered_network(cx.tv)
+        })
     }
 
     /// Every channel in any of the TV's favourite lists.
@@ -657,7 +695,7 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
 
     #[test]
     fn builds_tune_requests() {
-        let ch = crate::provider::Channel { id: 143, number: Some("18".into()), name: Some("More \"4\"".into()), radio: false, favourite: false };
+        let ch = crate::provider::Channel { id: 143, number: Some("18".into()), name: Some("More \"4\"".into()), radio: false, favourite: false, delivery: None, dvb: None };
         assert_eq!(
             tune_body(&ch, r#"{"id":"allter","version":"1352"}"#),
             r#"{"channel":{"ccid":143,"preset":"18","name":"More \"4\""},"channelList":{"id":"allter","version":"1352"}}"#
@@ -696,10 +734,14 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
     fn reads_channel_lists() {
         let json = r#"{"version":1353,"id":"all","Channel":[
             {"ccid":3,"preset":"1-1","name":"Play Movies & TV","type":"analog","serviceType":"audio_video"},
-            {"ccid":157,"preset":"3","name":"ITV1","onid":9018,"type":"DVB_T","serviceType":"audio_video"},
+            {"ccid":157,"preset":"3","name":"ITV1","onid":9018,"tsid":8197,"sid":8261,"type":"DVB_T","serviceType":"audio_video"},
             {"ccid":159,"preset":"1","name":"BBC ONE Lon","type":"DVB_T","serviceType":"audio_video"},
             {"ccid":12,"preset":"722","name":"BBC Essex","type":"DVB_T","serviceType":"radio"}]}"#;
         let list = parse_channel_list(json);
+        assert_eq!((list[1].delivery, list[1].dvb), (Some(crate::provider::Delivery::DvbT), Some((9018, 8197, 8261))));
+        assert_eq!(parse_list_country(r#"{"version":1353,"installCountry":"United Kingdom","Channel":[]}"#).as_deref(), Some("United Kingdom"));
+        let net = crate::provider::Network::of(&list, Some("United Kingdom".into()));
+        assert_eq!((net.onid, net.deliveries), (Some(9018), vec![crate::provider::Delivery::DvbT]));
         let labels: Vec<_> = list.iter().map(|c| c.label()).collect();
         assert_eq!(labels, ["1 BBC ONE Lon", "3 ITV1", "722 BBC Essex"]);
         assert_eq!((list[0].id, list[2].radio), (159, true));

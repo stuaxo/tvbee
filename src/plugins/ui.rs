@@ -373,6 +373,10 @@ const GUIDE_STEP: i64 = 30 * 60;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Guide {
     pub provider: &'static str,
+    /// "Freeview, United Kingdom (DVB-T, DVB-T2)", if the provider knows its network.
+    pub place: Option<String>,
+    /// How the network groups its channel numbers (for sub-headers).
+    pub lineup: Option<&'static crate::lineups::Lineup>,
     pub rows: Vec<GuideRow>,
     /// The channel the TV is tuned to.
     pub current: Option<u32>,
@@ -404,7 +408,43 @@ fn load_guide(tv: &Tv) -> Result<Guide> {
             GuideRow { channel, events }
         })
         .collect();
-    Ok(Guide { provider: p.name(), rows, current, pending, news })
+    let net = chans.network(&cx);
+    let place = net.as_ref().map(crate::provider::describe);
+    let lineup = net.as_ref().and_then(crate::lineups::find);
+    Ok(Guide { provider: p.name(), place, lineup, rows, current, pending, news })
+}
+
+/// A line of the guide's channel list: a group's sub-header, or channel row N.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuideItem<'a> {
+    Header(&'a str),
+    Row(usize),
+}
+
+/// The lines to show of a list whose rows are in `groups` (each row's group,
+/// None if ungrouped): a header where the group changes, `room` lines around
+/// row `sel`. Scrolled into a group, its header stays at the top.
+pub fn guide_items<'a>(groups: &[Option<&'a str>], sel: usize, room: usize) -> Vec<GuideItem<'a>> {
+    let mut all = Vec::new();
+    let mut last = None;
+    for (i, g) in groups.iter().enumerate() {
+        if g.is_some() && *g != last {
+            all.push(GuideItem::Header(g.unwrap_or_default()));
+        }
+        last = *g;
+        all.push(GuideItem::Row(i));
+    }
+    let at = all.iter().position(|it| *it == GuideItem::Row(sel)).unwrap_or(0);
+    let start = at.saturating_sub(room / 2).min(all.len().saturating_sub(room));
+    let mut out: Vec<GuideItem> = all.iter().copied().skip(start).take(room).collect();
+    // the top line mid-group: show the group instead (not over the selected
+    // row, and only if the group carries on below it)
+    if let (Some(GuideItem::Row(i)), Some(GuideItem::Row(j)), true) = (out.first().copied(), out.get(1).copied(), start > 0) {
+        if let (Some(g), true) = (groups[i], i != sel && groups[j] == groups[i]) {
+            out[0] = GuideItem::Header(g);
+        }
+    }
+    out
 }
 
 /// The guide pop-up's tabs.
@@ -2233,8 +2273,19 @@ impl App {
                             ids.push(None);
                         }
                         let sel = shown.iter().position(|r| r.channel.id == at).unwrap_or(0);
-                        let start = sel.saturating_sub(room / 2).min(shown.len().saturating_sub(room));
-                        for (i, r) in shown.iter().enumerate().skip(start).take(room) {
+                        // sub-headers from the country's lineup (Entertainment, HD, ...)
+                        let groups: Vec<Option<&str>> = shown.iter().map(|r| g.lineup.map(|l| l.group(r.channel.order().0))).collect();
+                        for item in guide_items(&groups, sel, room) {
+                            let i = match item {
+                                GuideItem::Header(name) => {
+                                    let rule = "─".repeat(total.saturating_sub(name.chars().count() + 4));
+                                    text.push(Line::from(vec![Span::styled(format!(" ─ {name} "), Style::new().fg(Color::Magenta).bold()), Span::styled(rule, dim)]));
+                                    ids.push(None);
+                                    continue;
+                                }
+                                GuideItem::Row(i) => i,
+                            };
+                            let r = shown[i];
                             let mark = if g.current == Some(r.channel.id) { "▶" } else { " " };
                             let star = if r.channel.favourite { "★" } else { "☆" };
                             // not on the TV yet: tvbee will send it when it can
@@ -2350,7 +2401,7 @@ impl App {
                             format!("↑/↓ choose  ←/→ half an hour  tab switch  ⏎/click watch  * favourite  shift+tab details  esc{more}")
                         };
                         text.push(Line::from(keys).fg(Color::DarkGray));
-                        format!(" guide: {} ", g.provider)
+                        format!(" guide: {} ", g.place.as_deref().unwrap_or(g.provider))
                     }
                 };
                 let r = popup(f, &title, text, Color::Magenta);
@@ -2860,9 +2911,27 @@ pub fn commands() -> Vec<Command> {
 mod tests {
 
     #[test]
+    fn guide_sub_headers() {
+        use GuideItem::{Header, Row};
+        let g = [Some("Ent"), Some("Ent"), Some("HD"), Some("HD"), Some("Radio")];
+        // all of it
+        assert_eq!(guide_items(&g, 0, 10), [Header("Ent"), Row(0), Row(1), Header("HD"), Row(2), Row(3), Header("Radio"), Row(4)]);
+        // the selected row centred
+        assert_eq!(guide_items(&g, 3, 4), [Header("HD"), Row(2), Row(3), Header("Radio")]);
+        // scrolled into a group: its header stays at the top
+        let long = [Some("Ent"); 6];
+        assert_eq!(guide_items(&long, 4, 3), [Header("Ent"), Row(4), Row(5)]);
+        // ... but not when the next line starts another group
+        assert_eq!(guide_items(&g, 4, 3), [Row(3), Header("Radio"), Row(4)]);
+        // ungrouped (no lineup): just rows
+        assert_eq!(guide_items(&[None, None], 1, 5), [Row(0), Row(1)]);
+        assert!(guide_items(&[], 0, 5).is_empty());
+    }
+
+    #[test]
     fn guide_filters_and_moves() {
         let row = |id: u32, n: &str, name: &str, now: &str, fav: bool| GuideRow {
-            channel: crate::provider::Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: fav },
+            channel: crate::provider::Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: fav, delivery: None, dvb: None },
             events: vec![crate::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None, info: None }],
         };
         let rows = [

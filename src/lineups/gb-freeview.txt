@@ -1,0 +1,20 @@
+# Freeview: digital terrestrial TV in the United Kingdom (DVB-T and DVB-T2).
+# Channel numbers are grouped by kind. Ranges from the section headings of
+# Wikipedia's "List of DTT channels in the United Kingdom" (as of
+# 18 November 2026); the page lists the channels under each heading but
+# doesn't state the ranges, so the edges here are read from those numbers.
+#
+#   name / country / onid   which lineup this is (onid: DVB original network id)
+#   <from>[-<to>] <group>   channel numbers and the group they're in
+name     Freeview
+country  United Kingdom
+onid     9018
+1-100    Entertainment
+101-199  HD
+200-229  Children's
+230-249  News
+250      Text
+251-299  Streamed
+600-669  Interactive
+670-699  Adult
+700-799  Radio

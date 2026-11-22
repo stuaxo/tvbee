@@ -18,7 +18,7 @@ use diesel::sqlite::SqliteConnection;
 use std::collections::HashMap;
 
 /// Bump when the tables change: the database is then rebuilt.
-const SCHEMA: i32 = 1;
+const SCHEMA: i32 = 2;
 
 mod schema {
     diesel::table! {

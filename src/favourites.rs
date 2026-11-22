@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn tells_what_happened() {
-        let ch = |id, n: &str| Channel { id, number: Some(n.into()), name: None, radio: false, favourite: false };
+        let ch = |id, n: &str| Channel { id, number: Some(n.into()), name: None, radio: false, favourite: false, delivery: None, dvb: None };
         let s = Sync { on_tv: vec![(158, true)], sent: vec![(143, false)], ..Sync::default() };
         assert_eq!(s.news(&[ch(158, "2"), ch(143, "18")]).as_deref(), Some("changed on the TV: +2; sent to the TV: -18"));
         assert_eq!(Sync::default().news(&[]), None);

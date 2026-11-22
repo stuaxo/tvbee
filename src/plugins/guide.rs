@@ -150,7 +150,19 @@ fn channels(c: &Ctx, args: &[String]) -> Result<()> {
     // what's on each, if there's a guide too
     let (at, off) = (now(), utc_offset());
     let on: Vec<provider::NowNext> = p.guide().and_then(|g| g.now_next(&cx, at).ok()).unwrap_or_default();
+    // grouped the way the country's lineup numbers them (Entertainment, HD, ...)
+    let net = chans.network(&cx);
+    let lineup = net.as_ref().and_then(crate::lineups::find);
+    if let Some(net) = &net {
+        println!("{}", provider::describe(net));
+    }
+    let mut group = None;
     for ch in list.iter().filter(|ch| kind.is_none_or(|r| ch.radio == r)) {
+        let g = lineup.map(|l| l.group(ch.order().0));
+        if g.is_some() && g != group {
+            println!("\n{}:", g.unwrap_or_default());
+            group = g;
+        }
         let title = on.iter().find(|n| n.channel == ch.id).and_then(|n| n.now.as_ref()).map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
         let radio = if ch.radio { " (radio)" } else { "" };
         let mark = if current == Some(ch.id) { "  <- on now" } else { "" };
@@ -264,13 +276,17 @@ pub fn fav_message(ch: &provider::Channel, on: bool, s: &crate::favourites::Sync
     }
 }
 
-fn providers(_: &Ctx, _: &[String]) -> Result<()> {
+fn providers(c: &Ctx, _: &[String]) -> Result<()> {
     let all = provider::all();
     if all.is_empty() {
         println!("no providers enabled (see 'tvbee plugins')");
     }
     for p in all {
         println!("{:<10} {:<24} {:<28} {}", p.id(), p.name(), p.hosts().join(","), provider::capabilities(*p).join(", "));
+        // where its channels come from, if it can say (Philips: needs pairing)
+        if let Some(net) = p.channels().and_then(|ch| ch.network(&Cx { tv: &c.tv })) {
+            println!("{:<10} {}", "", provider::describe(&net));
+        }
     }
     Ok(())
 }

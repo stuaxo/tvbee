@@ -19,7 +19,7 @@ pub struct Cx<'a> {
 
 /// A channel. `id` is the provider's own id for it (what guide events refer
 /// to); `number` is what you'd type on the remote.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Channel {
     pub id: u32,
     pub number: Option<String>,
@@ -27,6 +27,73 @@ pub struct Channel {
     pub radio: bool,
     /// In one of the user's favourite lists.
     pub favourite: bool,
+    /// How it's broadcast, if the provider says.
+    pub delivery: Option<Delivery>,
+    /// Its DVB service: (original network, transport stream, service). The
+    /// same after a retune, unlike `id`, and the same in any guide.
+    pub dvb: Option<(u16, u16, u16)>,
+}
+
+/// How a channel reaches the TV.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Delivery {
+    DvbT,
+    DvbT2,
+    DvbC,
+    DvbS,
+    Analog,
+    Other,
+}
+
+impl Delivery {
+    /// From the names TVs use: "DVB_T", "DVB-T2", "analog", ...
+    pub fn parse(s: &str) -> Delivery {
+        match s.to_ascii_uppercase().replace('-', "_").as_str() {
+            "DVB_T" => Delivery::DvbT,
+            "DVB_T2" => Delivery::DvbT2,
+            "DVB_C" | "DVB_C2" => Delivery::DvbC,
+            "DVB_S" | "DVB_S2" => Delivery::DvbS,
+            "ANALOG" | "ANALOGUE" => Delivery::Analog,
+            _ => Delivery::Other,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Delivery::DvbT => "DVB-T",
+            Delivery::DvbT2 => "DVB-T2",
+            Delivery::DvbC => "DVB-C",
+            Delivery::DvbS => "DVB-S",
+            Delivery::Analog => "analogue",
+            Delivery::Other => "other",
+        }
+    }
+}
+
+/// Where a provider's channels come from: the country the TV was set up
+/// for, the DVB network, and how they're broadcast.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Network {
+    pub country: Option<String>,
+    /// The DVB original network id most of the channels share.
+    pub onid: Option<u16>,
+    pub deliveries: Vec<Delivery>,
+}
+
+impl Network {
+    /// From the channels and the country: the commonest network id, and
+    /// every kind of broadcast in use (analogue inputs left out).
+    pub fn of(channels: &[Channel], country: Option<String>) -> Network {
+        let mut count: std::collections::BTreeMap<u16, usize> = std::collections::BTreeMap::new();
+        for (onid, _, _) in channels.iter().filter_map(|c| c.dvb) {
+            *count.entry(onid).or_default() += 1;
+        }
+        let onid = count.into_iter().max_by_key(|(_, n)| *n).map(|(o, _)| o);
+        let mut deliveries: Vec<Delivery> = channels.iter().filter_map(|c| c.delivery).filter(|d| *d != Delivery::Analog).collect();
+        deliveries.sort();
+        deliveries.dedup();
+        Network { country, onid, deliveries }
+    }
 }
 
 impl Channel {
@@ -121,6 +188,10 @@ pub trait Channels {
     }
     /// Switch to a channel; returns status-line feedback.
     fn tune(&self, cx: &Cx, channel: &Channel) -> Result<String>;
+    /// Where the channels come from (country, network, broadcast kind).
+    fn network(&self, _cx: &Cx) -> Option<Network> {
+        None
+    }
     /// The favourite channels (by id) as the TV has them; None if this
     /// provider has no favourites. tvbee syncs with these (`favourites`).
     fn favourites(&self, _cx: &Cx) -> Option<Result<std::collections::BTreeSet<u32>>> {
@@ -178,6 +249,18 @@ pub trait Provider: Sync {
     fn channels(&self) -> Option<&dyn Channels> {
         None
     }
+}
+
+/// "Freeview, United Kingdom (DVB-T, DVB-T2)": the lineup's name where one
+/// is known, else the country; then how it's broadcast.
+pub fn describe(net: &Network) -> String {
+    let place = match (crate::lineups::find(net), &net.country) {
+        (Some(l), _) => l.title(),
+        (None, Some(c)) => c.clone(),
+        (None, None) => "unknown network".into(),
+    };
+    let how: Vec<&str> = net.deliveries.iter().map(|d| d.as_str()).collect();
+    if how.is_empty() { place } else { format!("{place} ({})", how.join(", ")) }
 }
 
 /// The capabilities a provider has, by name (for `tvbee providers`).
@@ -244,7 +327,7 @@ mod tests {
 
     #[test]
     fn finds_channels() {
-        let ch = |id, n: &str, name: &str| Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: false };
+        let ch = |id, n: &str, name: &str| Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: false, delivery: None, dvb: None };
         let list = vec![ch(159, "1", "BBC ONE Lon"), ch(158, "2", "BBC TWO"), ch(156, "4", "Channel 4"), ch(143, "18", "More 4"), ch(9, "101", "BBC ONE Lon HD")];
         let id = |q| find_channel(&list, q).map(|c| c.id);
         assert_eq!(id("4"), Some(156));

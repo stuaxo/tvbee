@@ -4,6 +4,7 @@ mod crypto;
 mod error;
 mod favourites;
 mod http;
+mod lineups;
 mod https;
 mod mdns;
 mod menu;
