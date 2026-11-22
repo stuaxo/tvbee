@@ -110,9 +110,8 @@ pub fn activity_with(
     let (what, title) = describe(pkg, who.as_ref().map(|(n, k)| (n.as_str(), *k)), session)?;
     // the devtools round trip is only worth it while something is on
     let (mut url, mut progress) = (None, None);
-    if let (Some(link), Some(s)) = (app.and_then(|a| a.page_url), session)
-        && (s.playing() || s.paused())
-    {
+    let on = session.filter(|s| s.playing() || s.paused());
+    if let (Some(link), Some(_)) = (app.and_then(|a| a.page_url), on) {
         let pages = pages();
         url = pages.iter().find_map(|p| link(&p.url));
         progress = pages.iter().find_map(|p| p.progress);

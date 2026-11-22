@@ -3,7 +3,6 @@ use crate::plugin::{self, Mode};
 use crate::registry::{self, Command};
 use crate::Ctx;
 use std::io::Write;
-use std::os::unix::process::CommandExt;
 use std::process::{Command as Proc, Stdio};
 use std::time::Duration;
 
@@ -28,19 +27,50 @@ _tvbee() {
 complete -F _tvbee tvbee
 "#;
 
-/// Case-insensitive extended-regex filter via `grep -iE`.
+/// Hand over to `cmd`: on Unix it replaces tvbee (so signals and the
+/// terminal go straight to it); elsewhere tvbee runs it, waits, and exits
+/// with its status.
+pub fn run_replacing(cmd: &mut Proc) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(cmd.exec().into())
+    }
+    #[cfg(not(unix))]
+    {
+        let status = cmd.status()?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
+}
+
+/// Case-insensitive extended-regex filter via `grep -iE`. Where there is no
+/// grep (Windows), falls back to a case-insensitive substring match.
 pub fn grep_i(text: &str, pattern: &str) -> Result<String> {
-    let mut child = Proc::new("grep")
+    let spawned = Proc::new("grep")
         .args(["-iE", "--", pattern])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()?;
+        .spawn();
+    let mut child = match spawned {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("note: grep not found; matching '{pattern}' as plain text, not a regex");
+            return Ok(contains_i(text, pattern));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut stdin = child.stdin.take().expect("piped");
     let input = text.to_string();
     let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
     let out = child.wait_with_output()?;
     let _ = writer.join();
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Lines of `text` containing `needle`, ignoring case.
+pub fn contains_i(text: &str, needle: &str) -> String {
+    let needle = needle.to_lowercase();
+    text.lines().filter(|l| l.to_lowercase().contains(&needle)).map(|l| format!("{l}\n")).collect()
 }
 
 fn wait(c: &Ctx, args: &[String]) -> Result<()> {
@@ -88,7 +118,7 @@ fn debloat(_: &Ctx, args: &[String]) -> Result<()> {
     let env = std::env::var("TV_DEBLOAT").ok();
     let cwd = std::env::current_dir()?;
     let script = find_debloat(env.as_deref(), &cwd).or_else(|why| failed(format!("debloat: {why}")))?;
-    Err(Proc::new(script).args(args).exec().into())
+    run_replacing(Proc::new(script).args(args))
 }
 
 fn commands_list(c: &Ctx, _: &[String]) -> Result<()> {
@@ -189,6 +219,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn plain_text_filter() {
+        assert_eq!(contains_i("Foo bar\nbaz\nFOO\n", "foo"), "Foo bar\nFOO\n");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn grep_filters_case_insensitively() {
         let out = grep_i("Foo bar\nbaz\nFOO\n", "foo").unwrap();

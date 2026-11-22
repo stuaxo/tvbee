@@ -1,7 +1,7 @@
 //! Settings from `.env` files, so `TV_IP` and friends needn't be exported.
 //!
 //! Looked for in order: `./.env`, then `$XDG_CONFIG_HOME/tvbee/env`
-//! (`~/.config/tvbee/env`). The first file to set a key wins, and anything
+//! (`~/.config/tvbee/env`; `%APPDATA%\tvbee\env` on Windows). The first file to set a key wins, and anything
 //! already in the real environment wins over both. Only `TV_*` and `TVBEE_*`
 //! keys are read: a project's `.env` may hold unrelated secrets, and tvbee
 //! shouldn't pick those up or pass them on to scripts it runs.
@@ -31,9 +31,7 @@ pub fn parse(text: &str) -> Vec<(String, String)> {
 
 fn unquote(v: &str) -> String {
     for q in ['"', '\''] {
-        if let Some(inner) = v.strip_prefix(q)
-            && let Some(end) = inner.find(q)
-        {
+        if let Some((inner, end)) = v.strip_prefix(q).and_then(|i| i.find(q).map(|e| (i, e))) {
             return inner[..end].to_string();
         }
     }
@@ -48,9 +46,11 @@ pub fn ours(key: &str) -> bool {
 
 /// The files to read, in order of preference.
 pub fn files(cwd: &Path) -> Vec<PathBuf> {
+    // XDG first, then ~/.config, then %APPDATA% on Windows
     let config = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from));
     std::iter::once(cwd.join(".env")).chain(config.map(|c| c.join("tvbee").join("env"))).collect()
 }
 

@@ -126,7 +126,8 @@ pub fn format_cache(cache: &HashMap<String, bool>) -> String {
 pub fn cache_path(ip: &str) -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))?;
     Some(base.join("tvbee").join(format!("{ip}.plugins")))
 }
 

@@ -66,9 +66,8 @@ fn main() {
         let every: Vec<Command> = all.iter().flat_map(|p| (p.commands)()).collect();
         if let Some(cmd) = registry::find(&every, sub) {
             print!("{}", registry::help_for(cmd));
-            if registry::find(&ctx.commands, sub).is_none()
-                && let Some(p) = all.iter().find(|p| p.command_names().contains(&sub))
-            {
+            let disabled = all.iter().find(|p| p.command_names().contains(&sub));
+            if let (None, Some(p)) = (registry::find(&ctx.commands, sub), disabled) {
                 println!("\nnote: this comes from the '{}' plugin, which isn't enabled for this TV (see 'tvbee plugins').", p.name);
             }
             return;
@@ -126,7 +125,8 @@ mod tests {
     /// build (built-in plugins only, so `ui` and vendor plugins are left out).
     #[test]
     fn readme_lists_the_commands() {
-        let readme = include_str!("../README.md");
+        // tolerate a CRLF checkout (Windows)
+        let readme = include_str!("../README.md").replace("\r\n", "\n");
         let start = "<!-- commands:start (checked by a test: cargo test readme) -->\n```text\n";
         let end = "```\n<!-- commands:end -->";
         let from = readme.find(start).expect("README: commands:start marker") + start.len();

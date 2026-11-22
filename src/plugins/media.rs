@@ -189,10 +189,11 @@ pub fn parse_media_sessions(dump: &str) -> Vec<MediaInfo> {
         let Some(cur) = out.last_mut() else { continue };
         if line.starts_with("state=PlaybackState {") {
             cur.state = number_after(line, "{state=");
-        } else if line.starts_with("metadata:")
-            && let Some(d) = line.split_once("description=").map(|(_, d)| d) {
+        } else if line.starts_with("metadata:") {
+            if let Some((_, d)) = line.split_once("description=") {
                 (cur.title, cur.subtitle) = split_description(d);
             }
+        }
     }
     out
 }

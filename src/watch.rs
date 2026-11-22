@@ -95,6 +95,9 @@ pub fn run<F>(title: &str, every: f64, fetch: F) -> Result<()>
 where
     F: Fn() -> Result<String> + Send + 'static,
 {
+    if cfg!(not(unix)) {
+        return usage(format!("{title} --watch needs a Unix terminal (it uses stty); on Windows, 'tvbee ui' shows the same live"));
+    }
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return usage(format!("{title} --watch needs a terminal"));
     }

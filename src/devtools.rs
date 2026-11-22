@@ -115,9 +115,7 @@ impl Conn {
         let expr = seek_expr(to);
         for (_, ws) in self.page_list()? {
             let Some(ws) = ws else { continue };
-            if let Ok(v) = evaluate(self.fwd.port, &ws, &expr)
-                && let Ok(pos) = v.parse()
-            {
+            if let Some(pos) = evaluate(self.fwd.port, &ws, &expr).ok().and_then(|v| v.parse().ok()) {
                 return Ok(pos);
             }
         }

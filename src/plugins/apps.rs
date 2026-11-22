@@ -233,11 +233,14 @@ const GUESS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3
 /// asked from the TV (and cached). Never fails: no answer means no guesses.
 pub fn guesses(tv: &Tv) -> Vec<Guess> {
     let cache = guess_cache(&tv.ip);
-    if let Some(path) = &cache
-        && let Ok(meta) = std::fs::metadata(path)
-        && meta.modified().ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age < GUESS_MAX_AGE)
-        && let Ok(text) = std::fs::read_to_string(path)
-    {
+    let fresh = |path: &std::path::Path| -> Option<String> {
+        let age = std::fs::metadata(path).ok()?.modified().ok()?.elapsed().ok()?;
+        if age >= GUESS_MAX_AGE {
+            return None;
+        }
+        std::fs::read_to_string(path).ok()
+    };
+    if let Some(text) = cache.as_deref().and_then(fresh) {
         return read_guesses(&text);
     }
     let Ok(out) = tv.shell(&[GUESS_CMD]) else { return Vec::new() };

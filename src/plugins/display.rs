@@ -1,7 +1,6 @@
 use crate::error::{failed, Result};
 use crate::registry::Command;
 use crate::Ctx;
-use std::os::unix::process::CommandExt;
 use std::process::Command as Proc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -98,8 +97,7 @@ fn scrcpy(tv: &crate::tv::Tv) -> Result<Proc> {
 }
 
 fn mirror(c: &Ctx, args: &[String]) -> Result<()> {
-    let err = scrcpy(&c.tv)?.args(args).exec();
-    Err(err.into())
+    super::tools::run_replacing(scrcpy(&c.tv)?.args(args))
 }
 
 /// Menu version: open scrcpy in its own window and carry on. Waits briefly

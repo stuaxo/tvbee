@@ -425,13 +425,18 @@ fn onoff(v: Option<bool>) -> &'static str {
 }
 
 /// This PC's (epoch seconds, "+0100", "date text") from `date`.
+/// This PC's (epoch seconds, "+0100", "date text"). The offset and text come
+/// from `date`; where there's no `date` (Windows) they're empty and only the
+/// clock difference is shown.
 fn pc_clock() -> Result<(f64, String, String)> {
-    let out = std::process::Command::new("date").arg("+%z|%F %T %Z").output()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let (off, rest) = text.trim().split_once('|').unwrap_or(("", ""));
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |d| d.as_secs_f64());
+    let Ok(out) = std::process::Command::new("date").arg("+%z|%F %T %Z").output() else {
+        return Ok((now, String::new(), String::new()));
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (off, rest) = text.trim().split_once('|').unwrap_or(("", ""));
     Ok((now, off.to_string(), rest.to_string()))
 }
 
@@ -450,12 +455,16 @@ fn time(c: &Ctx, _: &[String]) -> Result<()> {
     println!("TV time:    {}", tv.text);
     println!("TV zone:    {} (UTC{})", if tv.zone.is_empty() { "unknown" } else { &tv.zone }, tv.offset);
     println!("auto time:  {}   auto zone: {}", onoff(tv.auto_time), onoff(tv.auto_zone));
-    println!("this PC:    {} (UTC{})", after.2, after.1);
+    if after.1.is_empty() {
+        println!("this PC:    (no 'date' command here, so only the difference is shown)");
+    } else {
+        println!("this PC:    {} (UTC{})", after.2, after.1);
+    }
     println!("difference: TV is {diff:+.1}s vs this PC");
     if diff.abs() > 5.0 {
         println!("WARNING: the TV clock is off by more than 5s");
     }
-    if tv.offset != after.1 {
+    if !after.1.is_empty() && tv.offset != after.1 {
         println!("WARNING: the TV's UTC offset ({}) differs from this PC's ({}) - daylight saving or timezone mismatch?", tv.offset, after.1);
     }
     if tv.auto_time == Some(false) {
