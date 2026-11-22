@@ -6,6 +6,15 @@ Command-line remote for Android TV over ADB. So far it has only been tested
 on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
 (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
 
+
+## Dependencies:
+
+You will need adb.
+You will need to have enabled developer mode on your tv.
+
+For screen mirroring scrcpy is required.
+
+
 ## Install
 
 Download from the [releases page](https://github.com/stuaxo/tvbee/releases):
@@ -26,8 +35,11 @@ The release builds include the full-screen remote (`tvbee ui`). From source:
 The plain build has no dependencies and builds with Debian 13's packaged Rust
 (`apt install cargo`); `--features ui` needs Rust 1.88 or newer.
 
-On the TV, turn on network debugging (Developer options), then point tvbee at
-it with `TV_IP` (see below) and accept the prompt on the TV the first time.
+On the TV, turn on network debugging (Developer options). `tvbee findtv` finds
+it on the network; point tvbee at it with `TV_IP` (see below) and accept the
+prompt on the TV the first time. `tvbee diagnose` checks the whole setup:
+adb (on PATH, `$ADB`, or under `$ANDROID_HOME` / `$ANDROID_SDK_ROOT`),
+scrcpy, `TV_IP`, and the connection.
 
 On Windows a few things are more limited: `status --watch` and `nowplaying
 --watch` need a Unix terminal (use `tvbee ui` instead), `logs <pattern>`
@@ -51,6 +63,8 @@ Reports from other TVs are welcome.
 
 A few examples:
 
+    tvbee findtv                      # look for TVs on the network
+    tvbee diagnose                    # check adb, scrcpy, TV_IP and the connection
     tvbee np                          # what's on: app, title, progress bar, link
     tvbee status --watch              # the same plus power, volume, memory, storage; live
     tvbee launch youtube
@@ -78,6 +92,10 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     open         open a link in the app that handles it
     quit         quit the current app
     search       search inside an app (YouTube, Kodi, live TV, ...)
+
+[diagnose]
+    diagnose     check adb, scrcpy, TV_IP and the connection to the TV
+    findtv       look for Android / Google TVs on the network
 
 [display]
     mirror       show/control the screen on this PC with scrcpy (alias: scrcpy)

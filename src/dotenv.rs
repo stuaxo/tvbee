@@ -69,16 +69,27 @@ pub fn settings(files: &[PathBuf], is_set: impl Fn(&str) -> bool) -> Vec<(String
     out
 }
 
+/// Which key came from which file, as loaded (for `tvbee diagnose`).
+static LOADED: std::sync::OnceLock<Vec<(String, PathBuf)>> = std::sync::OnceLock::new();
+
 /// Load `.env` settings into the environment. Call first thing in `main`,
 /// before any threads exist.
 pub fn load() {
     let Ok(cwd) = std::env::current_dir() else { return };
-    for (k, v, _) in settings(&files(&cwd), |k| std::env::var_os(k).is_some()) {
+    let mut loaded = Vec::new();
+    for (k, v, file) in settings(&files(&cwd), |k| std::env::var_os(k).is_some()) {
         // SAFETY: called at the very start of main, while the process is
         // still single-threaded, so nothing else can be reading the
         // environment concurrently.
-        unsafe { std::env::set_var(k, v) };
+        unsafe { std::env::set_var(&k, v) };
+        loaded.push((k, file));
     }
+    let _ = LOADED.set(loaded);
+}
+
+/// The file `key` was loaded from, if it came from one.
+pub fn source_of(key: &str) -> Option<PathBuf> {
+    LOADED.get()?.iter().find(|(k, _)| k == key).map(|(_, f)| f.clone())
 }
 
 #[cfg(test)]

@@ -2,9 +2,51 @@
 
 use crate::error::{failed, Error, Result};
 use std::io;
+use std::path::PathBuf;
 use std::process::{Command as Proc, Output};
 
 pub const DEFAULT_IP: &str = "192.168.1.19";
+
+/// Where a program was found, and how.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub path: PathBuf,
+    /// "PATH", "$ADB", "$ANDROID_HOME/platform-tools", ...
+    pub how: String,
+}
+
+/// `name` (plus `.exe` on Windows) in the directories of `path_var`.
+pub fn search_path(name: &str, path_var: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let names: Vec<String> = if cfg!(windows) { vec![format!("{name}.exe"), name.to_string()] } else { vec![name.to_string()] };
+    std::env::split_paths(path_var?)
+        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+        .find(|p| p.is_file())
+}
+
+/// Find adb: `$ADB`, then PATH, then the Android SDK variables
+/// (`$ANDROID_HOME` / `$ANDROID_SDK_ROOT` + `platform-tools`).
+pub fn find_adb(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<Found> {
+    if let Some(p) = env("ADB").map(PathBuf::from).filter(|p| p.is_file()) {
+        return Some(Found { path: p, how: "$ADB".into() });
+    }
+    if let Some(p) = search_path("adb", env("PATH").as_deref()) {
+        return Some(Found { path: p, how: "PATH".into() });
+    }
+    for var in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
+        let dir = env(var).map(|d| PathBuf::from(d).join("platform-tools"));
+        if let Some(p) = dir.and_then(|d| search_path("adb", Some(d.as_os_str()))) {
+            return Some(Found { path: p, how: format!("${var}/platform-tools") });
+        }
+    }
+    None
+}
+
+/// The adb to run (found once; plain "adb" if nothing was found, so the
+/// error says "adb not found").
+fn adb_program() -> &'static std::path::Path {
+    static ADB: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ADB.get_or_init(|| find_adb(|k| std::env::var_os(k)).map_or_else(|| PathBuf::from("adb"), |f| f.path))
+}
 
 pub struct Tv {
     pub ip: String,
@@ -12,7 +54,7 @@ pub struct Tv {
 
 fn adb_err(e: io::Error) -> Error {
     if e.kind() == io::ErrorKind::NotFound {
-        Error::Failed("adb not found in PATH".into())
+        Error::Failed("adb not found (looked at $ADB, PATH, $ANDROID_HOME and $ANDROID_SDK_ROOT); see 'tvbee diagnose'".into())
     } else {
         e.into()
     }
@@ -55,7 +97,7 @@ impl Tv {
     }
 
     fn run(&self, args: &[&str]) -> Result<Output> {
-        let out = Proc::new("adb")
+        let out = Proc::new(adb_program())
             .arg("-s")
             .arg(self.serial())
             .args(args)
@@ -66,7 +108,7 @@ impl Tv {
 
     /// `adb connect`; fails if adb can't run or the TV can't be reached.
     pub fn connect(&self) -> Result<()> {
-        let out = Proc::new("adb")
+        let out = Proc::new(adb_program())
             .args(["connect", &self.ip])
             .output()
             .map_err(adb_err)?;
@@ -104,7 +146,7 @@ impl Tv {
 
     /// Like `shell`, but the device's output goes straight to the terminal.
     pub fn shell_inherit(&self, args: &[&str]) -> Result<()> {
-        let status = Proc::new("adb")
+        let status = Proc::new(adb_program())
             .arg("-s")
             .arg(self.serial())
             .arg("shell")
@@ -160,6 +202,23 @@ impl Drop for Forward {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_adb() {
+        let dir = std::env::temp_dir().join(format!("tvbee-adb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let sdk = dir.join("sdk");
+        std::fs::create_dir_all(sdk.join("platform-tools")).unwrap();
+        let exe = if cfg!(windows) { "adb.exe" } else { "adb" };
+        std::fs::write(sdk.join("platform-tools").join(exe), "").unwrap();
+        let only_sdk = |k: &str| (k == "ANDROID_SDK_ROOT").then(|| sdk.clone().into_os_string());
+        let f = find_adb(only_sdk).unwrap();
+        assert_eq!(f.how, "$ANDROID_SDK_ROOT/platform-tools");
+        let on_path = |k: &str| (k == "PATH").then(|| sdk.join("platform-tools").into_os_string());
+        assert_eq!(find_adb(on_path).unwrap().how, "PATH");
+        assert!(find_adb(|_| None).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn connect_reply() {

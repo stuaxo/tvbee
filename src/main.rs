@@ -2,6 +2,7 @@ mod devtools;
 mod dotenv;
 mod error;
 mod http;
+mod mdns;
 mod menu;
 mod nowplaying;
 mod plugin;
