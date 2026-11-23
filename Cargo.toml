@@ -24,6 +24,9 @@ default = []
 # `tvbee ui`: interactive terminal remote (pulls in ratatui + crossterm)
 ui = ["dep:ratatui"]
 
+[profile.release]
+strip = true
+
 # Debian/Ubuntu package (cargo deb), built by the release workflow
 [package.metadata.deb]
 maintainer = "Stuart Axon <https://github.com/stuaxo>"
@@ -32,7 +35,8 @@ license-file = ["LICENSE", "0"]
 section = "utils"
 priority = "optional"
 features = ["ui"]
-depends = "$auto, adb"
+# the release builds are static (musl): nothing to depend on but adb
+depends = "adb"
 recommends = "scrcpy"
 extended-description = """\
 Control an Android TV from the command line over ADB: launch apps, search,

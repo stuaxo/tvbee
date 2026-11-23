@@ -64,3 +64,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --features "${{ matrix.features }}" -- -D warnings
       - run: cargo test --features "${{ matrix.features }}"
+
+  # the release's static Linux builds (musl), cross-compiled; the tests run
+  # under qemu, which also catches 32-bit problems on the ARM ones
+  linux-static:
+    name: Static ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - arm-unknown-linux-musleabihf
+          - armv7-unknown-linux-musleabihf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo test --features ui
+      - run: cargo build --release --features ui
+      - name: Statically linked
+        run: |
+          f=$(file -L target/${{ matrix.target }}/release/tvbee); echo "$f"
+          echo "$f" | grep -Eq 'static(-pie)?( |-)linked'

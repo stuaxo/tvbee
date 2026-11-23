@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag like v0.1.0 (matching Cargo.toml's version) to publish a
-# release with a Windows zip, a Linux tarball and a .deb.
+# release with a Windows zip, and static Linux tarballs and .debs for x86_64
+# and ARM (64-bit, and 32-bit for every Raspberry Pi).
 on:
   push:
     tags: ["v[0-9]+.*"]
@@ -26,6 +27,9 @@ jobs:
           title: tvbee $version
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Windows, and static (musl) Linux builds: no glibc version to match, so
+  # they run on any distribution and on things like a Synology NAS. Each
+  # Linux build is also packaged as a .deb (Raspberry Pi OS, Debian, Ubuntu).
   binaries:
     needs: create-release
     name: ${{ matrix.target }}
@@ -35,34 +39,49 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-          # built on an older Ubuntu so it runs on Debian 12+ / Ubuntu 22.04+
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            deb: true
+          # 64-bit Raspberry Pi OS (Pi 3 and later), other arm64 boards
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            deb: true
+          # 32-bit: ARMv6 with hard float, the baseline of Raspberry Pi OS's
+          # armhf, so it runs on every Pi (Zero and 1 too) and ARMv7 boards
+          - target: arm-unknown-linux-musleabihf
+            os: ubuntu-latest
+            deb: true
+          # 32-bit ARMv7 and later only, a little faster (Pi 2+, ARMv7 NAS)
+          - target: armv7-unknown-linux-musleabihf
+            os: ubuntu-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # the C cross compiler (for the bundled SQLite) and musl
+      - uses: taiki-e/setup-cross-toolchain-action@v1
+        if: contains(matrix.target, '-linux-')
+        with:
+          target: ${{ matrix.target }}
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: tvbee
           target: ${{ matrix.target }}
+          build-tool: cargo
           features: ui
           archive: $bin-$tag-$target
           zip: windows
           tar: unix
           include: README.md,LICENSE,.env.example
           token: ${{ secrets.GITHUB_TOKEN }}
-
-  deb:
-    needs: create-release
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
+        if: matrix.deb
         with:
           tool: cargo-deb
-      - run: cargo deb
-      - run: gh release upload "$GITHUB_REF_NAME" target/debian/*.deb
+      # packages the binary built above (amd64, arm64, armhf)
+      - if: matrix.deb
+        run: |
+          deb=$(cargo deb --no-build --no-strip --target ${{ matrix.target }})
+          gh release upload "$GITHUB_REF_NAME" "$deb"
         env:
           GH_TOKEN: ${{ github.token }}

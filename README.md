@@ -27,10 +27,17 @@ For screen mirroring scrcpy is required.
 
 Download from the [releases page](https://github.com/stuaxo/tvbee/releases):
 
-- **Debian / Ubuntu**: `sudo apt install ./tvbee_<version>-1_amd64.deb`, which
-  also pulls in `adb` (and suggests `scrcpy` for `tvbee mirror`).
-- **Other Linux**: unpack `tvbee-<version>-x86_64-unknown-linux-gnu.tar.gz` and
-  put `tvbee` on your PATH; install `adb` from your distribution.
+- **Debian / Ubuntu / Raspberry Pi OS**: `sudo apt install
+  ./tvbee_<version>-1_<arch>.deb` (`amd64`, `arm64`, or `armhf` for 32-bit,
+  which runs on every Raspberry Pi), which also pulls in `adb` (and suggests
+  `scrcpy` for `tvbee mirror`).
+- **Other Linux** (any distribution, a NAS such as a Synology, ARM boards):
+  unpack `tvbee-<version>-<target>.tar.gz` and put `tvbee` on your PATH. The
+  Linux builds are static (musl), so they don't depend on the system's C
+  library. Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`
+  (64-bit ARM), `arm-unknown-linux-musleabihf` (32-bit ARM, any Pi) and
+  `armv7-unknown-linux-musleabihf` (32-bit ARMv7 and later). tvbee still
+  needs `adb` (and `curl` for the Philips JointSpace commands) from the system.
 - **Windows**: unzip `tvbee-<version>-x86_64-pc-windows-msvc.zip`, and install
   Google's [platform-tools](https://developer.android.com/tools/releases/platform-tools)
   so that `adb.exe` is on your PATH.
