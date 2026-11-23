@@ -92,4 +92,4 @@ jobs:
       - name: Statically linked
         run: |
           f=$(file -L target/${{ matrix.target }}/release/tvbee); echo "$f"
-          echo "$f" | grep -Eq 'static(-pie)?( |-)linked'
+          echo "$f" | grep -Eq 'static(ally|-pie) linked'
