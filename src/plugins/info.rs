@@ -560,9 +560,10 @@ fn go(tv: &Tv, pkg: &str, to: &crate::more::Go) -> Result<String> {
             let own = crate::provider::for_package(pkg)
                 .is_some_and(|p| p.places().iter().any(|pl| host(pl.link) == host(url)) || p.search_link().is_some_and(|s| host(s) == host(url)));
             if own {
-                let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(url), pkg);
-                super::apps::before_link(tv, pkg)?;
-                tv.shell(&[&cmd])?;
+                if !super::apps::link_here_or_prepare(tv, pkg, url)? {
+                    let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(url), pkg);
+                    tv.shell(&[&cmd])?;
+                }
                 Ok(format!("opened {url}"))
             } else {
                 super::open::open_link(tv, url)

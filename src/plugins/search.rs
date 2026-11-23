@@ -164,10 +164,18 @@ pub fn search_package(tv: &Tv, all: &[Searchable], pkg: &str, query: &str, play:
     if dry {
         return Ok(format!("would run: {cmd}"));
     }
-    if !play && crate::provider::for_package(pkg).is_some_and(|p| p.search_here(tv, query).unwrap_or(false)) {
+    let here = match (&s.way, play) {
+        (Way::Link(template), false) => {
+            super::apps::link_here_or_prepare(tv, pkg, &normalise(&template.replace("{q}", &url_encode(query))))?
+        }
+        _ => {
+            super::apps::before_link(tv, pkg)?;
+            false
+        }
+    };
+    if here {
         return Ok(format!("searching {} for \"{query}\"", label(pkg)));
     }
-    super::apps::before_link(tv, pkg)?;
     let out = tv.shell(&[&cmd])?;
     if let Some(err) = out.lines().find(|l| l.starts_with("Error")) {
         return failed(format!("search: {err}"));

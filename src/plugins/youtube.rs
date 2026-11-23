@@ -74,15 +74,15 @@ impl crate::provider::Provider for YouTube {
     fn fresh_for_links(&self) -> bool {
         true
     }
-    // already in front: go to its search page through devtools rather than
-    // closing it for a link (the screen would drop to home, then reopen)
-    fn search_here(&self, tv: &Tv, query: &str) -> Result<bool> {
+    // already in front: hand the page the link as Android would, through
+    // devtools, rather than closing the app for it (the screen would drop
+    // to home, then reopen). The app ignores changes to location.hash.
+    fn open_here(&self, tv: &Tv, link: &str) -> Result<bool> {
         if crate::plugins::info::focus_package(&tv.window_dump()?).as_deref() != Some(PACKAGE) {
             return Ok(false);
         }
         let Some(c) = devtools::Conn::open(tv, PACKAGE) else { return Ok(false) };
-        let route = search_route(query);
-        Ok(c.eval(&format!("(location.hash='{route}',location.hash)")).is_ok_and(|now| now == route))
+        Ok(c.eval(&deep_link_expr(link)).is_ok_and(|v| v == "sent"))
     }
     fn places(&self) -> &'static [Place] {
         PLACES
@@ -98,10 +98,24 @@ impl crate::provider::Details for YouTube {
     }
 }
 
-/// The app's own route for a search (what its search page shows in
-/// `location.hash`), safe to put in a JavaScript string.
-fn search_route(query: &str) -> String {
-    format!("#/search?q={}", crate::plugins::search::url_encode(query))
+/// JavaScript that hands the page `link` the way the app's Android side does:
+/// a `deeplink` event on Cobalt's `h5vcc.runtime`. "sent" if it could.
+fn deep_link_expr(link: &str) -> String {
+    // a JavaScript string: escape what could end it
+    let mut quoted = String::from("'");
+    for ch in link.chars() {
+        match ch {
+            '\\' | '\'' => quoted.extend(['\\', ch]),
+            c if (c as u32) < 0x20 || c == '\u{2028}' || c == '\u{2029}' => quoted.push_str(&format!("\\u{:04x}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('\'');
+    format!(
+        "(function(){{var r=window.h5vcc&&h5vcc.runtime;if(!r||!r.dispatchEvent)return 'no';\
+         var e=new Event('deeplink');Object.defineProperty(e,'url',{{value:{quoted}}});\
+         r.dispatchEvent(e);return 'sent'}})()"
+    )
 }
 
 pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
@@ -301,9 +315,9 @@ pub fn commands() -> Vec<Command> {
          \x20 restart       close YouTube and reopen it at the same point of the same\n\
          \x20               video (or at home). Fixes a frozen picture: you hear the\n\
          \x20               video but see an old screen. tvbee also closes YouTube before\n\
-         \x20               sending it links (open, search, goto), which avoids that;\n\
-         \x20               a search while YouTube is in front goes to its search page\n\
-         \x20               without closing it.",
+         \x20               sending it links (open, search, goto), which avoids that,\n\
+         \x20               unless it's in front: then the link is handed to the page\n\
+         \x20               it's showing, as Android would, without closing it.",
     )]
 }
 
@@ -312,10 +326,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn search_routes_are_encoded() {
-        assert_eq!(search_route("hot ones"), "#/search?q=hot%20ones");
-        // nothing that could end the JavaScript string
-        assert_eq!(search_route("it's \\ \"x\""), "#/search?q=it%27s%20%5C%20%22x%22");
+    fn deep_links_are_quoted() {
+        let e = deep_link_expr("https://www.youtube.com/results?search_query=red%20panda");
+        assert!(e.contains("{value:'https://www.youtube.com/results?search_query=red%20panda'}"), "{e}");
+        // nothing in a link can end the JavaScript string
+        let e = deep_link_expr("a'b\\c\nd");
+        assert!(e.contains(r"{value:'a\'b\\c\u000ad'}"), "{e}");
     }
 
     #[test]

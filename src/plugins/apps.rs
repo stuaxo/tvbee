@@ -494,6 +494,17 @@ pub fn before_link(tv: &Tv, pkg: &str) -> Result<bool> {
     Ok(running)
 }
 
+/// Send `url` to `pkg` in place when its provider can (an app already in
+/// front): Ok(true), and the caller has nothing more to do. Otherwise the app
+/// is got ready for a link ([`before_link`]) and the caller sends it.
+pub fn link_here_or_prepare(tv: &Tv, pkg: &str, url: &str) -> Result<bool> {
+    if crate::provider::for_package(pkg).is_some_and(|p| p.open_here(tv, url).unwrap_or(false)) {
+        return Ok(true);
+    }
+    before_link(tv, pkg)?;
+    Ok(false)
+}
+
 /// Bring an app's existing task to the front (starting it if it isn't
 /// running); returns what the TV said. Doesn't print, so the ui can use it.
 pub fn bring_to_front(tv: &Tv, app: &str) -> Result<String> {

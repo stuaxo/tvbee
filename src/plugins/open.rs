@@ -137,7 +137,9 @@ pub fn open_link(tv: &Tv, line: &str) -> Result<String> {
     let mime = media_type(&url);
     tv.connect()?;
     let component = choose(tv, &url, mime, app)?;
-    super::apps::before_link(tv, component.split('/').next().unwrap_or(&component))?;
+    if super::apps::link_here_or_prepare(tv, component.split('/').next().unwrap_or(&component), &url)? {
+        return Ok(format!("opened in {}", label(&component)));
+    }
     let cmd = format!("am start -n {} {}", sh_quote(&component), intent_args(&url, mime, None));
     let out = tv.shell(&[&cmd])?;
     if let Some(err) = out.lines().find(|l| l.starts_with("Error")) {
