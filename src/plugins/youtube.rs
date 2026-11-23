@@ -74,6 +74,16 @@ impl crate::provider::Provider for YouTube {
     fn fresh_for_links(&self) -> bool {
         true
     }
+    // already in front: go to its search page through devtools rather than
+    // closing it for a link (the screen would drop to home, then reopen)
+    fn search_here(&self, tv: &Tv, query: &str) -> Result<bool> {
+        if crate::plugins::info::focus_package(&tv.window_dump()?).as_deref() != Some(PACKAGE) {
+            return Ok(false);
+        }
+        let Some(c) = devtools::Conn::open(tv, PACKAGE) else { return Ok(false) };
+        let route = search_route(query);
+        Ok(c.eval(&format!("(location.hash='{route}',location.hash)")).is_ok_and(|now| now == route))
+    }
     fn places(&self) -> &'static [Place] {
         PLACES
     }
@@ -86,6 +96,12 @@ impl crate::provider::Details for YouTube {
     fn details(&self, link: &str) -> Result<Details> {
         details(link)
     }
+}
+
+/// The app's own route for a search (what its search page shows in
+/// `location.hash`), safe to put in a JavaScript string.
+fn search_route(query: &str) -> String {
+    format!("#/search?q={}", crate::plugins::search::url_encode(query))
 }
 
 pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
@@ -285,13 +301,22 @@ pub fn commands() -> Vec<Command> {
          \x20 restart       close YouTube and reopen it at the same point of the same\n\
          \x20               video (or at home). Fixes a frozen picture: you hear the\n\
          \x20               video but see an old screen. tvbee also closes YouTube before\n\
-         \x20               sending it links (open, search, goto), which avoids that.",
+         \x20               sending it links (open, search, goto), which avoids that;\n\
+         \x20               a search while YouTube is in front goes to its search page\n\
+         \x20               without closing it.",
     )]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_routes_are_encoded() {
+        assert_eq!(search_route("hot ones"), "#/search?q=hot%20ones");
+        // nothing that could end the JavaScript string
+        assert_eq!(search_route("it's \\ \"x\""), "#/search?q=it%27s%20%5C%20%22x%22");
+    }
 
     #[test]
     fn reads_page_items() {

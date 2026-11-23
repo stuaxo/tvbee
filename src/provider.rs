@@ -235,6 +235,12 @@ pub trait Provider: Sync {
     fn fresh_for_links(&self) -> bool {
         false
     }
+    /// Search inside the app where it is, when it's already in front, without
+    /// sending it a link (which might mean restarting it). Ok(false): it
+    /// couldn't, so search the usual way.
+    fn search_here(&self, _tv: &crate::tv::Tv, _query: &str) -> crate::error::Result<bool> {
+        Ok(false)
+    }
     /// Fixed places in the app (`tvbee goto <id>`).
     fn places(&self) -> &'static [Place] {
         &[]

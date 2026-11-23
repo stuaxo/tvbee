@@ -164,6 +164,9 @@ pub fn search_package(tv: &Tv, all: &[Searchable], pkg: &str, query: &str, play:
     if dry {
         return Ok(format!("would run: {cmd}"));
     }
+    if !play && crate::provider::for_package(pkg).is_some_and(|p| p.search_here(tv, query).unwrap_or(false)) {
+        return Ok(format!("searching {} for \"{query}\"", label(pkg)));
+    }
     super::apps::before_link(tv, pkg)?;
     let out = tv.shell(&[&cmd])?;
     if let Some(err) = out.lines().find(|l| l.starts_with("Error")) {
