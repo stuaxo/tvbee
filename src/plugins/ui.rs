@@ -45,6 +45,8 @@ pub enum Action {
     /// Ask the TV to pair (it shows a PIN), then finish with the PIN typed.
     PairStart,
     PairFinish(String),
+    /// Change the Ambilight (from its dialog).
+    AmbilightChange(crate::plugins::ambilight::Change),
     /// Mute or unmute, the ui knowing which it is now (true: muted): one key,
     /// without reading the audio state first.
     MuteKnown(bool),
@@ -110,6 +112,8 @@ pub enum Input {
     ToggleAmbilight,
     /// Pair with the TV's API (from the Ambilight panel).
     Pair,
+    /// The dialog for changing the Ambilight.
+    AmbilightDialog,
     OpenMenu,
     OpenApps,
     OpenSearch,
@@ -147,6 +151,7 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
         (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
         (KeyCode::Char('P'), _) => Input::Pair,
+        (KeyCode::Char('L'), _) => Input::AmbilightDialog,
         (KeyCode::Char('a'), _) => Input::OpenApps,
         (KeyCode::Char('g'), _) => Input::OpenGuide,
         (KeyCode::Char(','), _) => Input::OpenOptions,
@@ -1060,6 +1065,7 @@ impl Actor {
             }
             Action::Refresh => "refreshed".into(),
             // other lanes' actions don't come here
+            Action::AmbilightChange(change) => crate::plugins::ambilight::apply(&self.tv, &change)?,
             Action::PairStart => {
                 self.pairing = Some(crate::plugins::philips::pair_start(&self.tv)?);
                 let _ = tx.send(Msg::AskPin);
@@ -1343,6 +1349,10 @@ pub enum Overlay {
     None,
     /// Typing the PIN the TV shows, to pair (the text is `App::prompt`).
     Pin,
+    /// Changing the Ambilight: the highlighted row and option.
+    Ambilight { row: usize, col: usize },
+    /// Typing a colour for option `col` of the dialog's lights row (0: all).
+    AmbiColour { col: usize },
     Help,
     /// The "more" menu, with the highlighted item.
     Menu(usize),
@@ -1679,6 +1689,8 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
         },
         // handled where it's typed (the PIN is `App::prompt`)
         Overlay::Pin => (Overlay::Pin, None),
+        Overlay::Ambilight { row, col } => (Overlay::Ambilight { row, col }, None),
+        Overlay::AmbiColour { col } => (Overlay::AmbiColour { col }, None),
     }
 }
 
@@ -1696,6 +1708,8 @@ pub fn pick(items: &[MenuItem], i: usize) -> (Overlay, Option<Action>) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Hit {
     Input(Input),
+    /// An option in the Ambilight dialog (row, option).
+    AmbiOption(usize, usize),
     /// The progress bar: clicking jumps there.
     Progress { x0: u16, width: u16 },
     /// The volume bar: clicking sets that level.
@@ -2141,6 +2155,18 @@ impl App {
                 self.ambi_open = !self.ambi_open;
                 let _ = actions.send(Action::AmbilightPanel(self.ambi_open));
             }
+            Input::AmbilightDialog if !self.ambi_supported => {
+                self.note = "no Ambilight here that tveee can control".into();
+            }
+            Input::AmbilightDialog => {
+                // the panel's reads feed the dialog
+                if !self.ambi_open {
+                    self.ambi_open = true;
+                    let _ = actions.send(Action::AmbilightPanel(true));
+                }
+                let col = self.ambi_rows().first().and_then(|r| r.current).unwrap_or(0);
+                self.overlay = Overlay::Ambilight { row: 0, col };
+            }
             Input::Pair => {
                 self.note = "asking the TV to pair...".into();
                 let _ = actions.send(Action::PairStart);
@@ -2311,6 +2337,14 @@ impl App {
                 }
             }
             (Overlay::None, _) => {}
+            (Overlay::Ambilight { .. }, Some(Hit::AmbiOption(row, col))) => self.ambi_pick(row, col, actions),
+            (Overlay::Ambilight { .. }, Some(Hit::Popup)) => {}
+            (Overlay::Ambilight { .. }, _) => self.overlay = Overlay::None,
+            (Overlay::AmbiColour { .. }, Some(Hit::Popup)) => {}
+            (Overlay::AmbiColour { col }, _) => {
+                let row = self.ambi_rows().iter().position(|r| r.name == "lights").unwrap_or(0);
+                self.overlay = Overlay::Ambilight { row, col };
+            }
             // the PIN box: a click outside it cancels
             (Overlay::Pin, Some(Hit::Popup)) => {}
             (Overlay::Pin, _) => {
@@ -2530,6 +2564,66 @@ impl App {
     }
 
     /// Rows the system panel wants, borders included.
+    /// The Ambilight dialog's rows, from the last reading (none until there is one).
+    fn ambi_rows(&self) -> Vec<crate::plugins::ambilight::Row> {
+        match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+            Some(crate::plugins::ambilight::Panel::Shown { state, lights }) => crate::plugins::ambilight::rows(state, lights),
+            _ => Vec::new(),
+        }
+    }
+
+    fn ambi_lights(&self) -> Vec<crate::plugins::ambilight::Light> {
+        match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+            Some(crate::plugins::ambilight::Panel::Shown { lights, .. }) => lights.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Pick option `col` of row `row` in the Ambilight dialog: make its
+    /// change, or (a light) ask for a colour.
+    fn ambi_pick(&mut self, row: usize, col: usize, actions: &Sender<Action>) {
+        let rows = self.ambi_rows();
+        let Some(r) = rows.get(row) else { return };
+        if r.name == "lights" {
+            self.prompt.clear();
+            self.overlay = Overlay::AmbiColour { col };
+            return;
+        }
+        self.overlay = Overlay::Ambilight { row, col };
+        if let Some((label, Some(change))) = r.options.get(col) {
+            self.note = format!("ambilight: {label}...");
+            let _ = actions.send(Action::AmbilightChange(change.clone()));
+        }
+    }
+
+    /// Keys in the Ambilight dialog: ↑/↓ rows, ←/→ change at once, ⏎ picks.
+    fn ambi_key(&mut self, row: usize, col: usize, code: KeyCode, actions: &Sender<Action>) {
+        let rows = self.ambi_rows();
+        if matches!(code, KeyCode::Esc | KeyCode::Char('L') | KeyCode::Char('q')) || rows.is_empty() {
+            if !rows.is_empty() || code == KeyCode::Esc {
+                self.overlay = Overlay::None;
+            }
+            return;
+        }
+        let row = row.min(rows.len() - 1);
+        let n = rows[row].options.len().max(1);
+        let to_row = |r: usize| Overlay::Ambilight { row: r, col: rows[r].current.unwrap_or(0) };
+        match code {
+            KeyCode::Up => self.overlay = to_row(row.saturating_sub(1)),
+            KeyCode::Down => self.overlay = to_row((row + 1).min(rows.len() - 1)),
+            KeyCode::Left | KeyCode::Right => {
+                let c = if code == KeyCode::Left { col.min(n - 1).saturating_sub(1) } else { (col + 1).min(n - 1) };
+                if rows[row].name == "lights" {
+                    self.overlay = Overlay::Ambilight { row, col: c };
+                } else if c != col.min(n - 1) || rows[row].current != Some(c) {
+                    self.ambi_pick(row, c, actions);
+                }
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => self.ambi_pick(row, col.min(n - 1), actions),
+            _ => {}
+        }
+    }
+
     /// The Ambilight panel's lines: state, or what's needed.
     fn ambilight_lines(&self) -> Vec<(Line<'static>, Option<Hit>)> {
         use crate::plugins::ambilight::Panel;
@@ -2545,13 +2639,15 @@ impl App {
                 ),
             ],
             Some(Panel::Failed(e)) => vec![(Line::from(format!("! {e}")).fg(Color::Red), None)],
-            Some(Panel::Shown { status, lights }) => {
-                let mut out: Vec<(Line<'static>, Option<Hit>)> = status
+            Some(Panel::Shown { state, lights }) => {
+                let open = Some(Hit::Input(Input::AmbilightDialog));
+                let mut out: Vec<(Line<'static>, Option<Hit>)> = state
+                    .lines()
                     .iter()
                     .filter(|l| !l.starts_with("lights:"))
                     .map(|l| {
                         let (k, v) = l.split_once(':').unwrap_or((l, ""));
-                        (Line::from(vec![Span::styled(format!("{k:<9}"), dim), Span::raw(v.trim().to_string())]), None)
+                        (Line::from(vec![Span::styled(format!("{k:<9}"), dim), Span::raw(v.trim().to_string())]), open.clone())
                     })
                     .collect();
                 // a block of each light's colour, a row per side
@@ -2568,7 +2664,7 @@ impl App {
                         spans.push(Span::styled("      ", Style::new().bg(Color::Rgb(r, g, b))));
                         spans.push(Span::raw(" "));
                     }
-                    out.push((Line::from(spans), None));
+                    out.push((Line::from(spans), open.clone()));
                 }
                 out
             }
@@ -2581,7 +2677,7 @@ impl App {
 
     /// The Ambilight panel: power, mode, style, Hue, and each light's colour now.
     fn draw_ambilight(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let block = Block::bordered().title(" ambilight - l hides, . for styles ").border_style(Style::new().fg(Color::DarkGray));
+        let block = Block::bordered().title(" ambilight - L (or click) changes it, l hides ").border_style(Style::new().fg(Color::DarkGray));
         let inner = block.inner(area);
         f.render_widget(block, area);
         for (i, (line, hit)) in self.ambilight_lines().into_iter().enumerate() {
@@ -3160,6 +3256,78 @@ impl App {
                 let r = popup(f, &format!(" {} ", it.label), text, Color::Yellow);
                 self.hits.push((r, Hit::Popup));
             }
+            Overlay::Ambilight { row, col } => {
+                let rows = self.ambi_rows();
+                // rows come and go (outside control has no settings row): the
+                // lights row is last, so a row past the end is it
+                let row = row.min(rows.len().saturating_sub(1));
+                let lights = self.ambi_lights();
+                let mut text: Vec<Line> = Vec::new();
+                // (line, x offset in it, width, row, option)
+                let mut spots: Vec<(usize, usize, usize, usize, usize)> = Vec::new();
+                if rows.is_empty() {
+                    text.push(Line::from(match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+                        Some(crate::plugins::ambilight::Panel::NeedsPairing) => "tveee isn't paired with the TV yet: P pairs",
+                        Some(crate::plugins::ambilight::Panel::Failed(_)) => "couldn't read the Ambilight (see the panel)",
+                        _ => "reading the Ambilight...",
+                    }));
+                }
+                for (ri, r) in rows.iter().enumerate() {
+                    let mut spans = vec![Span::styled(format!("{:<9}", r.name), Style::new().fg(Color::DarkGray))];
+                    let mut x = 9;
+                    for (ci, (label, _)) in r.options.iter().enumerate() {
+                        let mut st = Style::new();
+                        if r.current == Some(ci) {
+                            st = st.fg(Color::Green).bold();
+                        }
+                        // a light shows its colour
+                        if r.name == "lights" && ci > 0 {
+                            if let Some(l) = lights.get(ci - 1) {
+                                let (rr, g, b) = l.rgb;
+                                let dark = u32::from(rr) * 3 + u32::from(g) * 6 + u32::from(b) < 1280;
+                                st = st.bg(Color::Rgb(rr, g, b)).fg(if dark { Color::White } else { Color::Black });
+                            }
+                        }
+                        if ri == row && ci == col.min(r.options.len().saturating_sub(1)) {
+                            st = st.reversed();
+                        }
+                        let shown = format!(" {label} ");
+                        spots.push((text.len(), x, shown.chars().count(), ri, ci));
+                        x += shown.chars().count() + 1;
+                        spans.push(Span::styled(shown, st));
+                        spans.push(Span::raw(" "));
+                    }
+                    text.push(Line::from(spans));
+                }
+                text.push(Line::default());
+                text.push(Line::from("↑/↓ row  ←/→ change (at once)  ⏎ on a light: its colour  esc closes").fg(Color::DarkGray));
+                text.push(Line::from("green: what the TV is doing now").fg(Color::DarkGray));
+                let r = popup(f, " ambilight ", text, Color::Yellow);
+                self.hits.push((r, Hit::Popup));
+                for (line, x, w, ri, ci) in spots {
+                    let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
+                    let x = r.x + 1 + u16::try_from(x).unwrap_or(0);
+                    self.hits.push((ratatui::layout::Rect { x, y, width: u16::try_from(w).unwrap_or(1), height: 1 }, Hit::AmbiOption(ri, ci)));
+                }
+            }
+            Overlay::AmbiColour { col } => {
+                let which = match col.checked_sub(1).and_then(|i| self.ambi_lights().get(i).cloned()) {
+                    Some(l) => format!("{} {}", l.side, l.n),
+                    None => "every light".into(),
+                };
+                let text = vec![
+                    Line::from(format!("Colour for {which}:")),
+                    Line::from(vec![
+                        Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray)),
+                        Span::styled(" ".repeat(24usize.saturating_sub(self.prompt.chars().count() + 1)), Style::new().bg(Color::DarkGray)),
+                    ]),
+                    Line::from("red, warm, #ff8800 or 255,136,0 (the TV hands the lights over)").fg(Color::DarkGray),
+                    Line::default(),
+                    Line::from("⏎ set   esc back").fg(Color::DarkGray),
+                ];
+                let r = popup(f, " ambilight colour ", text, Color::Yellow);
+                self.hits.push((r, Hit::Popup));
+            }
             Overlay::Pin => {
                 let text = vec![
                     Line::from("Type the PIN the TV is showing:"),
@@ -3259,6 +3427,7 @@ const HELP: &str = " everywhere
    tab      switch mode      .      more (power, mirror, ...)
    i        system info      a      launch an app (space there: front / restart / close)
    l        Ambilight panel (TVs with one; P there pairs if needed)
+   L        change the Ambilight: power, style and setting, Hue, any light's colour
    /        search the app in front (tab picks another app)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
@@ -3371,6 +3540,30 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
                     let rows = tab_list(app.apps.as_deref().unwrap_or_default(), tab);
                     let pkg = rows.get(sel).map(|e| e.package.clone());
                     app.open_search(pkg);
+                } else if let Overlay::Ambilight { row, col } = app.overlay {
+                    app.ambi_key(row, col, k.code, actions);
+                } else if let Overlay::AmbiColour { col } = app.overlay {
+                    let lights_row = app.ambi_rows().iter().position(|r| r.name == "lights").unwrap_or(0);
+                    match k.code {
+                        KeyCode::Esc => app.overlay = Overlay::Ambilight { row: lights_row, col },
+                        KeyCode::Enter => match crate::plugins::ambilight::parse_colour(&app.prompt) {
+                            Some(rgb) => {
+                                let change = match col.checked_sub(1).and_then(|i| app.ambi_lights().get(i).cloned()) {
+                                    Some(l) => crate::plugins::ambilight::Change::One(l.side, l.n, rgb),
+                                    None => crate::plugins::ambilight::Change::All(rgb),
+                                };
+                                let _ = actions.send(Action::AmbilightChange(change));
+                                app.note = "ambilight: setting the colour...".into();
+                                app.overlay = Overlay::Ambilight { row: lights_row, col };
+                            }
+                            None => app.note = format!("'{}' isn't a colour tveee knows (red, #ff8800, 255,136,0)", app.prompt),
+                        },
+                        KeyCode::Backspace => {
+                            app.prompt.pop();
+                        }
+                        KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => app.prompt.push(c),
+                        _ => {}
+                    }
                 } else if let Overlay::Pin = app.overlay {
                     match k.code {
                         KeyCode::Esc => {
@@ -3542,7 +3735,8 @@ pub fn commands() -> Vec<Command> {
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
          \x20 l  Ambilight panel (Philips TVs that have it): state and each light's\n\
-         \x20    colour; its styles are in the . menu; P pairs with the TV if needed\n\
+         \x20    colour; L (or clicking it) changes power, style, Hue and any light's\n\
+         \x20    colour; P pairs with the TV if needed\n\
          \x20 a  launcher: the installed apps tveee has aliases for (see 'tveee apps'); ● marks\n\
          \x20    running ones (Enter brings them to the front), ⊘ ones Android keeps running\n\
          \x20    (live TV: they can't be closed); Space or right-click opens actions:\n\

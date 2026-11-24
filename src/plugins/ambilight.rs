@@ -208,8 +208,8 @@ pub enum Panel {
     Missing,
     /// It has one, but tveee isn't paired with the TV yet.
     NeedsPairing,
-    /// The state (as [`status`] lines) and each light's colour now.
-    Shown { status: Vec<String>, lights: Vec<Light> },
+    /// The state and each light's colour now.
+    Shown { state: State, lights: Vec<Light> },
     Failed(String),
 }
 
@@ -222,18 +222,61 @@ pub fn panel(tv: &Tv) -> Panel {
     if crate::pairing::load("jointspace", &tv.ip).is_none() {
         return Panel::NeedsPairing;
     }
-    let (status, lights) = std::thread::scope(|sc| {
+    let (state, lights) = std::thread::scope(|sc| {
         let l = sc.spawn(|| get(tv, "/6/ambilight/processed").map(|j| parse_lights(&j)));
-        (status(tv), l.join().unwrap_or_else(|_| failed("ambilight: a read failed")))
+        (state(tv), l.join().unwrap_or_else(|_| failed("ambilight: a read failed")))
     });
-    match status {
-        Ok(status) => Panel::Shown { status, lights: lights.unwrap_or_default() },
+    match state {
+        Ok(state) => Panel::Shown { state, lights: lights.unwrap_or_default() },
         Err(e) => Panel::Failed(e.to_string()),
     }
 }
 
-/// What the lights are doing, as lines.
-pub fn status(tv: &Tv) -> Result<Vec<String>> {
+/// What the lights are doing.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct State {
+    pub power: bool,
+    /// The TV's mode: internal, manual (outside control), lounge, expert, ...
+    pub mode: Option<String>,
+    /// FOLLOW_VIDEO, FOLLOW_AUDIO, FOLLOW_COLOR, OFF (none under outside control).
+    pub style: Option<String>,
+    /// The style's setting (STANDARD, VU_METER, HOT_LAVA, ...).
+    pub setting: Option<String>,
+    /// Ambilight+Hue, if the TV has it.
+    pub hue: Option<bool>,
+    /// How many lights on each side that has any.
+    pub sides: Vec<(String, u32)>,
+}
+
+impl State {
+    /// Something outside the TV is setting the colours.
+    pub fn outside(&self) -> bool {
+        self.mode.as_deref() == Some("manual")
+    }
+
+    /// As `tveee ambilight` prints it.
+    pub fn lines(&self) -> Vec<String> {
+        let mut out = vec![format!("power:   {}", if self.power { "on" } else { "off" })];
+        if self.mode.is_some() {
+            let who = if self.outside() { "outside the TV (tveee's 'set', or another program)" } else { "the TV" };
+            out.push(format!("control: {who}"));
+        }
+        if let Some(style) = &self.style {
+            let setting = self.setting.as_ref().map(|s| format!(", {}", s.to_lowercase().replace('_', " "))).unwrap_or_default();
+            out.push(format!("style:   {}{setting}", style.to_lowercase().replace('_', " ")));
+        }
+        if let Some(h) = self.hue {
+            out.push(format!("hue:     {} (Ambilight+Hue)", if h { "on" } else { "off" }));
+        }
+        if !self.sides.is_empty() {
+            out.push(format!("lights:  {}", self.sides.iter().map(|(s, n)| format!("{n} {s}")).collect::<Vec<_>>().join(", ")));
+        }
+        out
+    }
+}
+
+/// What the lights are doing, read from the TV.
+pub fn state(tv: &Tv) -> Result<State> {
     tv.connect()?;
     let (power, mode, config, hue, layout) = std::thread::scope(|sc| {
         let p = sc.spawn(|| get(tv, "/6/ambilight/power"));
@@ -247,28 +290,139 @@ pub fn status(tv: &Tv) -> Result<Vec<String>> {
     // power is the one every Ambilight TV has: its error is the one to show
     let power = power?;
     let field = |json: &Result<String>, k: &str| json.as_ref().ok().and_then(|j| crate::http::string_field(j, k));
-    let mut out = vec![format!("power:   {}", crate::http::string_field(&power, "power").unwrap_or_default().to_lowercase())];
-    if let Some(m) = field(&mode, "current") {
-        let who = if m == "manual" { "outside the TV (tveee's 'set', or another program)" } else { "the TV" };
-        out.push(format!("control: {who}"));
+    let on = |v: Option<String>| v.map(|p| p.eq_ignore_ascii_case("on"));
+    let sides = layout
+        .as_ref()
+        .map(|l| {
+            ["left", "top", "right", "bottom"]
+                .iter()
+                .map(|k| (k.to_string(), crate::http::number_field(l, k).unwrap_or(0.0) as u32))
+                .filter(|(_, n)| *n > 0)
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(State {
+        power: on(crate::http::string_field(&power, "power")).unwrap_or(false),
+        mode: field(&mode, "current"),
+        style: field(&config, "styleName"),
+        setting: field(&config, "menuSetting"),
+        hue: on(field(&hue, "power")),
+        sides,
+    })
+}
+
+/// What the lights are doing, as lines.
+pub fn status(tv: &Tv) -> Result<Vec<String>> {
+    Ok(state(tv)?.lines())
+}
+
+/// A change the ui can make.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub enum Change {
+    Power(bool),
+    /// One of the TV's styles, with its setting (and the label colours need).
+    Style { style: &'static str, setting: &'static str, label: Option<&'static str> },
+    Hue(bool),
+    /// Every light one colour (outside control).
+    All((u8, u8, u8)),
+    /// One light (side, number) one colour (outside control).
+    One(String, u32, (u8, u8, u8)),
+}
+
+/// Make `change`; returns what happened.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn apply(tv: &Tv, change: &Change) -> Result<String> {
+    match change {
+        Change::Power(on) => set_power(tv, *on),
+        Change::Style { style, setting, label } => {
+            set_style(tv, style, Some(setting), *label)?;
+            Ok(format!("ambilight: {}", setting.to_lowercase().replace('_', " ")))
+        }
+        Change::Hue(on) => {
+            post(tv, "/6/HueLamp/power", &format!(r#"{{"power":"{}"}}"#, if *on { "On" } else { "Off" }))?;
+            Ok(format!("Ambilight+Hue {}", if *on { "on" } else { "off" }))
+        }
+        Change::All(rgb) => set_colour(tv, *rgb),
+        Change::One(side, n, rgb) => set_light(tv, side, *n, *rgb),
     }
-    if let Some(style) = field(&config, "styleName") {
-        let setting = field(&config, "menuSetting").map(|s| format!(", {}", s.to_lowercase().replace('_', " "))).unwrap_or_default();
-        out.push(format!("style:   {}{setting}", style.to_lowercase().replace('_', " ")));
-    }
-    if let Some(h) = field(&hue, "power") {
-        out.push(format!("hue:     {} (Ambilight+Hue)", h.to_lowercase()));
-    }
-    if let Ok(l) = &layout {
-        let side = |k: &str| crate::http::number_field(l, k).unwrap_or(0.0) as u32;
-        let lights: Vec<String> = [("left", side("left")), ("top", side("top")), ("right", side("right")), ("bottom", side("bottom"))]
+}
+
+/// A row of the ui's Ambilight dialog: its options (with the change each
+/// makes; None on the lights row, where a colour is asked for), and which
+/// one is the TV's now.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub struct Row {
+    pub name: &'static str,
+    pub options: Vec<(String, Option<Change>)>,
+    pub current: Option<usize>,
+}
+
+/// The dialog's rows for `state` and `lights`: power, style, the style's
+/// settings, Ambilight+Hue (if there), and the lights (all, or each one).
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn rows(state: &State, lights: &[Light]) -> Vec<Row> {
+    let mut out = vec![Row {
+        name: "power",
+        options: vec![("on".into(), Some(Change::Power(true))), ("off".into(), Some(Change::Power(false)))],
+        current: Some(if state.power { 0 } else { 1 }),
+    }];
+    let style = if state.outside() { None } else { state.style.as_deref() };
+    let setting = state.setting.as_deref();
+    // the setting to keep when going back to a style: the one it had, if this was it
+    let keep = |s: &str, table: &[(&'static str, &'static str)], default: &'static str| -> &'static str {
+        if style == Some(s) {
+            if let Some((_, tv)) = table.iter().find(|(_, tv)| Some(*tv) == setting) {
+                return tv;
+            }
+        }
+        default
+    };
+    let colours: Vec<(&'static str, &'static str)> = COLOURS.iter().map(|(n, tv, _)| (*n, *tv)).collect();
+    let label_of = |tv: &str| COLOURS.iter().find(|c| c.1 == tv).map(|c| c.2);
+    out.push(Row {
+        name: "style",
+        options: vec![
+            ("video".into(), Some(Change::Style { style: "FOLLOW_VIDEO", setting: keep("FOLLOW_VIDEO", VIDEO, "STANDARD"), label: None })),
+            ("sound".into(), Some(Change::Style { style: "FOLLOW_AUDIO", setting: keep("FOLLOW_AUDIO", AUDIO, "ENERGY_ADAPTIVE_BRIGHTNESS"), label: None })),
+            ("colour".into(), {
+                let s = keep("FOLLOW_COLOR", &colours, "ISF");
+                Some(Change::Style { style: "FOLLOW_COLOR", setting: s, label: label_of(s) })
+            }),
+        ],
+        current: match style {
+            Some("FOLLOW_VIDEO") => Some(0),
+            Some("FOLLOW_AUDIO") => Some(1),
+            Some("FOLLOW_COLOR") => Some(2),
+            _ => None,
+        },
+    });
+    let settings = |table: &[(&'static str, &'static str)], style: &'static str, labels: bool| Row {
+        name: "setting",
+        options: table
             .iter()
-            .filter(|(_, n)| *n > 0)
-            .map(|(s, n)| format!("{n} {s}"))
-            .collect();
-        out.push(format!("lights:  {}", lights.join(", ")));
+            .map(|(n, tv)| (n.to_string(), Some(Change::Style { style, setting: tv, label: if labels { label_of(tv) } else { None } })))
+            .collect(),
+        current: table.iter().position(|(_, tv)| Some(*tv) == setting),
+    };
+    match style {
+        Some("FOLLOW_VIDEO") => out.push(settings(VIDEO, "FOLLOW_VIDEO", false)),
+        Some("FOLLOW_AUDIO") => out.push(settings(AUDIO, "FOLLOW_AUDIO", false)),
+        Some("FOLLOW_COLOR") => out.push(settings(&colours, "FOLLOW_COLOR", true)),
+        _ => {}
     }
-    Ok(out)
+    if let Some(h) = state.hue {
+        out.push(Row {
+            name: "hue",
+            options: vec![("on".into(), Some(Change::Hue(true))), ("off".into(), Some(Change::Hue(false)))],
+            current: Some(if h { 0 } else { 1 }),
+        });
+    }
+    let mut options = vec![("all".to_string(), None)];
+    options.extend(lights.iter().map(|l| (format!("{} {}", l.side, l.n), None)));
+    out.push(Row { name: "lights", options, current: None });
+    out
 }
 
 pub fn set_power(tv: &Tv, on: bool) -> Result<String> {
@@ -460,6 +614,29 @@ mod tests {
         assert!(lists_ambilight(r#"{"featuring":{"jsonfeatures":{"ambilight":["LoungeLight","Hue","Ambilight"],"menuitems":["Setup_Menu"]}}}"#));
         assert!(!lists_ambilight(r#"{"featuring":{"jsonfeatures":{"ambilight":[],"menuitems":["Ambilight"]}}}"#));
         assert!(!lists_ambilight(r#"{"featuring":{"jsonfeatures":{"menuitems":["Setup_Menu"]}}}"#));
+    }
+
+    #[test]
+    fn dialog_rows() {
+        let st = State { power: true, mode: Some("internal".into()), style: Some("FOLLOW_VIDEO".into()), setting: Some("VIVID".into()), hue: Some(true), sides: vec![] };
+        let lights = vec![Light { layer: 1, side: "left".into(), n: 0, rgb: (1, 2, 3) }];
+        let r = rows(&st, &lights);
+        assert_eq!(r.iter().map(|r| r.name).collect::<Vec<_>>(), ["power", "style", "setting", "hue", "lights"]);
+        assert_eq!((r[1].current, r[2].current), (Some(0), Some(2)));
+        // going back to video keeps vivid; sound starts at its default
+        assert_eq!(r[1].options[0].1, Some(Change::Style { style: "FOLLOW_VIDEO", setting: "VIVID", label: None }));
+        assert_eq!(r[1].options[1].1, Some(Change::Style { style: "FOLLOW_AUDIO", setting: "ENERGY_ADAPTIVE_BRIGHTNESS", label: None }));
+        assert_eq!(r[4].options.iter().map(|o| o.0.as_str()).collect::<Vec<_>>(), ["all", "left 0"]);
+        // outside control: no style marked, no settings row; no Hue: no hue row
+        let st = State { mode: Some("manual".into()), style: None, hue: None, ..st };
+        let r = rows(&st, &[]);
+        assert_eq!(r.iter().map(|r| r.name).collect::<Vec<_>>(), ["power", "style", "lights"]);
+        assert_eq!(r[1].current, None);
+        // colours carry their label
+        let st = State { mode: Some("lounge".into()), style: Some("FOLLOW_COLOR".into()), setting: Some("HOT_LAVA".into()), ..State::default() };
+        let r = rows(&st, &[]);
+        assert_eq!(r[2].options[0].1, Some(Change::Style { style: "FOLLOW_COLOR", setting: "HOT_LAVA", label: Some("Hot Lava") }));
+        assert_eq!(r[2].current, Some(0));
     }
 
     #[test]
