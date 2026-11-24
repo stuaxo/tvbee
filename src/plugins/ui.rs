@@ -32,7 +32,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 /// can't seek exactly.
 const KEY_STEP: f64 = 10.0;
 
-/// A user request, handled on the worker thread.
+/// A user request, handled by one of the lanes (see [`route`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     PlayPause,
@@ -40,6 +40,9 @@ pub enum Action {
     Jump(f64),
     Volume(i32),
     Mute,
+    /// Mute or unmute, the ui knowing which it is now (true: muted): one key,
+    /// without reading the audio state first.
+    MuteKnown(bool),
     /// Any remote key (back, home, d-pad, OK), by Android keycode.
     Key(u32),
     /// Type this text into the TV (remote mode).
@@ -176,11 +179,37 @@ fn remote_input(code: KeyCode, mods: KeyModifiers) -> Input {
     }
 }
 
-/// Hand each action to the thread that does it: remote keys and typing to
-/// [`send_keys`], everything else to the worker. Ends when the UI hangs up.
-fn route(actions: &Receiver<Action>, work: &Sender<Action>, keys: &Sender<Action>) {
+/// Which lane an action goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane {
+    /// Remote keys and typing ([`send_keys`]).
+    Keys,
+    /// Things the user did that change the TV ([`Actor`]), one at a time.
+    Act,
+    /// Things the user is waiting to see (the guide, what's running).
+    Read,
+    /// Work nobody is waiting for, done when the user pauses ([`background`]).
+    Idle,
+}
+
+pub fn lane(a: &Action) -> Lane {
+    match a {
+        Action::Key(_) | Action::Text(_) => Lane::Keys,
+        Action::LoadGuide | Action::CheckRunning => Lane::Read,
+        Action::PrefetchInfo => Lane::Idle,
+        _ => Lane::Act,
+    }
+}
+
+/// Hand each action to its lane, noting when the user last asked for
+/// something. Ends when the UI hangs up.
+fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender<Action>)]) {
     for a in actions {
-        let to = if matches!(a, Action::Key(_) | Action::Text(_)) { keys } else { work };
+        let l = lane(&a);
+        if l != Lane::Idle {
+            shared.touched();
+        }
+        let Some((_, to)) = lanes.iter().find(|(x, _)| *x == l) else { continue };
         if to.send(a).is_err() {
             return;
         }
@@ -593,42 +622,172 @@ pub fn guide_move(ids: &[u32], at: u32, code: KeyCode) -> u32 {
     ids[to]
 }
 
-struct Worker {
-    tv: Tv,
-    conn: Option<devtools::Conn>,
-    pkg: Option<String>,
+/// What the lanes share.
+struct Shared {
+    ip: String,
     /// Set by the UI on quit: finish up, and don't open new port forwards.
     stop: Arc<AtomicBool>,
-    menu: Vec<MenuItem>,
-    /// Kinds of apps tvbee has no entry for (fetched once, cached a day).
-    guesses: Vec<apps::Guess>,
-    /// Apps with a proper search (fetched once).
-    searchable: Vec<search::Searchable>,
+    /// The app in front, as of the last refresh.
+    pkg: std::sync::Mutex<Option<String>>,
+    /// Kinds of apps tvbee has no entry for (fetched in the background).
+    guesses: std::sync::Mutex<Vec<apps::Guess>>,
+    /// Apps with a proper search (fetched in the background, or when needed).
+    searchable: std::sync::Mutex<Vec<search::Searchable>>,
+    /// Actions running now: the refresh holds off for them.
+    busy: std::sync::atomic::AtomicUsize,
+    /// When the user last asked for something: background work waits for a lull.
+    input_at: std::sync::Mutex<Instant>,
+    /// Something the user did may have changed live TV's channel.
+    channel_stale: AtomicBool,
+    /// The first refresh has been shown (background work waits for it).
+    shown: AtomicBool,
+    /// The launcher's apps have been sent (held while they're being read, so
+    /// they're read once, by whichever lane gets there first).
+    apps_sent: std::sync::Mutex<bool>,
 }
 
-impl Worker {
-    /// The devtools connection for `pkg`, opened (or re-opened) on demand.
-    fn conn(&mut self, pkg: &str) -> Option<&devtools::Conn> {
-        if self.conn.as_ref().is_some_and(|c| c.pkg != pkg) {
-            self.conn = None;
+/// How long the user has to leave things alone before background work runs.
+const LULL: Duration = Duration::from_secs(2);
+/// How long the refresh holds off for an action before going ahead anyway.
+const HOLD_OFF: Duration = Duration::from_millis(1500);
+/// How often live TV's channel is read again when nothing suggests it changed.
+const CHANNEL_EVERY: Duration = Duration::from_secs(5);
+
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl Shared {
+    fn new(ip: String, stop: Arc<AtomicBool>) -> Shared {
+        Shared {
+            ip,
+            stop,
+            pkg: Default::default(),
+            guesses: Default::default(),
+            searchable: Default::default(),
+            busy: Default::default(),
+            input_at: std::sync::Mutex::new(Instant::now()),
+            channel_stale: AtomicBool::new(true),
+            shown: AtomicBool::new(false),
+            apps_sent: std::sync::Mutex::new(false),
         }
-        if self.conn.is_none() && !self.stopping() {
-            self.conn = devtools::Conn::open(&self.tv, pkg);
-        }
-        self.conn.as_ref()
     }
 
-    /// Tell the ui which apps are running.
-    fn send_running(&self, tx: &Sender<Msg>) {
-        let cmd = format!("ps -A -o NAME; echo @@; {}", apps::PERSISTENT_CMD);
-        if let Ok(out) = self.tv.shell(&[&cmd]) {
-            let (ps, pers) = out.split_once("@@").unwrap_or((&out, ""));
-            let _ = tx.send(Msg::Running(apps::running(ps), apps::persistent(pers)));
-        }
+    fn tv(&self) -> Tv {
+        Tv { ip: self.ip.clone() }
     }
 
     fn stopping(&self) -> bool {
         self.stop.load(Ordering::Relaxed)
+    }
+
+    /// The user asked for something.
+    fn touched(&self) {
+        *lock(&self.input_at) = Instant::now();
+        self.channel_stale.store(true, Ordering::Relaxed);
+    }
+
+    /// Nothing asked for lately and nothing running: background work may go.
+    fn idle(&self) -> bool {
+        self.shown.load(Ordering::Relaxed) && self.busy.load(Ordering::Relaxed) == 0 && lock(&self.input_at).elapsed() >= LULL
+    }
+
+    /// Wait for a lull; false if quitting meanwhile.
+    fn wait_idle(&self) -> bool {
+        while !self.idle() {
+            if self.stopping() {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        !self.stopping()
+    }
+}
+
+/// Read the launcher's apps and send them, unless that's been done. False if
+/// the TV couldn't say (try again later).
+fn send_apps(shared: &Shared, tv: &Tv, tx: &Sender<Msg>) -> bool {
+    let mut sent = lock(&shared.apps_sent);
+    if *sent {
+        return true;
+    }
+    let Ok(pm) = tv.shell(&["cmd", "package", "list", "packages"]) else { return false };
+    let guesses = apps::guesses(tv);
+    *lock(&shared.guesses) = guesses.clone();
+    let default_home = apps::default_home(tv).ok().flatten();
+    let default_pkg = default_home.as_deref().map(|c| c.split('/').next().unwrap_or(c));
+    let _ = tx.send(Msg::Apps(launcher_entries(&apps::installed_aliases(&pm), &guesses, default_pkg)));
+    *sent = true;
+    true
+}
+
+/// Tell the ui which apps are running.
+fn send_running(tv: &Tv, tx: &Sender<Msg>) {
+    let cmd = format!("ps -A -o NAME; echo @@; {}", apps::PERSISTENT_CMD);
+    if let Ok(out) = tv.shell(&[&cmd]) {
+        let (ps, pers) = out.split_once("@@").unwrap_or((&out, ""));
+        let _ = tx.send(Msg::Running(apps::running(ps), apps::persistent(pers)));
+    }
+}
+
+/// A devtools connection for `pkg`, opened (or re-opened) on demand.
+fn devtools_for<'a>(slot: &'a mut Option<devtools::Conn>, tv: &Tv, pkg: &str, stopping: bool) -> Option<&'a devtools::Conn> {
+    if slot.as_ref().is_some_and(|c| c.pkg != pkg) {
+        *slot = None;
+    }
+    if slot.is_none() && !stopping {
+        *slot = devtools::Conn::open(tv, pkg);
+    }
+    slot.as_ref()
+}
+
+/// The refresh lane: what's on, every [`REFRESH`], or sooner when woken
+/// (after an action). Holds off while an action runs.
+struct Refresher {
+    tv: Tv,
+    shared: Arc<Shared>,
+    conn: Option<devtools::Conn>,
+    /// Live TV's channel, and when it was read.
+    channel: Option<(crate::provider::Channel, Instant)>,
+}
+
+impl Refresher {
+    fn run(mut self, wake: &Receiver<()>, tx: Sender<Msg>) {
+        // every REFRESH, or when woken; until the action lane has gone
+        while let Ok(()) | Err(RecvTimeoutError::Timeout) = wake.recv_timeout(REFRESH) {
+            // several wake-ups at once: one refresh
+            while wake.try_recv().is_ok() {}
+            let held = Instant::now();
+            while self.shared.busy.load(Ordering::Relaxed) > 0 && held.elapsed() < HOLD_OFF && !self.shared.stopping() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            if self.shared.stopping() {
+                break;
+            }
+            let msg = match self.snapshot() {
+                Ok(s) => Msg::Snap(Box::new(s), Instant::now()),
+                // e.g. while it reboots; keep trying every second
+                Err(e) => Msg::Failed(format!("waiting for the TV ({e})")),
+            };
+            if tx.send(msg).is_err() {
+                break;
+            }
+            self.shared.shown.store(true, Ordering::Relaxed);
+        }
+        // the port forward goes before the message channel, so the UI can wait for it
+        drop(self);
+        drop(tx);
+    }
+
+    /// Live TV in `pkg`: its channel is read again only now and then, or
+    /// when the user may have changed it.
+    fn live(&mut self, pkg: &str) -> Option<Activity> {
+        let stale = self.shared.channel_stale.swap(false, Ordering::Relaxed);
+        if stale || self.channel.as_ref().is_none_or(|(_, at)| at.elapsed() >= CHANNEL_EVERY) {
+            self.channel = nowplaying::live_channel(&self.tv, pkg).map(|c| (c, Instant::now()));
+        }
+        let (ch, _) = self.channel.as_ref()?;
+        nowplaying::live_on(&self.tv, pkg, ch)
     }
 
     fn snapshot(&mut self) -> Result<Snapshot> {
@@ -649,33 +808,35 @@ impl Worker {
         let media_dump = media_dump.unwrap_or_default();
         let awake = power.lines().any(|l| l.trim() == "mWakefulness=Awake");
         let pkg = info::focus_package(&window);
-        self.pkg = pkg.clone();
+        *lock(&self.shared.pkg) = pkg.clone();
         let sessions = media::parse_media_sessions(&media_dump);
+        let guesses = lock(&self.shared.guesses).clone();
         let mut exact = false;
         // live TV: the channel and programme (when the TV can say)
         let mut live = match (&pkg, awake) {
-            (Some(p), true) if live_provider().is_some_and(|lp| lp.hosts().contains(&p.as_str())) => nowplaying::live(&self.tv, p),
+            (Some(p), true) if live_provider().is_some_and(|lp| lp.hosts().contains(&p.as_str())) => self.live(p),
             _ => None,
         };
         let activity = match (&pkg, awake) {
             (_, false) => Some(Activity::just("In standby")),
-            // live TV: the channel and programme (when the TV can say)
             (Some(_), true) if live.is_some() => live.take(),
             (Some(pkg), true) => {
                 let pkg = pkg.clone();
-                let who = apps::identify(&pkg, &self.guesses);
+                let who = apps::identify(&pkg, &guesses);
                 let use_dt = nowplaying::has_devtools(&pkg);
+                let stopping = self.shared.stopping();
+                let (tv, slot) = (&self.tv, &mut self.conn);
                 let mut pages = || {
                     if !use_dt {
                         return Vec::new();
                     }
-                    let got = self.conn(&pkg).map(|c| c.pages());
+                    let got = devtools_for(slot, tv, &pkg, stopping).map(|c| c.pages());
                     match got {
                         Some(Ok(p)) => p,
                         // stale forward (app restarted?): drop it, try once more
                         _ => {
-                            self.conn = None;
-                            self.conn(&pkg).and_then(|c| c.pages().ok()).unwrap_or_default()
+                            *slot = None;
+                            devtools_for(slot, tv, &pkg, stopping).and_then(|c| c.pages().ok()).unwrap_or_default()
                         }
                     }
                 };
@@ -693,47 +854,68 @@ impl Worker {
             standby: !awake,
             kind: pkg.as_deref().and_then(|p| {
                 let known = apps::by_package(p).is_some();
-                apps::identify(p, &self.guesses)
-                    .map(|(_, k)| if known { k.as_str().to_string() } else { format!("{}, guessed", k.as_str()) })
+                apps::identify(p, &guesses).map(|(_, k)| if known { k.as_str().to_string() } else { format!("{}, guessed", k.as_str()) })
             }),
             power: power.lines().find_map(|l| l.trim().strip_prefix("mWakefulness=")).map(str::to_string),
             focus: info::focus_window(&window),
             system,
         })
     }
+}
+
+/// The action lane: what the user did, one at a time, as soon as it comes.
+/// Each wakes the refresh when done, so the screen catches up.
+struct Actor {
+    tv: Tv,
+    shared: Arc<Shared>,
+    conn: Option<devtools::Conn>,
+    menu: Vec<MenuItem>,
+    /// Wakes the refresh.
+    wake: Sender<()>,
+    /// The read lane (to update the running apps after launching, closing).
+    reads: Sender<Action>,
+}
+
+impl Actor {
+    fn run(mut self, actions: &Receiver<Action>, tx: Sender<Msg>) {
+        while let Ok(first) = actions.recv() {
+            // keys already pressed still go, even when quitting
+            let mut queued = vec![first];
+            queued.extend(actions.try_iter());
+            if self.shared.stopping() {
+                queued.retain(|a| *a != Action::Refresh);
+            }
+            for a in coalesce(queued) {
+                self.shared.busy.fetch_add(1, Ordering::Relaxed);
+                let result = self.act(a, &tx);
+                self.shared.busy.fetch_sub(1, Ordering::Relaxed);
+                let _ = self.wake.send(());
+                let msg = match result {
+                    Ok(note) if note.is_empty() => continue,
+                    Ok(note) => Msg::Note(note),
+                    Err(e) => Msg::Failed(e.to_string()),
+                };
+                if tx.send(msg).is_err() {
+                    return;
+                }
+            }
+        }
+        drop(self);
+        drop(tx);
+    }
+
+    fn exact_seek(&mut self, to: SeekTo) -> Option<f64> {
+        let pkg = lock(&self.shared.pkg).clone()?;
+        if !nowplaying::has_devtools(&pkg) {
+            return None;
+        }
+        devtools_for(&mut self.conn, &self.tv, &pkg, self.shared.stopping())?.seek(to).ok()
+    }
 
     /// Carry out one action; returns status-line feedback.
     fn act(&mut self, a: Action, tx: &Sender<Msg>) -> Result<String> {
         self.tv.connect()?;
         Ok(match a {
-            Action::PrefetchInfo => {
-                let ip = self.tv.ip.clone();
-                std::thread::spawn(move || {
-                    let tv = Tv { ip };
-                    // reads (and caches) every description; any one will do to start it
-                    if let Some(g) = live_provider().and_then(|p| p.guide()) {
-                        let _ = g.info(&crate::provider::Cx { tv: &tv }, 0, 0);
-                    }
-                });
-                String::new()
-            }
-            Action::LoadInfo(ch, start) => {
-                // the first read takes the TV a while: off the worker, so the screen keeps refreshing
-                let (ip, tx) = (self.tv.ip.clone(), tx.clone());
-                std::thread::spawn(move || {
-                    let tv = Tv { ip };
-                    let info = live_provider()
-                        .and_then(|p| p.guide())
-                        .map_or(Ok(None), |g| g.info(&crate::provider::Cx { tv: &tv }, ch, start))
-                        .map_err(|e| e.to_string());
-                    let _ = tx.send(Msg::Info((ch, start), info));
-                });
-                String::new()
-            }
-            Action::LoadGuide => {
-                let _ = tx.send(Msg::Guide(load_guide(&self.tv).map_err(|e| e.to_string())));
-                String::new()
-            }
             Action::Favourite(ch, on) => {
                 let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
                 let done = crate::favourites::set(p, &crate::provider::Cx { tv: &self.tv }, ch.id, on);
@@ -747,7 +929,9 @@ impl Worker {
             }
             Action::Watch(ch) => {
                 let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
-                p.channels().expect("checked").tune(&crate::provider::Cx { tv: &self.tv }, &ch)?
+                let said = p.channels().expect("checked").tune(&crate::provider::Cx { tv: &self.tv }, &ch)?;
+                self.shared.channel_stale.store(true, Ordering::Relaxed);
+                said
             }
             Action::PlayPause => {
                 self.tv.keyevent(85)?;
@@ -762,6 +946,10 @@ impl Worker {
             Action::Mute => {
                 let now = media::is_muted(&self.tv)?.unwrap_or(false);
                 media::set_mute(&self.tv, !now)?;
+                if now { "unmuted".into() } else { "muted".into() }
+            }
+            Action::MuteKnown(now) => {
+                self.tv.keyevent(164)?;
                 if now { "unmuted".into() } else { "muted".into() }
             }
             Action::Seek(d) => match self.exact_seek(SeekTo::By(d)) {
@@ -784,14 +972,6 @@ impl Worker {
                 }
                 None => "jumping needs a video tvbee can read (currently YouTube)".into(),
             },
-            Action::Key(code) => {
-                self.tv.keyevent(code)?;
-                key_name(code).into()
-            }
-            Action::Text(t) => {
-                self.tv.shell(&["input", "text", &super::input::escape_text(&t)])?;
-                format!("typed \"{t}\"")
-            }
             Action::Menu(i) => match self.menu.get(i).map(|m| m.run) {
                 Some(Run::Now(run)) => run(&self.tv)?,
                 Some(Run::WithText { .. }) => "that needs some text".into(),
@@ -803,7 +983,7 @@ impl Worker {
             },
             Action::Launch(target) => {
                 apps::start(&self.tv, &target)?;
-                self.send_running(tx);
+                let _ = self.reads.send(Action::CheckRunning);
                 format!("launched {}", app_name(apps::pkg_of(&target)))
             }
             Action::Front(target) => {
@@ -812,111 +992,128 @@ impl Worker {
             }
             Action::Close(pkg) => {
                 self.tv.shell(&["am", "force-stop", &pkg])?;
-                self.send_running(tx);
+                let _ = self.reads.send(Action::CheckRunning);
                 format!("closed {}", app_name(&pkg))
             }
             Action::Restart { pkg, target } => {
                 self.tv.shell(&["am", "force-stop", &pkg])?;
                 apps::start(&self.tv, &target)?;
-                self.send_running(tx);
+                let _ = self.reads.send(Action::CheckRunning);
                 format!("restarted {}", app_name(&pkg))
-            }
-            Action::CheckRunning => {
-                self.send_running(tx);
-                String::new()
             }
             Action::Search { pkg, query, keys: true } => search::keys_search(&self.tv, &pkg, &query, false)?,
             Action::Search { pkg, query, keys: false } => {
-                if self.searchable.is_empty() {
-                    self.searchable = search::searchable(&self.tv)?;
+                let mut found = lock(&self.shared.searchable).clone();
+                if found.is_empty() {
+                    found = search::searchable(&self.tv)?;
+                    *lock(&self.shared.searchable) = found.clone();
                 }
-                search::search_package(&self.tv, &self.searchable, &pkg, &query, false, false)?
+                search::search_package(&self.tv, &found, &pkg, &query, false, false)?
+            }
+            Action::LoadInfo(ch, start) => {
+                // the first read takes the TV a while: a thread of its own
+                let (tv, tx) = (self.shared.tv(), tx.clone());
+                std::thread::spawn(move || {
+                    let info = live_provider()
+                        .and_then(|p| p.guide())
+                        .map_or(Ok(None), |g| g.info(&crate::provider::Cx { tv: &tv }, ch, start))
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::Info((ch, start), info));
+                });
+                String::new()
             }
             Action::Refresh => "refreshed".into(),
+            // other lanes' actions don't come here
+            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo => String::new(),
         })
     }
+}
 
-    /// Send several remote keys in one adb round trip.
-    fn keys(&mut self, codes: &[u32]) -> Result<String> {
-        self.tv.connect()?;
-        self.tv.keys(codes)?;
-        let names: Vec<&str> = codes.iter().map(|c| key_name(*c)).collect();
-        Ok(names.join(" "))
-    }
-
-    fn exact_seek(&mut self, to: SeekTo) -> Option<f64> {
-        let pkg = self.pkg.clone()?;
-        if !nowplaying::has_devtools(&pkg) {
-            return None;
+/// The read lane: things the user is waiting to see, kept apart from
+/// actions so a slow read doesn't hold one up.
+fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg>) {
+    let tv = &shared.tv();
+    while let Ok(first) = actions.recv() {
+        let mut queued = vec![first];
+        queued.extend(actions.try_iter());
+        queued.dedup();
+        for a in queued {
+            if tv.connect().is_err() {
+                continue;
+            }
+            match a {
+                Action::LoadGuide => {
+                    let _ = tx.send(Msg::Guide(load_guide(tv).map_err(|e| e.to_string())));
+                }
+                // the launcher is open: its apps can't wait for a lull
+                Action::CheckRunning => std::thread::scope(|sc| {
+                    // side by side: neither needs the other
+                    sc.spawn(|| send_apps(shared, tv, tx));
+                    send_running(tv, tx);
+                }),
+                _ => {}
+            }
         }
-        self.conn(&pkg)?.seek(to).ok()
     }
+}
 
-    /// Runs until the UI hangs up, then drops the worker (removing its port
-    /// forward) *before* the message channel, so the UI can wait for that.
-    fn run(mut self, actions: Receiver<Action>, tx: Sender<Msg>) {
-        self.serve(&actions, &tx);
-        drop(self);
-        drop(tx);
+/// The background lane: work nobody is waiting for, each piece only once the
+/// user has paused ([`LULL`]): the launcher's apps and what can be searched,
+/// reading the guide ahead of it being opened, and its descriptions when
+/// asked to.
+fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
+    let tv = shared.tv();
+    // the launcher's apps (unless opening the launcher got them first), then
+    // the apps the search box can search
+    loop {
+        if !shared.wait_idle() {
+            return;
+        }
+        if tv.connect().is_ok() && send_apps(shared, &tv, &tx) {
+            break;
+        }
+        std::thread::sleep(REFRESH);
     }
-
-    fn serve(&mut self, actions: &Receiver<Action>, tx: &Sender<Msg>) {
-        let mut apps_sent = false;
-        loop {
-            let first = match actions.recv_timeout(REFRESH) {
-                Ok(a) => Some(a),
-                Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => return,
-            };
-            // keys already pressed still reach the TV, even when quitting
-            let mut queued: Vec<Action> = first.into_iter().collect();
-            queued.extend(actions.try_iter());
-            if self.stopping() {
-                queued.retain(|a| *a != Action::Refresh);
-            }
-            for batch in batches(coalesce(queued)) {
-                let result = match batch {
-                    Batch::Keys(codes) => self.keys(&codes),
-                    Batch::One(a) => self.act(a, tx),
-                };
-                let msg = match result {
-                    Ok(note) if note.is_empty() => continue,
-                    Ok(note) => Msg::Note(note),
-                    Err(e) => Msg::Failed(e.to_string()),
-                };
-                if tx.send(msg).is_err() {
-                    return;
+    if !shared.wait_idle() {
+        return;
+    }
+    let found = search::searchable(&tv).unwrap_or_default();
+    *lock(&shared.searchable) = found.clone();
+    if tx.send(Msg::Searchable(found)).is_err() {
+        return;
+    }
+    // nothing more to tell the ui: don't keep it waiting on quit
+    drop(tx);
+    let warm_guide = |tv: &Tv| {
+        // the programmes (cached), not the favourites sync that opening the guide does
+        if let Some(g) = live_provider().and_then(|p| p.guide()) {
+            let _ = g.now_next(&crate::provider::Cx { tv }, crate::plugins::guide::now());
+        }
+    };
+    let mut warmed: Option<Instant> = None;
+    loop {
+        // asked for (descriptions), or every so often: keep the guide warm
+        let a = match asked.recv_timeout(Duration::from_secs(60)) {
+            Ok(a) => Some(a),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => return,
+        };
+        if !shared.wait_idle() {
+            return;
+        }
+        match a {
+            Some(Action::PrefetchInfo) => {
+                // reads (and caches) every description; any one will do to start it
+                if let Some(g) = live_provider().and_then(|p| p.guide()) {
+                    let _ = g.info(&crate::provider::Cx { tv: &tv }, 0, 0);
                 }
             }
-            if self.stopping() {
-                return;
+            Some(_) => {}
+            None if warmed.is_none_or(|w| w.elapsed() >= Duration::from_secs(20 * 60)) => {
+                warm_guide(&tv);
+                warmed = Some(Instant::now());
             }
-            let msg = match self.snapshot() {
-                Ok(s) => Msg::Snap(Box::new(s), Instant::now()),
-                // e.g. while it reboots; keep trying every second
-                Err(e) => Msg::Failed(format!("waiting for the TV ({e})")),
-            };
-            if tx.send(msg).is_err() {
-                return;
-            }
-            // after the first refresh, so it doesn't delay the main screen
-            if !apps_sent && !self.stopping() && self.tv.connect().is_ok()
-                && let Ok(pm) = self.tv.shell(&["cmd", "package", "list", "packages"])
-            {
-                apps_sent = true;
-                self.guesses = apps::guesses(&self.tv);
-                let default_home = apps::default_home(&self.tv).ok().flatten();
-                let default_pkg = default_home.as_deref().map(|c| c.split('/').next().unwrap_or(c));
-                let rows = launcher_entries(&apps::installed_aliases(&pm), &self.guesses, default_pkg);
-                if tx.send(Msg::Apps(rows)).is_err() {
-                    return;
-                }
-                let found = search::searchable(&self.tv).unwrap_or_default();
-                self.searchable = found.clone();
-                if tx.send(Msg::Searchable(found)).is_err() {
-                    return;
-                }
-            }
+            None => {}
         }
     }
 }
@@ -1875,6 +2072,11 @@ impl App {
                 let now = rows.iter().position(|a| Some(a.package.as_str()) == pkg);
                 self.overlay = Overlay::Apps { tab, sel: now.unwrap_or(0) };
                 let _ = actions.send(Action::CheckRunning);
+            }
+            // the last refresh knows whether it's muted: just press the key
+            Input::Do(Action::Mute) => {
+                let known = self.snap.as_ref().and_then(|s| s.muted);
+                let _ = actions.send(known.map_or(Action::Mute, Action::MuteKnown));
             }
             Input::Do(a) => {
                 let _ = actions.send(a);
@@ -2928,21 +3130,32 @@ impl Drop for MouseCapture {
 
 fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action>, msgs: &Receiver<Msg>) -> std::io::Result<()> {
     use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+    // redraw when something changed (a key, news from the TV), and at least
+    // every TICK so the progress bar moves
+    const TICK: Duration = Duration::from_millis(200);
+    let mut drawn: Option<Instant> = None;
+    let mut dirty = true;
     loop {
         for m in msgs.try_iter() {
             app.handle(m);
+            dirty = true;
         }
-        term.draw(|f| app.draw(f))?;
+        if dirty || app.animating() || drawn.is_none_or(|d| d.elapsed() >= TICK) {
+            term.draw(|f| app.draw(f))?;
+            drawn = Some(Instant::now());
+            dirty = false;
+        }
         // drawing the details panel can find a description it needs
         if let Some((ch, start)) = app.want_info.take() {
             let _ = actions.send(Action::LoadInfo(ch, start));
         }
-        // short poll: keeps the progress bar moving and keys snappy; shorter
-        // still while the guide slides
-        let wait = if app.animating() { Duration::from_millis(10) } else { Duration::from_millis(200) };
+        // a short wait, so news from the TV shows at once (keys wake it anyway);
+        // shorter still while the guide slides
+        let wait = if app.animating() { Duration::from_millis(10) } else { Duration::from_millis(25) };
         if !event::poll(wait)? {
             continue;
         }
+        dirty = true;
         match event::read()? {
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
@@ -3026,23 +3239,27 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let (act_tx, act_rx) = mpsc::channel();
     let (msg_tx, msg_rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
-    let worker = Worker {
-        tv: Tv { ip: c.tv.ip.clone() },
-        conn: None,
-        pkg: None,
-        stop: Arc::clone(&stop),
-        menu: c.menu.clone(),
-        guesses: Vec::new(),
-        searchable: Vec::new(),
-    };
-    // keys go their own way, so they never wait behind a refresh
-    let (work_tx, work_rx) = mpsc::channel();
+    let shared = Arc::new(Shared::new(c.tv.ip.clone(), Arc::clone(&stop)));
+    // the lanes (see `route`): keys, actions, reads, background, and the refresh
     let (key_tx, key_rx) = mpsc::channel();
-    std::thread::spawn(move || route(&act_rx, &work_tx, &key_tx));
-    let key_msgs = msg_tx.clone();
-    let key_tv = Tv { ip: c.tv.ip.clone() };
+    let (do_tx, do_rx) = mpsc::channel();
+    let (read_tx, read_rx) = mpsc::channel();
+    let (idle_tx, idle_rx) = mpsc::channel();
+    let (wake_tx, wake_rx) = mpsc::channel();
+    let lanes = vec![(Lane::Keys, key_tx), (Lane::Act, do_tx), (Lane::Read, read_tx.clone()), (Lane::Idle, idle_tx)];
+    let sh = Arc::clone(&shared);
+    std::thread::spawn(move || route(&act_rx, &sh, &lanes));
+    let (key_msgs, key_tv) = (msg_tx.clone(), shared.tv());
     std::thread::spawn(move || send_keys(key_tv, &key_rx, &key_msgs));
-    std::thread::spawn(move || worker.run(work_rx, msg_tx));
+    let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), conn: None, menu: c.menu.clone(), wake: wake_tx, reads: read_tx };
+    let actor_msgs = msg_tx.clone();
+    std::thread::spawn(move || actor.run(&do_rx, actor_msgs));
+    let (read_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
+    std::thread::spawn(move || reads(&sh, &read_rx, &read_msgs));
+    let (idle_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
+    std::thread::spawn(move || background(&sh, &idle_rx, idle_msgs));
+    let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), conn: None, channel: None };
+    std::thread::spawn(move || refresher.run(&wake_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);
     let mut app = App {
         ip: c.tv.ip.clone(),
@@ -3602,6 +3819,36 @@ mod tests {
         );
         assert_eq!(key_name(4), "back");
         assert_eq!(key_name(20), "down");
+    }
+
+    #[test]
+    fn actions_go_to_their_lanes() {
+        use Action::*;
+        assert_eq!(lane(&Key(19)), Lane::Keys);
+        assert_eq!(lane(&Text("a".into())), Lane::Keys);
+        assert_eq!(lane(&PlayPause), Lane::Act);
+        assert_eq!(lane(&Launch("youtube".into())), Lane::Act);
+        assert_eq!(lane(&LoadGuide), Lane::Read);
+        assert_eq!(lane(&CheckRunning), Lane::Read);
+        assert_eq!(lane(&PrefetchInfo), Lane::Idle);
+    }
+
+    #[test]
+    fn background_waits_for_a_lull() {
+        let sh = Shared::new("x".into(), Arc::new(AtomicBool::new(false)));
+        *lock(&sh.input_at) = Instant::now() - LULL * 2;
+        // not before the first refresh is up
+        assert!(!sh.idle());
+        sh.shown.store(true, Ordering::Relaxed);
+        assert!(sh.idle());
+        // nor while an action runs
+        sh.busy.fetch_add(1, Ordering::Relaxed);
+        assert!(!sh.idle());
+        sh.busy.fetch_sub(1, Ordering::Relaxed);
+        // nor just after the user asked for something
+        sh.touched();
+        assert!(!sh.idle());
+        assert!(sh.channel_stale.load(Ordering::Relaxed));
     }
 
     #[test]

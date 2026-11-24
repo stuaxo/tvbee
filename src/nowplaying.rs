@@ -73,10 +73,21 @@ impl Activity {
 /// Live TV in `pkg`: the channel it's on and the programme, from the
 /// provider hosted there (None if it can't tell: not paired, say).
 pub fn live(tv: &Tv, pkg: &str) -> Option<Activity> {
+    live_on(tv, pkg, &live_channel(tv, pkg)?)
+}
+
+/// The channel live TV in `pkg` is on (None if it can't tell).
+pub fn live_channel(tv: &Tv, pkg: &str) -> Option<crate::provider::Channel> {
+    let p = crate::provider::for_package(pkg)?;
+    p.channels()?.current(&crate::provider::Cx { tv }).ok()?
+}
+
+/// Live TV in `pkg`, on channel `ch`: what's on it now and next.
+pub fn live_on(tv: &Tv, pkg: &str, ch: &crate::provider::Channel) -> Option<Activity> {
     use crate::plugins::guide::{hhmm, now, utc_offset};
     let p = crate::provider::for_package(pkg)?;
     let cx = crate::provider::Cx { tv };
-    let ch = p.channels()?.current(&cx).ok()??;
+    let ch = ch.clone();
     let at = now();
     let events = p.guide().and_then(|g| g.schedule(&cx, ch.id, at, at + 6 * 3600).ok()).unwrap_or_default();
     Some(live_activity(&ch, &events, at, utc_offset(), hhmm))
