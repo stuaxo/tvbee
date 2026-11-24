@@ -1,3 +1,4 @@
+pub mod ambilight;
 pub mod apps;
 pub mod debloat;
 pub mod diagnose;
@@ -46,7 +47,8 @@ pub fn all() -> Vec<Plugin> {
         )
         .with_apps(philips::apps)
         .with_providers(philips::providers)
-        .with_pairings(philips::pairings),
+        .with_pairings(philips::pairings)
+        .with_menu(ambilight::menu),
         Plugin::detect("youtube", "the YouTube app: what's on, search, looking inside it", youtube::detect, youtube::commands)
             .with_apps(youtube::apps)
             .with_providers(youtube::providers),

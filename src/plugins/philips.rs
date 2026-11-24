@@ -647,13 +647,15 @@ pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
 }
 
 pub fn commands() -> Vec<Command> {
-    vec![Command::new(CAT, "jointspace", "[/6/<path>]", "read a path of Philips' TV API (JointSpace)", jointspace).long(
+    let mut v = vec![Command::new(CAT, "jointspace", "[/6/<path>]", "read a path of Philips' TV API (JointSpace)", jointspace).long(
         "Reads a JointSpace path (default /6/system: model, API version, features).\n\
          Unpaired, only the public routes work (plain HTTP on :1925); others say\n\
          pairing is required. After 'tveee pair jointspace' (the TV shows a PIN),\n\
          paths are read over HTTPS on :1926 with the saved key: the current channel\n\
          (/6/activities/tv), channel lists (/6/channeldb/tv) and more.",
-    )]
+    )];
+    v.extend(super::ambilight::commands());
+    v
 }
 
 #[cfg(test)]

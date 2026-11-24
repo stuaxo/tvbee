@@ -198,7 +198,9 @@ Env: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tveee/env
 <!-- commands:end -->
 
 Not listed above: `ui` (built with `--features ui`), and commands from plugins
-that are enabled when the TV has what they're for: `jointspace` (`philips`). Those plugins
+that are enabled when the TV has what they're for: `jointspace` and `ambilight`
+(`philips`; Ambilight: power, styles, each light's colour, handing the lights
+to outside control). Those plugins
 also add their apps: iPlayer, Arte, Dailymotion and live TV (`philips`),
 YouTube (`youtube`).
 
