@@ -8,7 +8,8 @@
 //! Which device and scan code give an Android key is worked out once per TV
 //! boot ([`discover`]): the devices' declared keys (`getevent -i`), and their
 //! key layout files (`.kl`, found the way Android finds them). Keys no device
-//! can give (and the power keys) fall back to `input keyevent`.
+//! can give (and the power keys) fall back to `input keyevent`, as does
+//! everything with the `fast-keys` option off (`tvbee options fast-keys off`).
 
 use crate::error::Result;
 use crate::tv::Tv;
@@ -369,10 +370,16 @@ fn guarded(boot: &str, cmd: &str) -> String {
     format!("read b < {BOOT_ID}; if [ \"$b\" = '{boot}' ]; then {cmd}; else echo @@stale; fi")
 }
 
+/// Whether to send keys raw (the `fast-keys` option; off: always `input`).
+fn fast() -> bool {
+    crate::options::get(crate::options::FAST_KEYS)
+}
+
 /// Press `presses` on `tv` (one-off, e.g. from the command line): raw when it
 /// can, else `input keyevent`.
 pub fn press(tv: &Tv, presses: &[(u32, bool)]) -> Result<()> {
-    for fresh in [false, true] {
+    let tries: &[bool] = if fast() { &[false, true] } else { &[] };
+    for &fresh in tries {
         let map = match (fresh, cached(tv)) {
             (false, Some(m)) => m,
             (false, None) => continue,
@@ -395,7 +402,7 @@ pub fn press(tv: &Tv, presses: &[(u32, bool)]) -> Result<()> {
 /// Type `text` on `tv` (one-off): raw when every character can be, else
 /// `input text`.
 pub fn type_text(tv: &Tv, text: &str) -> Result<()> {
-    let raw = cached(tv).or_else(|| discover(tv).ok().inspect(|m| save(tv, m)));
+    let raw = fast().then(|| cached(tv).or_else(|| discover(tv).ok().inspect(|m| save(tv, m)))).flatten();
     if let Some(m) = raw {
         if let Some(cmd) = m.text_command(text) {
             if !tv.shell(&[&guarded(&m.boot, &cmd)])?.contains("@@stale") {
@@ -435,7 +442,9 @@ impl Session {
 
     /// Get ready before the first key: the map, and the shell.
     pub fn warm(&mut self) {
-        let _ = self.map();
+        if fast() {
+            let _ = self.map();
+        }
         let _ = self.send("true");
     }
 
@@ -474,7 +483,8 @@ impl Session {
 
     /// Press keys (Shift held where asked).
     pub fn press(&mut self, presses: &[(u32, bool)]) -> Result<()> {
-        let raw = self.map().and_then(|m| m.command(presses));
+        // the option is read each time, so changing it takes effect at once
+        let raw = if fast() { self.map().and_then(|m| m.command(presses)) } else { None };
         match raw {
             Some(cmd) => self.send(&cmd),
             None => {
@@ -486,7 +496,8 @@ impl Session {
 
     /// Type `text` (raw when every character can be, else `input text`).
     pub fn text(&mut self, text: &str) -> Result<()> {
-        match self.map().and_then(|m| m.text_command(text)) {
+        let raw = if fast() { self.map().and_then(|m| m.text_command(text)) } else { None };
+        match raw {
             Some(cmd) => self.send(&cmd),
             None => self.send(&format!("input text {}", crate::plugins::input::escape_text(text))),
         }

@@ -16,13 +16,22 @@ pub struct Opt {
 }
 
 pub const SCROLL_ANIMATION: &str = "scroll-animation";
+pub const FAST_KEYS: &str = "fast-keys";
 
-pub const OPTIONS: &[Opt] = &[Opt {
-    name: SCROLL_ANIMATION,
-    label: "scroll animations",
-    help: "the UI's guide slides smoothly when moving through time (else it jumps)",
-    default: true,
-}];
+pub const OPTIONS: &[Opt] = &[
+    Opt {
+        name: SCROLL_ANIMATION,
+        label: "scroll animations",
+        help: "the UI's guide slides smoothly when moving through time (else it jumps)",
+        default: true,
+    },
+    Opt {
+        name: FAST_KEYS,
+        label: "fast keys",
+        help: "keys go straight to the TV's input devices (off: Android's slower 'input' command)",
+        default: true,
+    },
+];
 
 fn file() -> Option<std::path::PathBuf> {
     Some(crate::dotenv::config_dir()?.join("options.txt"))
