@@ -1523,7 +1523,11 @@ impl App {
         let running = self.running.contains(&e.package);
         let Some(choice) = app_choices(e, running).get(at).copied() else { return };
         match choice_action(choice, e) {
-            (Some(a), _) => self.apply_overlay(Overlay::None, Some(a), actions),
+            // done: back to the list, with what's running brought up to date
+            (Some(a), _) => {
+                self.apply_overlay(Overlay::Apps { tab, sel }, Some(a), actions);
+                let _ = actions.send(Action::CheckRunning);
+            }
             (None, true) => self.open_search(Some(e.package.clone())),
             // cancel: back to the list
             (None, false) => self.overlay = Overlay::Apps { tab, sel },
@@ -2224,6 +2228,98 @@ impl App {
         );
     }
 
+    /// The launcher pop-up; `behind` another pop-up it's dimmed and inert.
+    fn draw_apps(&mut self, f: &mut Frame, tab: AppTab, sel: usize, behind: bool) {
+        let pkg = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
+        let all = self.apps.as_deref().unwrap_or_default();
+        let list = tab_list(all, tab);
+        // the tab labels, with counts
+        let labels: Vec<(AppTab, String)> = [AppTab::Known, AppTab::Other]
+            .into_iter()
+            .map(|t| {
+                let n = all.iter().filter(|e| t.holds(e)).count();
+                let name = if t == AppTab::Known { "Apps" } else { "Other TV apps" };
+                (t, format!(" {name} ({n}) "))
+            })
+            .collect();
+        let tab_line = Line::from(
+            labels
+                .iter()
+                .flat_map(|(t, l)| {
+                    let st = if *t == tab {
+                        Style::new().fg(Color::Black).bg(Color::Green).bold()
+                    } else {
+                        Style::new().fg(Color::Gray)
+                    };
+                    [Span::styled(l.clone(), st), Span::raw(" ")]
+                })
+                .collect::<Vec<_>>(),
+        );
+        // (line, the entry it shows); section headings show none
+        let mut rows: Vec<(Line, Option<usize>)> = Vec::new();
+        if self.apps.is_none() {
+            rows.push((Line::from("looking for installed apps...").italic(), None));
+        } else if list.is_empty() {
+            rows.push((Line::from("none on this TV").italic(), None));
+        }
+        // wide enough for the other tab too, so switching doesn't resize the box
+        let wide = all.iter().map(|e| e.name.chars().count()).max().unwrap_or(0).min(40);
+        let mut section = "";
+        for (i, e) in list.iter().enumerate() {
+            if tab == AppTab::Other && e.section != section {
+                section = e.section;
+                rows.push((Line::from(format!(" {section}")).bold(), None));
+            }
+            let on = if Some(e.package.as_str()) == pkg.as_deref() { "  (on now)" } else { "" };
+            let extra = e.alias.or(e.tag).unwrap_or("");
+            let dot = if self.running.contains(&e.package) && e.target != "home" { "●" } else { " " };
+            // fixed columns, so both tabs draw the same width
+            let line = Line::from(format!(" {dot}{:<wide$}  {extra:<12}{on:<10}", e.name));
+            rows.push((if i == sel { line.reversed() } else { line }, Some(i)));
+        }
+        // scroll so the highlighted row stays in view
+        let room = usize::from(f.area().height.saturating_sub(10)).max(3);
+        let at = rows.iter().position(|(_, i)| *i == Some(sel)).unwrap_or(0);
+        let start = at.saturating_sub(room.saturating_sub(1)).min(rows.len().saturating_sub(room));
+        let scrolls = rows.len() > room;
+        let shown: Vec<(Line, Option<usize>)> = rows.into_iter().skip(start).take(room).collect();
+        let ids: Vec<Option<usize>> = shown.iter().map(|(_, i)| *i).collect();
+        let mut shown: Vec<Line> = shown.into_iter().map(|(l, _)| l).collect();
+        // pad to the taller tab, so switching doesn't move the box (or its tabs)
+        let tallest = [AppTab::Known, AppTab::Other].iter().map(|t| tab_rows(all, *t)).max().unwrap_or(0);
+        while shown.len() < tallest.min(room) {
+            shown.push(Line::default());
+        }
+        let mut text = vec![tab_line, Line::default()];
+        text.extend(shown);
+        text.push(Line::default());
+        let more = if scrolls { "  (scrolls)" } else { "" };
+        text.push(Line::from(format!("↑/↓ choose  ⏎ open (● running: to front)  space actions  / search{more}")).fg(Color::DarkGray));
+        text.push(Line::from("letter = jump  tab/←/→ switch  click / right-click  esc closes").fg(Color::DarkGray));
+        let r = popup(f, " launch an app ", text, Color::Green);
+        if behind {
+            // under another pop-up: dim, and not clickable
+            f.buffer_mut().set_style(r, Style::new().fg(Color::DarkGray).bg(Color::Reset).remove_modifier(Modifier::BOLD));
+            return;
+        }
+        self.hits.push((r, Hit::Popup));
+        // tab labels on the first row
+        let mut x = r.x + 1;
+        for (t, l) in &labels {
+            let w = u16::try_from(l.chars().count()).unwrap_or(0);
+            self.hits.push((ratatui::layout::Rect { x, y: r.y + 1, width: w, height: 1 }, Hit::AppTab(*t)));
+            x += w + 1;
+        }
+        // app rows start after the tabs and a blank line
+        for (row, id) in ids.into_iter().enumerate() {
+            if let Some(i) = id {
+                let y = r.y + 3 + u16::try_from(row).unwrap_or(0);
+                let width = r.width.saturating_sub(2);
+                self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width, height: 1 }, Hit::AppItem(i)));
+            }
+        }
+    }
+
     fn draw_overlay(&mut self, f: &mut Frame) {
         match self.overlay {
             Overlay::None => {}
@@ -2496,92 +2592,10 @@ impl App {
                     x += w + 1;
                 }
             }
-            Overlay::Apps { tab, sel } => {
-                let pkg = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
-                let all = self.apps.as_deref().unwrap_or_default();
-                let list = tab_list(all, tab);
-                // the tab labels, with counts
-                let labels: Vec<(AppTab, String)> = [AppTab::Known, AppTab::Other]
-                    .into_iter()
-                    .map(|t| {
-                        let n = all.iter().filter(|e| t.holds(e)).count();
-                        let name = if t == AppTab::Known { "Apps" } else { "Other TV apps" };
-                        (t, format!(" {name} ({n}) "))
-                    })
-                    .collect();
-                let tab_line = Line::from(
-                    labels
-                        .iter()
-                        .flat_map(|(t, l)| {
-                            let st = if *t == tab {
-                                Style::new().fg(Color::Black).bg(Color::Green).bold()
-                            } else {
-                                Style::new().fg(Color::Gray)
-                            };
-                            [Span::styled(l.clone(), st), Span::raw(" ")]
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                // (line, the entry it shows); section headings show none
-                let mut rows: Vec<(Line, Option<usize>)> = Vec::new();
-                if self.apps.is_none() {
-                    rows.push((Line::from("looking for installed apps...").italic(), None));
-                } else if list.is_empty() {
-                    rows.push((Line::from("none on this TV").italic(), None));
-                }
-                // wide enough for the other tab too, so switching doesn't resize the box
-                let wide = all.iter().map(|e| e.name.chars().count()).max().unwrap_or(0).min(40);
-                let mut section = "";
-                for (i, e) in list.iter().enumerate() {
-                    if tab == AppTab::Other && e.section != section {
-                        section = e.section;
-                        rows.push((Line::from(format!(" {section}")).bold(), None));
-                    }
-                    let on = if Some(e.package.as_str()) == pkg.as_deref() { "  (on now)" } else { "" };
-                    let extra = e.alias.or(e.tag).unwrap_or("");
-                    let dot = if self.running.contains(&e.package) && e.target != "home" { "●" } else { " " };
-                    // fixed columns, so both tabs draw the same width
-                    let line = Line::from(format!(" {dot}{:<wide$}  {extra:<12}{on:<10}", e.name));
-                    rows.push((if i == sel { line.reversed() } else { line }, Some(i)));
-                }
-                // scroll so the highlighted row stays in view
-                let room = usize::from(f.area().height.saturating_sub(10)).max(3);
-                let at = rows.iter().position(|(_, i)| *i == Some(sel)).unwrap_or(0);
-                let start = at.saturating_sub(room.saturating_sub(1)).min(rows.len().saturating_sub(room));
-                let scrolls = rows.len() > room;
-                let shown: Vec<(Line, Option<usize>)> = rows.into_iter().skip(start).take(room).collect();
-                let ids: Vec<Option<usize>> = shown.iter().map(|(_, i)| *i).collect();
-                let mut shown: Vec<Line> = shown.into_iter().map(|(l, _)| l).collect();
-                // pad to the taller tab, so switching doesn't move the box (or its tabs)
-                let tallest = [AppTab::Known, AppTab::Other].iter().map(|t| tab_rows(all, *t)).max().unwrap_or(0);
-                while shown.len() < tallest.min(room) {
-                    shown.push(Line::default());
-                }
-                let mut text = vec![tab_line, Line::default()];
-                text.extend(shown);
-                text.push(Line::default());
-                let more = if scrolls { "  (scrolls)" } else { "" };
-                text.push(Line::from(format!("↑/↓ choose  ⏎ open (● running: to front)  space actions  / search{more}")).fg(Color::DarkGray));
-                text.push(Line::from("letter = jump  tab/←/→ switch  click / right-click  esc closes").fg(Color::DarkGray));
-                let r = popup(f, " launch an app ", text, Color::Green);
-                self.hits.push((r, Hit::Popup));
-                // tab labels on the first row
-                let mut x = r.x + 1;
-                for (t, l) in &labels {
-                    let w = u16::try_from(l.chars().count()).unwrap_or(0);
-                    self.hits.push((ratatui::layout::Rect { x, y: r.y + 1, width: w, height: 1 }, Hit::AppTab(*t)));
-                    x += w + 1;
-                }
-                // app rows start after the tabs and a blank line
-                for (row, id) in ids.into_iter().enumerate() {
-                    if let Some(i) = id {
-                        let y = r.y + 3 + u16::try_from(row).unwrap_or(0);
-                        let width = r.width.saturating_sub(2);
-                        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width, height: 1 }, Hit::AppItem(i)));
-                    }
-                }
-            }
+            Overlay::Apps { tab, sel } => self.draw_apps(f, tab, sel, false),
             Overlay::AppActions { tab, sel, at } => {
+                // the list stays behind it, dimmed
+                self.draw_apps(f, tab, sel, true);
                 let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
                 let Some(e) = rows.get(sel) else { return };
                 let running = self.running.contains(&e.package);
