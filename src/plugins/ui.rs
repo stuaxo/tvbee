@@ -711,14 +711,20 @@ fn send_apps(shared: &Shared, tv: &Tv, tx: &Sender<Msg>) -> bool {
     if *sent {
         return true;
     }
-    let Ok(pm) = tv.shell(&["cmd", "package", "list", "packages"]) else { return false };
+    let Some(rows) = app_rows(shared, tv) else { return false };
+    let _ = tx.send(Msg::Apps(rows));
+    *sent = true;
+    true
+}
+
+/// The launcher's rows, read from the TV now.
+fn app_rows(shared: &Shared, tv: &Tv) -> Option<Vec<Entry>> {
+    let pm = tv.shell(&["cmd", "package", "list", "packages"]).ok()?;
     let guesses = apps::guesses(tv);
     *lock(&shared.guesses) = guesses.clone();
     let default_home = apps::default_home(tv).ok().flatten();
     let default_pkg = default_home.as_deref().map(|c| c.split('/').next().unwrap_or(c));
-    let _ = tx.send(Msg::Apps(launcher_entries(&apps::installed_aliases(&pm), &guesses, default_pkg)));
-    *sent = true;
-    true
+    Some(launcher_entries(&apps::installed_aliases(&pm), &guesses, default_pkg))
 }
 
 /// Tell the ui which apps are running.
@@ -1081,6 +1087,17 @@ fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
     *lock(&shared.searchable) = found.clone();
     if tx.send(Msg::Searchable(found)).is_err() {
         return;
+    }
+    // apps' own names, for those tveee only knows by package: when some
+    // turn up, the launcher again with them (on a TV that can't say,
+    // nothing changes)
+    if !shared.wait_idle() {
+        return;
+    }
+    if crate::labels::refresh(&tv).unwrap_or(0) > 0 {
+        if let Some(rows) = app_rows(shared, &tv) {
+            let _ = tx.send(Msg::Apps(rows));
+        }
     }
     // nothing more to tell the ui: don't keep it waiting on quit
     drop(tx);
@@ -1446,7 +1463,7 @@ pub struct Entry {
 
 /// A package's friendly name, for the status line.
 pub fn app_name(pkg: &str) -> String {
-    apps::by_package(pkg).map_or_else(|| pkg.to_string(), |a| list_name(a.name))
+    apps::by_package(pkg).map_or_else(|| crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()), |a| list_name(a.name))
 }
 
 /// Other-tab headings, in the order they're shown.
@@ -1479,7 +1496,7 @@ pub fn launcher_entries(known: &[&'static apps::App], guessed: &[apps::Guess], d
         }
         let e = Entry {
             // "the home screen" says nothing about which one; the package does
-            name: if other_home { pkg.to_string() } else { list_name(a.name) },
+            name: if other_home { crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()) } else { list_name(a.name) },
             alias: a.alias,
             target: a.alias.unwrap_or(a.target).to_string(),
             package: pkg.to_string(),
@@ -1497,9 +1514,10 @@ pub fn launcher_entries(known: &[&'static apps::App], guessed: &[apps::Guess], d
         let table = apps::by_package(&g.package);
         // generic table names ("the home screen", "a NetTV app") don't say
         // which app this is; the package does
+        // which app this is; its own name does (or failing that, its package)
         let name = match table {
             Some(a) if !a.name.starts_with("a ") && !a.name.starts_with("the ") => list_name(a.name),
-            _ => g.package.clone(),
+            _ => crate::labels::name(&g.package).unwrap_or_else(|| g.package.clone()),
         };
         let kind = table.map_or(g.kind, |a| a.kind);
         let tag = (kind != apps::Kind::Other).then(|| kind.as_str());
@@ -2530,6 +2548,7 @@ impl App {
         let pkg = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
         let all = self.apps.as_deref().unwrap_or_default();
         let list = tab_list(all, tab);
+        let show_pkgs = crate::options::get(crate::options::SHOW_PACKAGES);
         // the tab labels, with counts
         let labels: Vec<(AppTab, String)> = [AppTab::Known, AppTab::Other]
             .into_iter()
@@ -2576,7 +2595,9 @@ impl App {
             };
             // fixed columns, so both tabs draw the same width; a space after
             // the dot, which some terminals draw wider than one cell
-            let line = Line::from(format!(" {dot} {:<wide$}  {extra:<12}{on:<10}", e.name));
+            // and its package, if asked for
+            let pkg_col = if show_pkgs { format!("  {}", e.package) } else { String::new() };
+            let line = Line::from(format!(" {dot} {:<wide$}  {extra:<12}{on:<10}{pkg_col}", e.name));
             rows.push((if i == sel { line.reversed() } else { line }, Some(i)));
         }
         // scroll so the highlighted row stays in view
@@ -2598,7 +2619,7 @@ impl App {
         let more = if scrolls { "  (scrolls)" } else { "" };
         text.push(Line::from(format!("↑/↓ choose  ⏎ open (or to front)  space actions  / search{more}")).fg(Color::DarkGray));
         text.push(Line::from("● running  ⊘ always running: Android won't let it close").fg(Color::DarkGray));
-        text.push(Line::from("letter = jump  tab/←/→ switch  click / right-click  esc closes").fg(Color::DarkGray));
+        text.push(Line::from("letter = jump  tab/←/→ switch  # package names  click / right-click  esc closes").fg(Color::DarkGray));
         let r = popup(f, " launch an app ", text, Color::Green);
         if behind {
             // under another pop-up: dim, and not clickable
@@ -3169,6 +3190,13 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
                     let (next, action) = search_key(at, k.code, k.modifiers, &mut text, &app.search_targets);
                     app.prompt = text;
                     app.apply_overlay(next, action, actions);
+                } else if let (Overlay::Apps { .. }, KeyCode::Char('#')) = (app.overlay, k.code) {
+                    // package names in the launcher, or not (remembered)
+                    let on = !crate::options::get(crate::options::SHOW_PACKAGES);
+                    app.note = match crate::options::set(crate::options::SHOW_PACKAGES, on) {
+                        Ok(()) => if on { "showing package names" } else { "package names hidden" }.into(),
+                        Err(e) => e.to_string(),
+                    };
                 } else if let (Overlay::Apps { tab, sel }, KeyCode::Char('/')) = (app.overlay, k.code) {
                     // search the highlighted app
                     let rows = tab_list(app.apps.as_deref().unwrap_or_default(), tab);

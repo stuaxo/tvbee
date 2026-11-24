@@ -263,7 +263,8 @@ pub fn identify(pkg: &str, guessed: &[Guess]) -> Option<(String, Kind)> {
     if let Some(a) = by_package(pkg) {
         return Some((a.name.to_string(), a.kind));
     }
-    guessed.iter().find(|g| g.package == pkg).map(|g| (pkg.to_string(), g.kind))
+    // the app's own name when tveee has found it (see `labels`), else its package
+    guessed.iter().find(|g| g.package == pkg).map(|g| (crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()), g.kind))
 }
 
 fn by_alias(alias: &str) -> Option<&'static App> {

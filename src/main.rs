@@ -7,6 +7,7 @@ mod http;
 mod lineups;
 mod https;
 mod keys;
+mod labels;
 mod mdns;
 mod menu;
 mod more;

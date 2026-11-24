@@ -17,6 +17,7 @@ pub struct Opt {
 
 pub const SCROLL_ANIMATION: &str = "scroll-animation";
 pub const FAST_KEYS: &str = "fast-keys";
+pub const SHOW_PACKAGES: &str = "show-packages";
 
 pub const OPTIONS: &[Opt] = &[
     Opt {
@@ -30,6 +31,12 @@ pub const OPTIONS: &[Opt] = &[
         label: "fast keys",
         help: "keys go straight to the TV's input devices (off: Android's slower 'input' command)",
         default: true,
+    },
+    Opt {
+        name: SHOW_PACKAGES,
+        label: "package names",
+        help: "the UI's launcher shows each app's package (com.example.app) too; # there toggles it",
+        default: false,
     },
 ];
 
