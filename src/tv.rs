@@ -54,7 +54,7 @@ pub struct Tv {
 
 fn adb_err(e: io::Error) -> Error {
     if e.kind() == io::ErrorKind::NotFound {
-        Error::Failed("adb not found (looked at $ADB, PATH, $ANDROID_HOME and $ANDROID_SDK_ROOT); see 'tvbee diagnose'".into())
+        Error::Failed("adb not found (looked at $ADB, PATH, $ANDROID_HOME and $ANDROID_SDK_ROOT); see 'tveee diagnose'".into())
     } else {
         e.into()
     }
@@ -160,7 +160,7 @@ impl Tv {
         }
     }
 
-    /// Press a key: written straight to an input device when tvbee can,
+    /// Press a key: written straight to an input device when tveee can,
     /// which is much quicker than `input keyevent` (see `keys`).
     pub fn keyevent(&self, code: u32) -> Result<()> {
         crate::keys::press(self, &[(code, false)])
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn finds_adb() {
-        let dir = std::env::temp_dir().join(format!("tvbee-adb-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tveee-adb-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let sdk = dir.join("sdk");
         std::fs::create_dir_all(sdk.join("platform-tools")).unwrap();

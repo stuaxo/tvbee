@@ -1,4 +1,4 @@
-//! The little cryptography tvbee needs, without crates: SHA-1, HMAC-SHA1
+//! The little cryptography tveee needs, without crates: SHA-1, HMAC-SHA1
 //! (to sign JointSpace pairing) and base64.
 
 /// SHA-1 of `data` (FIPS 180-4).

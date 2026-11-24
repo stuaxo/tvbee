@@ -1,4 +1,4 @@
-//! Menu items: actions a plugin offers to interactive front ends (`tvbee ui`)
+//! Menu items: actions a plugin offers to interactive front ends (`tveee ui`)
 //! that are too rare or too drastic to have a key of their own. Plain data, so
 //! plugins describe them whether or not the UI is built.
 

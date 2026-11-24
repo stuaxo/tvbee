@@ -1,7 +1,7 @@
 //! Sending keys quickly.
 //!
 //! `adb shell input keyevent` starts a Java VM on the TV for every key, which
-//! takes seconds on a busy TV. Instead, tvbee writes raw key events straight
+//! takes seconds on a busy TV. Instead, tveee writes raw key events straight
 //! into one of the TV's input devices (the shell user may: it's in the
 //! `input` group), which takes about as long as an adb round trip.
 //!
@@ -9,14 +9,14 @@
 //! boot ([`discover`]): the devices' declared keys (`getevent -i`), and their
 //! key layout files (`.kl`, found the way Android finds them). Keys no device
 //! can give (and the power keys) fall back to `input keyevent`, as does
-//! everything with the `fast-keys` option off (`tvbee options fast-keys off`).
+//! everything with the `fast-keys` option off (`tveee options fast-keys off`).
 
 use crate::error::Result;
 use crate::tv::Tv;
 use std::collections::HashMap;
 use std::io::Write;
 
-/// Android key codes tvbee sends, by their names in `.kl` files.
+/// Android key codes tveee sends, by their names in `.kl` files.
 const NAMES: &[(u32, &str)] = &[
     (3, "HOME"),
     (4, "BACK"),
@@ -195,7 +195,7 @@ pub struct Map {
 
 impl Map {
     /// Work it out from the devices, their layouts (by device path), and
-    /// which devices tvbee may write to.
+    /// which devices tveee may write to.
     pub fn build(devices: &[Device], layouts: &HashMap<String, HashMap<u16, String>>, writable: &[String]) -> Map {
         // what each device can give: Android key name → scan code
         let gives: Vec<(&Device, HashMap<&str, u16>)> = devices
@@ -289,7 +289,7 @@ impl Map {
 
     /// As saved in the cache file.
     pub fn render(&self) -> String {
-        let mut out = format!("# how tvbee sends keys raw to this TV (see src/keys.rs)\nboot {}\nwide {}\n", self.boot, u8::from(self.wide));
+        let mut out = format!("# how tveee sends keys raw to this TV (see src/keys.rs)\nboot {}\nwide {}\n", self.boot, u8::from(self.wide));
         let mut keys: Vec<_> = self.keys.iter().collect();
         keys.sort();
         for (code, (dev, scan)) in keys {

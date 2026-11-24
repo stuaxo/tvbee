@@ -10,23 +10,23 @@ const CAT: &str = "tools";
 
 
 const COMPLETION: &str = r#"# source this from ~/.bashrc, or ~/.zshrc after: autoload -U +X bashcompinit && bashcompinit
-_tvbee() {
+_tveee() {
   local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
   local cmds apps
-  cmds=$(tvbee commands 2>/dev/null)
-  apps=$(tvbee apps --all 2>/dev/null | awk '{print $1}')
+  cmds=$(tveee commands 2>/dev/null)
+  apps=$(tveee apps --all 2>/dev/null | awk '{print $1}')
   case $prev in
     launch|foreground|fg|kill|--free|--quiet) COMPREPLY=($(compgen -W "$apps --free --quiet" -- "$cur")) ;;
-    input) COMPREPLY=($(compgen -W "$(tvbee inputs --all 2>/dev/null | awk '{print $1}')" -- "$cur")) ;;
+    input) COMPREPLY=($(compgen -W "$(tveee inputs --all 2>/dev/null | awk '{print $1}')" -- "$cur")) ;;
     vol|channel|ch) COMPREPLY=($(compgen -W "up down" -- "$cur")) ;;
     *) COMPREPLY=($(compgen -W "$cmds" -- "$cur")) ;;
   esac
 }
-complete -F _tvbee tvbee
+complete -F _tveee tveee
 "#;
 
-/// Hand over to `cmd`: on Unix it replaces tvbee (so signals and the
-/// terminal go straight to it); elsewhere tvbee runs it, waits, and exits
+/// Hand over to `cmd`: on Unix it replaces tveee (so signals and the
+/// terminal go straight to it); elsewhere tveee runs it, waits, and exits
 /// with its status.
 pub fn run_replacing(cmd: &mut Proc) -> Result<()> {
     #[cfg(unix)]
@@ -74,7 +74,7 @@ pub fn contains_i(text: &str, needle: &str) -> String {
 fn wait(c: &Ctx, args: &[String]) -> Result<()> {
     let limit: u64 = match args.first() {
         None => 180,
-        Some(s) => s.parse().or_else(|_| usage("usage: tvbee wait [secs]"))?,
+        Some(s) => s.parse().or_else(|_| usage("usage: tveee wait [secs]"))?,
     };
     let mut waited = 0;
     while waited < limit {
@@ -113,7 +113,7 @@ fn help(c: &Ctx, args: &[String]) -> Result<()> {
             let off: Vec<_> = c.plugins.iter().filter(|p| !p.enabled).collect();
             if !off.is_empty() {
                 let names: Vec<_> = off.iter().map(|p| format!("{} ({})", p.name, p.source.label())).collect();
-                println!("Plugins not enabled: {} - see 'tvbee plugins'", names.join(", "));
+                println!("Plugins not enabled: {} - see 'tveee plugins'", names.join(", "));
             }
         }
         Some(name) => match registry::find(&c.commands, name) {
@@ -132,7 +132,7 @@ fn plugins_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let states = match args.first().map(String::as_str) {
         None => &c.plugins,
         Some("--refresh") => {
-            let overrides = plugin::parse_overrides(&std::env::var("TVBEE_PLUGINS").unwrap_or_default());
+            let overrides = plugin::parse_overrides(&std::env::var("TVEEE_PLUGINS").unwrap_or_default());
             refreshed = plugin::resolve(
                 &crate::plugins::all(),
                 &c.tv,
@@ -142,7 +142,7 @@ fn plugins_cmd(c: &Ctx, args: &[String]) -> Result<()> {
             );
             &refreshed
         }
-        Some(_) => return usage("usage: tvbee plugins [--refresh]"),
+        Some(_) => return usage("usage: tveee plugins [--refresh]"),
     };
     for s in states {
         let on = if s.enabled { "on" } else { "off" };
@@ -154,9 +154,9 @@ fn plugins_cmd(c: &Ctx, args: &[String]) -> Result<()> {
 pub fn commands() -> Vec<Command> {
     vec![
         Command::new(CAT, "wait", "[secs]", "wait until the TV is reachable and booted", wait)
-            .long("Default timeout 180s. Useful as: tvbee reboot && tvbee wait && tvbee launch iplayer"),
+            .long("Default timeout 180s. Useful as: tveee reboot && tveee wait && tveee launch iplayer"),
         Command::new(CAT, "plugins", "[--refresh]", "list plugins and whether they are enabled", plugins_cmd).long(
-            "Vendor plugins are enabled by detection, cached per TV in ~/.cache/tvbee.\n  --refresh  re-probe the TV now (contacts it) and update the cache\nTVBEE_PLUGINS=philips,-other forces plugins on or off.",
+            "Vendor plugins are enabled by detection, cached per TV in ~/.cache/tveee.\n  --refresh  re-probe the TV now (contacts it) and update the cache\nTVEEE_PLUGINS=philips,-other forces plugins on or off.",
         ),
         Command::new(CAT, "commands", "", "list all command names and aliases", commands_list),
         Command::new(CAT, "completion", "", "print a bash/zsh completion script", completion),

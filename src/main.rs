@@ -37,7 +37,9 @@ pub struct Ctx {
 }
 
 fn main() {
-    // before anything reads TV_IP etc. (and before any threads)
+    // before anything reads TV_IP etc. (and before any threads); the folders
+    // first, as the env file is in one
+    dotenv::move_old_folders();
     dotenv::load();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let tv = Tv::from_env();
@@ -54,7 +56,7 @@ fn main() {
     // Only touch the TV to detect plugins when one of their commands was asked
     // for (and never just to show help).
     let mode = if !help && plugin::needs_probe(&all, sub, rest) { Mode::Probe } else { Mode::Cached };
-    let overrides = plugin::parse_overrides(&std::env::var("TVBEE_PLUGINS").unwrap_or_default());
+    let overrides = plugin::parse_overrides(&std::env::var("TVEEE_PLUGINS").unwrap_or_default());
     let cache_file = plugin::cache_path(&tv.ip);
     let states = plugin::resolve(&all, &tv, mode, &overrides, cache_file.as_deref());
 
@@ -76,14 +78,14 @@ fn main() {
         .collect();
     let ctx = Ctx { tv, commands, menu, plugins: states };
 
-    // `tvbee <cmd> --help`: any command, enabled or not, without the TV
+    // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {
         let every: Vec<Command> = all.iter().flat_map(|p| (p.commands)()).collect();
         if let Some(cmd) = registry::find(&every, sub) {
             print!("{}", registry::help_for(cmd));
             let disabled = all.iter().find(|p| p.command_names().contains(&sub));
             if let (None, Some(p)) = (registry::find(&ctx.commands, sub), disabled) {
-                println!("\nnote: this comes from the '{}' plugin, which isn't enabled for this TV (see 'tvbee plugins').", p.name);
+                println!("\nnote: this comes from the '{}' plugin, which isn't enabled for this TV (see 'tveee plugins').", p.name);
             }
             return;
         }
@@ -97,7 +99,7 @@ fn main() {
             .find(|(p, s)| !s.enabled && p.command_names().contains(&sub))
         {
             eprintln!(
-                "tvbee: '{sub}' is provided by the '{}' plugin, which is not enabled for this TV ({}).\nTry 'tvbee plugins --refresh', or set TVBEE_PLUGINS={}.",
+                "tveee: '{sub}' is provided by the '{}' plugin, which is not enabled for this TV ({}).\nTry 'tveee plugins --refresh', or set TVEEE_PLUGINS={}.",
                 p.name,
                 s.source.label(),
                 p.name
@@ -106,23 +108,23 @@ fn main() {
         }
         if let Some((_, feature)) = plugins::NOT_BUILT.iter().find(|(c, _)| *c == sub) {
             eprintln!(
-                "tvbee: '{sub}' isn't in this build; it needs the '{feature}' feature:\n  cargo install --path . --features {feature}"
+                "tveee: '{sub}' isn't in this build; it needs the '{feature}' feature:\n  cargo install --path . --features {feature}"
             );
             std::process::exit(1);
         }
         match registry::suggest(&ctx.commands, sub) {
-            Some(close) => eprintln!("tvbee: unknown command '{sub}' - did you mean '{close}'? (see 'tvbee help')"),
+            Some(close) => eprintln!("tveee: unknown command '{sub}' - did you mean '{close}'? (see 'tveee help')"),
             None => {
-                eprintln!("tvbee: unknown command '{sub}'");
+                eprintln!("tveee: unknown command '{sub}'");
                 eprint!("{}", registry::usage_text(&ctx.commands));
             }
         }
         std::process::exit(2);
     };
     if let Err(e) = (cmd.run)(&ctx, rest) {
-        eprintln!("tvbee: {e}");
+        eprintln!("tveee: {e}");
         if let Error::Usage(_) = e {
-            eprintln!("(see 'tvbee {} --help')", cmd.name);
+            eprintln!("(see 'tveee {} --help')", cmd.name);
         }
         std::process::exit(match e {
             Error::Usage(_) => 2,
@@ -136,7 +138,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// The README's command listing must match `tvbee help` for the default
+    /// The README's command listing must match `tveee help` for the default
     /// build (built-in plugins only, so `ui` and vendor plugins are left out).
     #[test]
     fn readme_lists_the_commands() {

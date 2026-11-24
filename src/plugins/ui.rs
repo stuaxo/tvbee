@@ -1,4 +1,4 @@
-//! `tvbee ui`: an interactive terminal remote (ratatui). Only built with the
+//! `tveee ui`: an interactive terminal remote (ratatui). Only built with the
 //! `ui` cargo feature.
 //!
 //! The screen shows what is on (as `nowplaying`) plus the volume, and keys
@@ -629,7 +629,7 @@ struct Shared {
     stop: Arc<AtomicBool>,
     /// The app in front, as of the last refresh.
     pkg: std::sync::Mutex<Option<String>>,
-    /// Kinds of apps tvbee has no entry for (fetched in the background).
+    /// Kinds of apps tveee has no entry for (fetched in the background).
     guesses: std::sync::Mutex<Vec<apps::Guess>>,
     /// Apps with a proper search (fetched in the background, or when needed).
     searchable: std::sync::Mutex<Vec<search::Searchable>>,
@@ -970,7 +970,7 @@ impl Actor {
                     let _ = tx.send(Msg::Seeked(pos, Instant::now()));
                     format!("jumped to {}%: {}", (f * 100.0).round(), clock(pos))
                 }
-                None => "jumping needs a video tvbee can read (currently YouTube)".into(),
+                None => "jumping needs a video tveee can read (currently YouTube)".into(),
             },
             Action::Menu(i) => match self.menu.get(i).map(|m| m.run) {
                 Some(Run::Now(run)) => run(&self.tv)?,
@@ -1289,7 +1289,7 @@ pub enum Overlay {
     Search(usize),
     /// What to do with launcher row `sel` of `tab`; `at` is the highlighted choice.
     AppActions { tab: AppTab, sel: usize, at: usize },
-    /// tvbee's options, with N highlighted.
+    /// tveee's options, with N highlighted.
     Options(usize),
     /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
     /// the filter typed is `App::prompt`.
@@ -1511,7 +1511,7 @@ pub fn launcher_entries(known: &[&'static apps::App], guessed: &[apps::Guess], d
     rows
 }
 
-/// The launcher's tabs: apps tvbee has aliases for, and the rest of the
+/// The launcher's tabs: apps tveee has aliases for, and the rest of the
 /// TV-launcher apps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppTab {
@@ -1841,7 +1841,7 @@ impl App {
             return;
         }
         let snap = self.snap.as_ref();
-        // home screens on the way: the ones tvbee knows, and those on the TV
+        // home screens on the way: the ones tveee knows, and those on the TV
         let mut passing: Vec<String> = self
             .apps
             .iter()
@@ -2249,7 +2249,7 @@ impl App {
     fn draw(&mut self, f: &mut Frame) {
         self.hits.clear();
         let outer = Block::bordered()
-            .title(Line::from(format!(" tvbee ui - {} ", self.ip)).bold())
+            .title(Line::from(format!(" tveee ui - {} ", self.ip)).bold())
             .title(
                 Line::from(match self.mode {
                     Mode::Player => " player ",
@@ -2355,7 +2355,7 @@ impl App {
                             }
                             // leave room for the label and " 1:02:03 / 1:02:03 (100%)"
                             let w = width.saturating_sub(9 + 26).max(10);
-                            // jumping needs a video tvbee can seek in (not live TV)
+                            // jumping needs a video tveee can seek in (not live TV)
                             let hit = p.duration.filter(|_| s.exact).map(|_| Hit::Progress {
                                 x0: body.x + LABEL,
                                 width: u16::try_from(w).unwrap_or(u16::MAX),
@@ -2371,7 +2371,7 @@ impl App {
                         }
                         lines.extend(a.fields.iter().filter(|f| f.place == nowplaying::Place::Bottom).map(field));
                     }
-                    None => lines.push((Line::from("nothing playing that tvbee recognises").italic(), None)),
+                    None => lines.push((Line::from("nothing playing that tveee recognises").italic(), None)),
                 }
                 if s.standby {
                     lines.push((Line::from("press . then w to wake the TV").fg(Color::Yellow), None));
@@ -2650,7 +2650,7 @@ impl App {
                     text.push(if i == sel { line.reversed() } else { line });
                 }
                 text.push(Line::default());
-                text.push(Line::from("↑/↓ choose  space/⏎/click toggle  esc closes  (saved in ~/.config/tvbee/options.txt)").fg(Color::DarkGray));
+                text.push(Line::from("↑/↓ choose  space/⏎/click toggle  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray));
                 let r = popup(f, " options ", text, Color::Blue);
                 self.hits.push((r, Hit::Popup));
                 for i in 0..crate::options::OPTIONS.len() {
@@ -2757,7 +2757,7 @@ impl App {
                             let r = shown[i];
                             let mark = if g.current == Some(r.channel.id) { "▶" } else { " " };
                             let star = if r.channel.favourite { "★" } else { "☆" };
-                            // not on the TV yet: tvbee will send it when it can
+                            // not on the TV yet: tveee will send it when it can
                             let wait = if g.pending.contains_key(&r.channel.id) { " ·" } else { "" };
                             // "(radio)" tells them apart in the other tabs; not needed in Radio
                             let radio = if r.channel.radio && tab != GuideTab::Radio { " (radio)" } else { "" };
@@ -2936,7 +2936,7 @@ impl App {
                 let target = self.search_targets.get(at);
                 let app_name = target.map_or("(no app in front)".to_string(), |t| t.name.clone());
                 let how = match target.map(|t| t.method) {
-                    Some("keys") => "no search of its own: tvbee will press its search key and type (best effort)",
+                    Some("keys") => "no search of its own: tveee will press its search key and type (best effort)",
                     Some("results link") => "opens its search results",
                     Some(_) => "uses the app's own search",
                     None => "",
@@ -3229,7 +3229,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         match a.as_str() {
             "--no-mouse" => mouse = false,
             "--no-settle" => settle = false,
-            _ => return crate::error::usage(format!("usage: tvbee ui [--no-mouse] [--no-settle]  (unexpected '{a}')")),
+            _ => return crate::error::usage(format!("usage: tveee ui [--no-mouse] [--no-settle]  (unexpected '{a}')")),
         }
     }
     use std::io::IsTerminal;
@@ -3314,7 +3314,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
 
 pub fn commands() -> Vec<Command> {
     vec![Command::new(CAT, "ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking", ui).long(
-        "A full-screen remote showing what is playing (as 'tvbee nowplaying') and the\n\
+        "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
          the arrows seek and change volume; in remote mode the keyboard is the TV's:\n\
          arrows move around its menus, Enter is OK, Esc is back, and what you type\n\
@@ -3325,14 +3325,14 @@ pub fn commands() -> Vec<Command> {
          \x20 up/down + -   volume       m      mute/unmute\n\
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
-         \x20 a  launcher: the installed apps tvbee has aliases for (see 'tvbee apps'); ● marks\n\
+         \x20 a  launcher: the installed apps tveee has aliases for (see 'tveee apps'); ● marks\n\
          \x20    running ones (Enter brings them to the front), ⊘ ones Android keeps running\n\
          \x20    (live TV: they can't be closed); Space or right-click opens actions:\n\
          \x20    restart, close, search\n\
          \x20 /  search the app in front, or (in the launcher) the highlighted app\n\
          \x20 ?  all keys   q / Esc / Ctrl-C  quit\n\
          \n\
-         Seeking is exact for apps tvbee can read the video of (YouTube); elsewhere\n\
+         Seeking is exact for apps tveee can read the video of (YouTube); elsewhere\n\
          left/right send fast-forward/rewind key presses (~10s each, apps differ)\n\
          and number keys do nothing.\n\
          \n\
@@ -3440,7 +3440,7 @@ mod tests {
         assert_eq!(guide_time_at(1_000, 0), 1_000);
         assert_eq!(guide_time_at(1_000, 1), 1_800);
         assert_eq!(guide_time_at(1_800, 2), 5_400);
-        assert_eq!(textwrap("needs tvbee to be paired", 12), ["needs tvbee", "to be paired"]);
+        assert_eq!(textwrap("needs tveee to be paired", 12), ["needs tveee", "to be paired"]);
         assert_eq!(input_for(KeyCode::Char('g'), KeyModifiers::NONE, Mode::Player), Input::OpenGuide);
     }
 
@@ -3777,7 +3777,7 @@ mod tests {
             g("org.videolan.vlc", apps::Kind::Player, Some("org.videolan.vlc/.StartActivity")),
             // not in the TV launcher: can't be launched from here
             g("com.android.tv.settings", apps::Kind::Launcher, None),
-            // in tvbee's table without an alias: its kind, but a specific name
+            // in tveee's table without an alias: its kind, but a specific name
             g("com.spocky.projengmenu", apps::Kind::Launcher, Some("com.spocky.projengmenu/.ui.home.MainActivity")),
             g("org.droidtv.nettvbrowser", apps::Kind::Other, Some("org.droidtv.nettvbrowser/.Main")),
         ];

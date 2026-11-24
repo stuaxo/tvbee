@@ -520,7 +520,7 @@ pub fn parse_originals(text: &str) -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// `~/.config/tvbee` (or the platform's equivalent).
+/// `~/.config/tveee` (or the platform's equivalent).
 fn config_dir() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
     crate::dotenv::files(&cwd).into_iter().nth(1)?.parent().map(PathBuf::from)
@@ -553,7 +553,7 @@ fn print_plan(steps: &[Step]) -> usize {
     changes
 }
 
-/// The profile to use: `--profile FILE`, else `~/.config/tvbee/debloat.txt`,
+/// The profile to use: `--profile FILE`, else `~/.config/tveee/debloat.txt`,
 /// else a built-in one for `model`.
 fn load_profile(file: Option<&str>, model: Option<&str>) -> Result<(Profile, String)> {
     let user = config_dir().map(|d| d.join("debloat.txt")).filter(|f| f.is_file());
@@ -564,7 +564,7 @@ fn load_profile(file: Option<&str>, model: Option<&str>) -> Result<(Profile, Str
             let text = match model {
                 Some(m) => BUILTIN.iter().find(|(bm, _)| *bm == m).map(|(_, t)| *t).ok_or_else(|| {
                     crate::error::Error::Failed(format!(
-                        "debloat: no built-in profile for a {m}; start one with 'tvbee debloat list --raw > ~/.config/tvbee/debloat.txt'"
+                        "debloat: no built-in profile for a {m}; start one with 'tveee debloat list --raw > ~/.config/tveee/debloat.txt'"
                     ))
                 })?,
                 None => BUILTIN[0].1,
@@ -680,8 +680,8 @@ fn list(o: &Opts) -> Result<()> {
         println!("\n  note: {n}");
     }
     if o.profile.is_none() {
-        println!("\nA profile of your own in ~/.config/tvbee/debloat.txt (or --profile FILE) replaces this one.");
-        println!("To start one: tvbee debloat list --raw > ~/.config/tvbee/debloat.txt (the format is in its comments).");
+        println!("\nA profile of your own in ~/.config/tveee/debloat.txt (or --profile FILE) replaces this one.");
+        println!("To start one: tveee debloat list --raw > ~/.config/tveee/debloat.txt (the format is in its comments).");
     }
     Ok(())
 }
@@ -715,7 +715,7 @@ fn run(c: &Ctx, dir: Option<Direction>, o: &Opts) -> Result<()> {
         }
     }
     let Some(dir) = dir else {
-        println!("\n{changes} item(s) marked '*' would change with 'tvbee debloat apply'.");
+        println!("\n{changes} item(s) marked '*' would change with 'tveee debloat apply'.");
         return Ok(());
     };
     if changes == 0 {
@@ -738,7 +738,7 @@ fn run(c: &Ctx, dir: Option<Direction>, o: &Opts) -> Result<()> {
         Direction::Apply => {
             println!("WARNING: this will change {changes} thing(s) on the TV ({}):", groups.join(", "));
             println!("it disables or removes system apps and changes settings.");
-            println!("  - It's reversible ('tvbee debloat restore'), but a disabled app stops working, and so");
+            println!("  - It's reversible ('tveee debloat restore'), but a disabled app stops working, and so");
             println!("    may anything that quietly depends on it. Check the list above.");
             println!("  - 'system' and 'dependency' apps are ones the TV or other apps need; they're never disabled.");
             println!("  - Original setting values are saved in {saved}.");
@@ -747,7 +747,7 @@ fn run(c: &Ctx, dir: Option<Direction>, o: &Opts) -> Result<()> {
             println!("WARNING: this will change {changes} thing(s) on the TV ({}):", groups.join(", "));
             println!("it re-enables and reinstalls the apps above and sets settings back to their originals.");
             println!("  - The re-enabled apps (assistant, telemetry, ...) start running again.");
-            println!("  - 'tvbee debloat apply' puts the debloat back.");
+            println!("  - 'tveee debloat apply' puts the debloat back.");
         }
     }
     confirm(&format!("Change {changes} item(s) on {}?", tv.ip), o.yes)?;
@@ -852,7 +852,7 @@ pub fn commands() -> Vec<Command> {
          \x20 -n, --dry-run   show what would change; touch nothing\n\
          \x20 --yes           don't ask (for scripts)\n\
          \x20 --force         use a profile made for a different TV model\n\
-         \x20 --profile FILE  use FILE instead of ~/.config/tvbee/debloat.txt or the built-in\n\
+         \x20 --profile FILE  use FILE instead of ~/.config/tveee/debloat.txt or the built-in\n\
          \n\
          'dependency' entries record what needs them (on Philips TVs, disabling\n\
          nettvregistration breaks iPlayer, Arte and the app gallery). 'speed' changes\n\

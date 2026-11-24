@@ -71,7 +71,7 @@ fn vol(c: &Ctx, args: &[String]) -> Result<()> {
             c.tv.connect()?;
             c.tv.shell(&["media", "volume", "--stream", "3", "--set", n]).map(drop)
         }
-        _ => usage("usage: tvbee vol up|down|<level>"),
+        _ => usage("usage: tveee vol up|down|<level>"),
     }
 }
 
@@ -272,12 +272,12 @@ fn parse_skip_args(name: &str, args: &[String]) -> Result<(Amount, f64)> {
         } else if amount.is_none() {
             amount = Some(a.as_str());
         } else {
-            return usage(format!("usage: tvbee {name} {SKIP_USAGE}"));
+            return usage(format!("usage: tveee {name} {SKIP_USAGE}"));
         }
     }
     match amount.and_then(parse_amount) {
         Some(a) => Ok((a, step)),
-        None => usage(format!("usage: tvbee {name} {SKIP_USAGE}  (e.g. 90s, 2m, 1h30m, 10%)")),
+        None => usage(format!("usage: tveee {name} {SKIP_USAGE}  (e.g. 90s, 2m, 1h30m, 10%)")),
     }
 }
 

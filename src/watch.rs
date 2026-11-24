@@ -96,7 +96,7 @@ where
     F: Fn() -> Result<String> + Send + 'static,
 {
     if cfg!(not(unix)) {
-        return usage(format!("{title} --watch needs a Unix terminal (it uses stty); on Windows, 'tvbee ui' shows the same live"));
+        return usage(format!("{title} --watch needs a Unix terminal (it uses stty); on Windows, 'tveee ui' shows the same live"));
     }
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return usage(format!("{title} --watch needs a terminal"));
@@ -122,7 +122,7 @@ where
     let (mut body, mut error) = (String::from("waiting for the TV..."), None::<String>);
     let mut stamp = String::new();
     let draw = |body: &str, error: Option<&str>, stamp: &str| {
-        let header = format!("tvbee {title}   ({hint})   {stamp}");
+        let header = format!("tveee {title}   ({hint})   {stamp}");
         print!("{}", frame(&header, body, error));
         let _ = std::io::stdout().flush();
     };

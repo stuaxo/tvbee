@@ -91,5 +91,5 @@ jobs:
       - run: cargo build --release --features ui
       - name: Statically linked
         run: |
-          f=$(file -L target/${{ matrix.target }}/release/tvbee); echo "$f"
+          f=$(file -L target/${{ matrix.target }}/release/tveee); echo "$f"
           echo "$f" | grep -Eq 'static(ally|-pie) linked'

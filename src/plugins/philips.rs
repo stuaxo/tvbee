@@ -27,10 +27,10 @@ pub fn pairing_signature(timestamp: i64, pin: &str) -> String {
     crate::crypto::base64(crate::crypto::hex(&mac).as_bytes())
 }
 
-/// How tvbee introduces itself to the TV.
+/// How tveee introduces itself to the TV.
 fn device_json(id: &str) -> String {
     let os = if cfg!(windows) { "Windows" } else { "Linux" };
-    format!(r#"{{"device_name":"tvbee","device_os":"{os}","app_name":"tvbee","type":"native","app_id":"app.id","id":"{id}"}}"#)
+    format!(r#"{{"device_name":"tveee","device_os":"{os}","app_name":"tveee","type":"native","app_id":"app.id","id":"{id}"}}"#)
 }
 
 /// A random-enough id for this pairing (16 hex digits).
@@ -50,7 +50,7 @@ fn credentials(saved: &crate::pairing::Saved) -> Option<(&str, &str)> {
     Some((saved.get("user")?, saved.get("key")?))
 }
 
-/// Whether tvbee is paired with this TV's JointSpace.
+/// Whether tveee is paired with this TV's JointSpace.
 pub fn paired(tv: &Tv) -> bool {
     crate::pairing::load(PAIRING, &tv.ip).as_ref().and_then(credentials).is_some()
 }
@@ -103,7 +103,7 @@ impl crate::pairing::Pairing for JointSpace {
         "the Philips TV API (JointSpace)"
     }
     fn unlocks(&self) -> &'static str {
-        "channel names and numbers, the current channel, more of 'tvbee jointspace'"
+        "channel names and numbers, the current channel, more of 'tveee jointspace'"
     }
     fn how(&self) -> &'static str {
         "the TV shows a 4-digit PIN for about a minute; type it in"
@@ -159,8 +159,8 @@ fn jointspace(c: &Ctx, args: &[String]) -> Result<()> {
     let path = match args.first().map(String::as_str) {
         None => "/6/system".to_string(),
         Some(p) if p.starts_with("/6/") => p.to_string(),
-        Some("pair") => return usage("pairing moved: run 'tvbee pair jointspace'"),
-        Some(_) => return usage("usage: tvbee jointspace [/6/<path>]"),
+        Some("pair") => return usage("pairing moved: run 'tveee pair jointspace'"),
+        Some(_) => return usage("usage: tveee jointspace [/6/<path>]"),
     };
     let (status, body) = match crate::pairing::load(PAIRING, &c.tv.ip) {
         Some(saved) => https_get(&c.tv, &saved, &path)?,
@@ -175,7 +175,7 @@ fn jointspace(c: &Ctx, args: &[String]) -> Result<()> {
         _ if !paired(&c.tv) => Err(crate::pairing::required_error(PAIRING, &path)),
         // the TV says 401 for paths it doesn't have, too
         401 => failed(format!(
-            "jointspace: the TV refused {path} (HTTP 401): it may not have that path; if every path fails, pair again ('tvbee pair jointspace')"
+            "jointspace: the TV refused {path} (HTTP 401): it may not have that path; if every path fails, pair again ('tveee pair jointspace')"
         )),
         _ => {
             println!("{body}");
@@ -502,7 +502,7 @@ fn guide_source(tv: &Tv) -> String {
 fn paired_ok(tv: &Tv, path: &str, what: &str) -> Result<String> {
     match js_get_paired(tv, path, what)? {
         (200, body) => Ok(body),
-        (401, _) => failed(format!("{what}: the TV refused the saved pairing (HTTP 401); if this keeps happening, pair again: 'tvbee pair jointspace'")),
+        (401, _) => failed(format!("{what}: the TV refused the saved pairing (HTTP 401); if this keeps happening, pair again: 'tveee pair jointspace'")),
         (code, _) => failed(format!("{what}: the TV answered HTTP {code} for {path}")),
     }
 }
@@ -650,7 +650,7 @@ pub fn commands() -> Vec<Command> {
     vec![Command::new(CAT, "jointspace", "[/6/<path>]", "read a path of Philips' TV API (JointSpace)", jointspace).long(
         "Reads a JointSpace path (default /6/system: model, API version, features).\n\
          Unpaired, only the public routes work (plain HTTP on :1925); others say\n\
-         pairing is required. After 'tvbee pair jointspace' (the TV shows a PIN),\n\
+         pairing is required. After 'tveee pair jointspace' (the TV shows a PIN),\n\
          paths are read over HTTPS on :1926 with the saved key: the current channel\n\
          (/6/activities/tv), channel lists (/6/channeldb/tv) and more.",
     )]

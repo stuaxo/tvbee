@@ -212,7 +212,7 @@ pub fn parse_watch_args(name: &str, args: &[String]) -> Result<Option<f64>> {
                     .map_or_else(|| usage(format!("{name}: --interval needs a duration of at least 0.5s")), Ok)?;
                 watch = true;
             }
-            _ => return usage(format!("usage: tvbee {name} {WATCH_USAGE}")),
+            _ => return usage(format!("usage: tveee {name} {WATCH_USAGE}")),
         }
     }
     Ok(watch.then_some(every))
@@ -351,7 +351,7 @@ fn status_text(tv: &Tv) -> Result<String> {
     Ok(out)
 }
 
-const NOTHING: &str = "nothing playing that tvbee recognises\n";
+const NOTHING: &str = "nothing playing that tveee recognises\n";
 
 /// Just the what / title / progress / url lines.
 fn nowplaying_text(tv: &Tv) -> Result<String> {
@@ -519,9 +519,9 @@ fn details_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let (pkg, app, url) = current(&c.tv)?;
     let name = app.map_or(pkg.clone(), |a| super::apps::list_name(a.name));
     let Some(hook) = crate::provider::for_package(&pkg).and_then(|p| p.details()) else {
-        return failed(format!("details: tvbee has no details for {name}"));
+        return failed(format!("details: tveee has no details for {name}"));
     };
-    let Some(url) = url else { return failed(format!("details: nothing playing in {name} that tvbee can look up")) };
+    let Some(url) = url else { return failed(format!("details: nothing playing in {name} that tveee can look up")) };
     let d = hook.details(&url)?;
     println!("{:<10}{url}", "link:");
     for (k, v) in &d.fields {
@@ -606,7 +606,7 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     match words.as_slice() {
         [] => {
             if places.is_empty() && provider.and_then(|p| p.details()).is_none() {
-                return failed(format!("goto: tvbee knows no places in {name}"));
+                return failed(format!("goto: tveee knows no places in {name}"));
             }
             println!("{name}:");
             for p in places {
@@ -648,11 +648,11 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
                     println!("{}", go(tv, &pkg, &l.go)?);
                     Ok(())
                 }
-                None => failed(format!("goto: no {}{n} (see 'tvbee goto')", if chapter { "chapter " } else { "link " })),
+                None => failed(format!("goto: no {}{n} (see 'tveee goto')", if chapter { "chapter " } else { "link " })),
             }
         }
         _ => usage(format!(
-            "goto: where? one of: {}{}channel, chapter N, or a number from 'tvbee goto'",
+            "goto: where? one of: {}{}channel, chapter N, or a number from 'tveee goto'",
             places.iter().map(|p| p.id).collect::<Vec<_>>().join(", "),
             if places.is_empty() { "" } else { ", " }
         )),
@@ -662,11 +662,11 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
 pub fn commands() -> Vec<Command> {
     vec![
         Command::new(CAT, "status", WATCH_USAGE, "power state, foreground app, mute and free RAM", status).long(concat!(
-            "When tvbee recognises what is on, it says so in words, e.g.\n  what:     Watching YouTube\n  title:    <title> (<channel>)\n  progress: ━━━━━━━━━━━━━━━━━━━━━━━━━━━┃── 25:16 / 27:31 (91%)\n  url:      https://www.youtube.com/watch?v=...\nTitles come from the app's media session; the progress bar and link from its\ndevtools page, for apps that expose one (currently YouTube). Lines are left out\nwhen there is nothing to say. 'tvbee nowplaying' shows just those lines.\n\n", watch_long!()),
+            "When tveee recognises what is on, it says so in words, e.g.\n  what:     Watching YouTube\n  title:    <title> (<channel>)\n  progress: ━━━━━━━━━━━━━━━━━━━━━━━━━━━┃── 25:16 / 27:31 (91%)\n  url:      https://www.youtube.com/watch?v=...\nTitles come from the app's media session; the progress bar and link from its\ndevtools page, for apps that expose one (currently YouTube). Lines are left out\nwhen there is nothing to say. 'tveee nowplaying' shows just those lines.\n\n", watch_long!()),
         ),
         Command::new(CAT, "nowplaying", WATCH_USAGE, "what's on: app, title, progress bar and link", nowplaying_cmd)
             .long(concat!(
-                "The what/title/progress/url lines from 'tvbee status', on their own. Prints\n\"nothing playing ...\" and exits 1 when tvbee doesn't recognise what is on.\n\n",
+                "The what/title/progress/url lines from 'tveee status', on their own. Prints\n\"nothing playing ...\" and exits 1 when tveee doesn't recognise what is on.\n\n",
                 watch_long!()
             ))
             .aliases(&["np"]),
@@ -683,11 +683,11 @@ pub fn commands() -> Vec<Command> {
             "With nothing more, lists where you can go: the app's places (YouTube: home,\n\
              subscriptions, history, library, watchlater) and, for what's on, its channel,\n\
              chapters and the links in its description, numbered.\n\
-             \x20 tvbee goto history          a place in the app in front\n\
-             \x20 tvbee goto youtube history  in a named app (it opens it)\n\
-             \x20 tvbee goto channel          the channel of what's on\n\
-             \x20 tvbee goto chapter 3        seek to chapter 3\n\
-             \x20 tvbee goto 7                link 7 from the list",
+             \x20 tveee goto history          a place in the app in front\n\
+             \x20 tveee goto youtube history  in a named app (it opens it)\n\
+             \x20 tveee goto channel          the channel of what's on\n\
+             \x20 tveee goto chapter 3        seek to chapter 3\n\
+             \x20 tveee goto 7                link 7 from the list",
         ),
         Command::new(CAT, "logs", "[regex]", "recent logcat, optionally filtered", logs)
             .long("Case-insensitive extended regex; shows the last 200 matching lines."),

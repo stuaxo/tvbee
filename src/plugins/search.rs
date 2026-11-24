@@ -156,7 +156,7 @@ fn label(pkg: &str) -> String {
 pub fn search_package(tv: &Tv, all: &[Searchable], pkg: &str, query: &str, play: bool, dry: bool) -> Result<String> {
     let Some(s) = all.iter().find(|s| s.package == pkg) else {
         return failed(format!(
-            "search: {} doesn't support search (see 'tvbee search --list', or try --keys)",
+            "search: {} doesn't support search (see 'tveee search --list', or try --keys)",
             label(pkg)
         ));
     };
@@ -294,10 +294,10 @@ pub fn commands() -> Vec<Command> {
          intent (or a search-results link for YouTube, which only takes links).\n\
          With no arguments, or --list, shows which installed apps support it.\n\
          \n\
-         \x20 tvbee search youtube cat videos\n\
-         \x20 tvbee search livetv news          (the TV guide's programme search)\n\
-         \x20 tvbee search --play vlc jazz       play the best match straight away\n\
-         \x20 tvbee search --keys netflix dune   for apps without search: open the app, press\n\
+         \x20 tveee search youtube cat videos\n\
+         \x20 tveee search livetv news          (the TV guide's programme search)\n\
+         \x20 tveee search --play vlc jazz       play the best match straight away\n\
+         \x20 tveee search --keys netflix dune   for apps without search: open the app, press\n\
          \x20                                     the search key, type, Enter (best effort)\n\
          \x20 --dry-run  show what would be sent\n\
          \n\

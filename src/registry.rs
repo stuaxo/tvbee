@@ -102,7 +102,7 @@ pub fn usage_text(cmds: &[Command]) -> String {
         by_cat.entry(c.category).or_default().push(c);
     }
     let mut out = String::from(
-        "Usage: tvbee <command> [args]\n\nType 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.\n",
+        "Usage: tveee <command> [args]\n\nType 'tveee <command> --help' (or 'tveee help <command>') for help on a command.\n",
     );
     for (cat, mut group) in by_cat {
         group.sort_by_key(|c| c.name);
@@ -116,12 +116,12 @@ pub fn usage_text(cmds: &[Command]) -> String {
             out.push_str(&format!("    {:<12} {}{}\n", c.name, c.desc, alias));
         }
     }
-    out.push_str("\nEnv: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tvbee/env\n");
+    out.push_str("\nEnv: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tveee/env\n");
     out
 }
 
 pub fn help_for(c: &Command) -> String {
-    let mut out = format!("usage: tvbee {} {}\n\n{}\n", c.name, c.usage, c.desc)
+    let mut out = format!("usage: tveee {} {}\n\n{}\n", c.name, c.usage, c.desc)
         .replace(" \n\n", "\n\n");
     if !c.long.is_empty() {
         out.push_str(&format!("\n{}\n", c.long));
@@ -209,6 +209,6 @@ mod tests {
     #[test]
     fn help_trims_empty_usage() {
         let s = sample();
-        assert!(help_for(find(&s, "sleep").unwrap()).starts_with("usage: tvbee sleep\n\nstandby"));
+        assert!(help_for(find(&s, "sleep").unwrap()).starts_with("usage: tveee sleep\n\nstandby"));
     }
 }

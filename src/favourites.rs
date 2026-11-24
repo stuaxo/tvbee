@@ -1,11 +1,11 @@
-//! Favourite channels, kept in sync between tvbee and the TV.
+//! Favourite channels, kept in sync between tveee and the TV.
 //!
 //! The TV is the real list, but it can't always take changes (Philips TVs
 //! only accept them with live TV in front), and it can be changed from its
-//! own menus. So tvbee keeps, per provider and TV:
+//! own menus. So tveee keeps, per provider and TV:
 //!
 //! - what it last read from the TV, and when (`seen`), and
-//! - changes made in tvbee that the TV hasn't taken yet (`want`), each with
+//! - changes made in tveee that the TV hasn't taken yet (`want`), each with
 //!   when it was made.
 //!
 //! Every read of the TV's favourites is a sync. A channel that differs from
@@ -24,7 +24,7 @@ pub struct Store {
     pub seen_at: i64,
     /// The favourites as the TV had them then.
     pub seen: BTreeSet<u32>,
-    /// Changes made in tvbee not on the TV yet: channel -> (favourite?, when).
+    /// Changes made in tveee not on the TV yet: channel -> (favourite?, when).
     pub want: BTreeMap<u32, (bool, i64)>,
 }
 
@@ -86,11 +86,11 @@ pub fn decide(store: &Store, tv: &BTreeSet<u32>, id: u32, on: bool, at: i64) -> 
 /// The outcome of a sync.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sync {
-    /// The favourites as tvbee shows them: the TV's, with pending changes.
+    /// The favourites as tveee shows them: the TV's, with pending changes.
     pub favourites: BTreeSet<u32>,
     /// Changes not on the TV yet.
     pub pending: BTreeMap<u32, bool>,
-    /// Changed on the TV itself since tvbee last looked.
+    /// Changed on the TV itself since tveee last looked.
     pub on_tv: Vec<(u32, bool)>,
     /// Pending changes that just went to the TV.
     pub sent: Vec<(u32, bool)>,
@@ -132,7 +132,7 @@ fn save(provider: &str, ip: &str, store: &Store) -> Result<()> {
     if let Some(dir) = f.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(f, store.render(&format!("favourites tvbee last read from {provider} on {ip}, and changes waiting to go to it")))?;
+    std::fs::write(f, store.render(&format!("favourites tveee last read from {provider} on {ip}, and changes waiting to go to it")))?;
     Ok(())
 }
 

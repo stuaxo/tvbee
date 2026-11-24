@@ -1,6 +1,6 @@
 //! HTTPS requests through `curl`, for TV APIs that use TLS with a
 //! self-signed certificate and digest authentication (Philips JointSpace).
-//! tvbee has no TLS library; curl is on Linux and Windows 10+ already.
+//! tveee has no TLS library; curl is on Linux and Windows 10+ already.
 
 use crate::error::{failed, Error, Result};
 use std::io::Write;

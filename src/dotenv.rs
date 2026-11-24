@@ -1,9 +1,9 @@
 //! Settings from `.env` files, so `TV_IP` and friends needn't be exported.
 //!
-//! Looked for in order: `./.env`, then `$XDG_CONFIG_HOME/tvbee/env`
-//! (`~/.config/tvbee/env`; `%APPDATA%\tvbee\env` on Windows). The first file to set a key wins, and anything
-//! already in the real environment wins over both. Only `TV_*` and `TVBEE_*`
-//! keys are read: a project's `.env` may hold unrelated secrets, and tvbee
+//! Looked for in order: `./.env`, then `$XDG_CONFIG_HOME/tveee/env`
+//! (`~/.config/tveee/env`; `%APPDATA%\tveee\env` on Windows). The first file to set a key wins, and anything
+//! already in the real environment wins over both. Only `TV_*` and `TVEEE_*`
+//! keys are read: a project's `.env` may hold unrelated secrets, and tveee
 //! shouldn't pick those up or pass them on to scripts it runs.
 
 use std::path::{Path, PathBuf};
@@ -39,9 +39,42 @@ fn unquote(v: &str) -> String {
     v.split(" #").next().unwrap_or(v).trim().to_string()
 }
 
-/// Keys tvbee reads; everything else in a `.env` is left alone.
+/// Keys tveee reads; everything else in a `.env` is left alone. (`TVBEE_*`
+/// are the same settings under tveee's old name, see [`old_name`].)
 pub fn ours(key: &str) -> bool {
-    key.starts_with("TV_") || key.starts_with("TVBEE_")
+    key.starts_with("TV_") || key.starts_with("TVEEE_") || key.starts_with(OLD_PREFIX)
+}
+
+/// tveee was called tvbee: its settings were `TVBEE_*`.
+const OLD_PREFIX: &str = "TVBEE_";
+
+/// The current name of a setting under the old name (`TVBEE_PLUGINS` ->
+/// `TVEEE_PLUGINS`), if it is one.
+pub fn old_name(key: &str) -> Option<String> {
+    key.strip_prefix(OLD_PREFIX).map(|rest| format!("TVEEE_{rest}"))
+}
+
+/// The folders tveee keeps things in (config, cache), each with its parent.
+fn base_dirs() -> Vec<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from));
+    let cache = crate::plugin::cache_path("x").and_then(|p| p.parent()?.parent().map(PathBuf::from));
+    config.into_iter().chain(cache).collect()
+}
+
+/// tveee was called tvbee: move its folders (`~/.config/tvbee`,
+/// `~/.cache/tvbee`) to the new name, once, if there's nothing there yet.
+pub fn move_old_folders() {
+    for base in base_dirs() {
+        let (old, new) = (base.join("tvbee"), base.join("tveee"));
+        if old.is_dir() && !new.exists() {
+            let _ = std::fs::rename(&old, &new);
+            // the cache database, under its new name too
+            let _ = std::fs::rename(new.join("tvbee.sqlite"), new.join("tveee.sqlite"));
+        }
+    }
 }
 
 /// The files to read, in order of preference.
@@ -51,10 +84,10 @@ pub fn files(cwd: &Path) -> Vec<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from));
-    std::iter::once(cwd.join(".env")).chain(config.map(|c| c.join("tvbee").join("env"))).collect()
+    std::iter::once(cwd.join(".env")).chain(config.map(|c| c.join("tveee").join("env"))).collect()
 }
 
-/// tvbee's config folder (`~/.config/tvbee`, or the platform's equivalent),
+/// tveee's config folder (`~/.config/tveee`, or the platform's equivalent),
 /// where the user-wide env file, debloat settings and pairings live.
 pub fn config_dir() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
@@ -76,7 +109,7 @@ pub fn settings(files: &[PathBuf], is_set: impl Fn(&str) -> bool) -> Vec<(String
     out
 }
 
-/// Which key came from which file, as loaded (for `tvbee diagnose`).
+/// Which key came from which file, as loaded (for `tveee diagnose`).
 static LOADED: std::sync::OnceLock<Vec<(String, PathBuf)>> = std::sync::OnceLock::new();
 
 /// Load `.env` settings into the environment. Call first thing in `main`,
@@ -91,6 +124,15 @@ pub fn load() {
         unsafe { std::env::set_var(&k, v) };
         loaded.push((k, file));
     }
+    // settings under the old name count as the new ones (unless those are set)
+    let old: Vec<(String, std::ffi::OsString)> =
+        std::env::vars_os().filter_map(|(k, v)| Some((old_name(k.to_str()?)?, v))).collect();
+    for (k, v) in old {
+        if std::env::var_os(&k).is_none() {
+            // SAFETY: as above, still single-threaded
+            unsafe { std::env::set_var(&k, v) };
+        }
+    }
     let _ = LOADED.set(loaded);
 }
 
@@ -104,11 +146,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn old_names() {
+        assert_eq!(old_name("TVBEE_PLUGINS").as_deref(), Some("TVEEE_PLUGINS"));
+        assert_eq!(old_name("TVEEE_PLUGINS"), None);
+        assert_eq!(old_name("TV_IP"), None);
+        assert!(ours("TVBEE_PLUGINS") && ours("TVEEE_PLUGINS") && ours("TV_IP") && !ours("SECRET"));
+    }
+
+    #[test]
     fn parses_env_files() {
         let text = "
 # the TV
 TV_IP=192.168.1.50
-export TVBEE_PLUGINS = philips
+export TVEEE_PLUGINS = philips
 TV_DEBLOAT=\"/opt/my scripts/tv-debloat.sh\"  # quoted
 TV_X='single # not a comment'
 TV_Y=plain # a comment
@@ -120,7 +170,7 @@ BAD KEY=1
             parse(text),
             vec![
                 ("TV_IP".into(), "192.168.1.50".into()),
-                ("TVBEE_PLUGINS".into(), "philips".into()),
+                ("TVEEE_PLUGINS".into(), "philips".into()),
                 ("TV_DEBLOAT".into(), "/opt/my scripts/tv-debloat.sh".into()),
                 ("TV_X".into(), "single # not a comment".into()),
                 ("TV_Y".into(), "plain".into()),
@@ -130,16 +180,16 @@ BAD KEY=1
 
     #[test]
     fn precedence() {
-        let dir = std::env::temp_dir().join(format!("tvbee-dotenv-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tveee-dotenv-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let (local, user) = (dir.join("local.env"), dir.join("user.env"));
         std::fs::write(&local, "TV_IP=1.1.1.1\nAWS_SECRET=nope\n").unwrap();
-        std::fs::write(&user, "TV_IP=2.2.2.2\nTV_DEBLOAT=/x.sh\nTVBEE_PLUGINS=philips\n").unwrap();
+        std::fs::write(&user, "TV_IP=2.2.2.2\nTV_DEBLOAT=/x.sh\nTVEEE_PLUGINS=philips\n").unwrap();
         let files = vec![local.clone(), dir.join("missing"), user.clone()];
         // the first file wins; other people's keys are ignored; the real
         // environment wins over both
-        let got = settings(&files, |k| k == "TVBEE_PLUGINS");
+        let got = settings(&files, |k| k == "TVEEE_PLUGINS");
         let keys: Vec<_> = got.iter().map(|(k, v, f)| (k.as_str(), v.as_str(), f == &local)).collect();
         assert_eq!(keys, vec![("TV_IP", "1.1.1.1", true), ("TV_DEBLOAT", "/x.sh", false)]);
         let _ = std::fs::remove_dir_all(&dir);
@@ -149,6 +199,6 @@ BAD KEY=1
     fn looks_in_cwd_then_config() {
         let f = files(Path::new("/some/dir"));
         assert_eq!(f[0], PathBuf::from("/some/dir/.env"));
-        assert!(f.get(1).is_some_and(|p| p.ends_with("tvbee/env")));
+        assert!(f.get(1).is_some_and(|p| p.ends_with("tveee/env")));
     }
 }

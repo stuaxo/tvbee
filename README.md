@@ -1,17 +1,20 @@
-# tvbee
+# tveee
 
 🔴🟠🟡 Warning slopcoded - made to operate my own TV YMMV  🟡🟠🔴
 
 This is a rust port of [tv.sh](https://github.com/stuaxo/tv.sh) with more functinaltiy.
+
+Formerly called tvbee. Settings and caches from tvbee (`~/.config/tvbee`,
+`~/.cache/tvbee`, `TVBEE_*` variables) are picked up automatically.
 
 
 Command-line remote for Android TV over ADB. So far it has only been tested
 on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
 (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
 
-![tvbee ui: live TV, the programme guide, options, help, the system panel and launcher, then searching YouTube and playing the video it finds](docs/tvbee-ui.gif)
+![tveee ui: live TV, the programme guide, options, help, the system panel and launcher, then searching YouTube and playing the video it finds](docs/tveee-ui.gif)
 
-*`tvbee ui`: live TV (channel, programme, what's next), the guide (sliding
+*`tveee ui`: live TV (channel, programme, what's next), the guide (sliding
 through time, programme details, filtering, the Favourites and Radio tabs),
 options, help, the system panel and the launcher, then searching YouTube for
 a video, playing it in remote mode, and seeking.*
@@ -27,40 +30,40 @@ For screen mirroring scrcpy is required.
 
 ## Install
 
-Download from the [releases page](https://github.com/stuaxo/tvbee/releases):
+Download from the [releases page](https://github.com/stuaxo/tveee/releases):
 
 - **Debian / Ubuntu / Raspberry Pi OS**: `sudo apt install
-  ./tvbee_<version>-1_<arch>.deb` (`amd64`, `arm64`, or `armhf` for 32-bit,
+  ./tveee_<version>-1_<arch>.deb` (`amd64`, `arm64`, or `armhf` for 32-bit,
   which runs on every Raspberry Pi), which also pulls in `adb` (and suggests
-  `scrcpy` for `tvbee mirror`).
+  `scrcpy` for `tveee mirror`).
 - **Other Linux** (any distribution, a NAS such as a Synology, ARM boards):
-  unpack `tvbee-<version>-<target>.tar.gz` and put `tvbee` on your PATH. The
+  unpack `tveee-<version>-<target>.tar.gz` and put `tveee` on your PATH. The
   Linux builds are static (musl), so they don't depend on the system's C
   library. Targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`
   (64-bit ARM), `arm-unknown-linux-musleabihf` (32-bit ARM, any Pi) and
-  `armv7-unknown-linux-musleabihf` (32-bit ARMv7 and later). tvbee still
+  `armv7-unknown-linux-musleabihf` (32-bit ARMv7 and later). tveee still
   needs `adb` (and `curl` for the Philips JointSpace commands) from the system.
-- **Windows**: unzip `tvbee-<version>-x86_64-pc-windows-msvc.zip`, and install
+- **Windows**: unzip `tveee-<version>-x86_64-pc-windows-msvc.zip`, and install
   Google's [platform-tools](https://developer.android.com/tools/releases/platform-tools)
   so that `adb.exe` is on your PATH.
 
-The release builds include the full-screen remote (`tvbee ui`). From source:
+The release builds include the full-screen remote (`tveee ui`). From source:
 
-    cargo install --git https://github.com/stuaxo/tvbee              # plain
-    cargo install --git https://github.com/stuaxo/tvbee --features ui
+    cargo install --git https://github.com/stuaxo/tveee              # plain
+    cargo install --git https://github.com/stuaxo/tveee --features ui
 
 The plain build works with Debian 13's packaged Rust (`apt install cargo
-build-essential`: a C compiler builds the bundled SQLite that tvbee caches the
+build-essential`: a C compiler builds the bundled SQLite that tveee caches the
 TV's guide in); `--features ui` needs Rust 1.88 or newer.
 
-On the TV, turn on network debugging (Developer options). `tvbee findtv` finds
-it on the network; point tvbee at it with `TV_IP` (see below) and accept the
-prompt on the TV the first time. `tvbee diagnose` checks the whole setup:
+On the TV, turn on network debugging (Developer options). `tveee findtv` finds
+it on the network; point tveee at it with `TV_IP` (see below) and accept the
+prompt on the TV the first time. `tveee diagnose` checks the whole setup:
 adb (on PATH, `$ADB`, or under `$ANDROID_HOME` / `$ANDROID_SDK_ROOT`),
 scrcpy, `TV_IP`, and the connection.
 
 On Windows a few things are more limited: `status --watch` and `nowplaying
---watch` need a Unix terminal (use `tvbee ui` instead), `logs <pattern>`
+--watch` need a Unix terminal (use `tveee ui` instead), `logs <pattern>`
 matches plain text rather than a regex unless `grep` is installed, and `time`
 compares the clocks without checking the time zone.
 
@@ -72,7 +75,7 @@ Android TV with network debugging on. Some parts are Philips-specific:
 - the `philips` plugin (the JointSpace API), enabled only when detected
 - the iPlayer, Arte and Dailymotion aliases (Philips NetTV web apps), and the
   `livetv` alias (Philips' TV app)
-- input switching by keycode (`tvbee input hdmi1`), which depends on the
+- input switching by keycode (`tveee input hdmi1`), which depends on the
   TV's firmware
 
 Reports from other TVs are welcome.
@@ -81,33 +84,33 @@ Reports from other TVs are welcome.
 
 A few examples:
 
-    tvbee findtv                      # look for TVs on the network
-    tvbee diagnose                    # check adb, scrcpy, TV_IP and the connection
-    tvbee np                          # what's on: app, title, progress bar, link
-    tvbee details                     # channel, chapters, description (YouTube, via yt-dlp)
-    tvbee goto history                # a place in the app; 'tvbee goto' lists them
-    tvbee goto chapter 3              # seek to a chapter of the video
-    tvbee guide                       # now/next on live TV (from the over-the-air guide)
-    tvbee guide bbc two               # one channel's programmes today
-    tvbee watch more 4                # switch live TV by channel number or name
-    tvbee fav add more 4              # add a favourite (synced with the TV)
-    tvbee status --watch              # the same plus power, volume, memory, storage; live
-    tvbee launch youtube
-    tvbee home --set projectivy       # choose the default home app (see --list)
-    tvbee search youtube cat videos   # or: tvbee search livetv news
-    tvbee open https://youtu.be/...   # links go to the app that claims them
-    tvbee vol 20
-    tvbee seek 50%
-    tvbee ui                          # full-screen remote (needs the ui feature)
-    tvbee debloat apply --dry-run     # what the debloat profile would change
+    tveee findtv                      # look for TVs on the network
+    tveee diagnose                    # check adb, scrcpy, TV_IP and the connection
+    tveee np                          # what's on: app, title, progress bar, link
+    tveee details                     # channel, chapters, description (YouTube, via yt-dlp)
+    tveee goto history                # a place in the app; 'tveee goto' lists them
+    tveee goto chapter 3              # seek to a chapter of the video
+    tveee guide                       # now/next on live TV (from the over-the-air guide)
+    tveee guide bbc two               # one channel's programmes today
+    tveee watch more 4                # switch live TV by channel number or name
+    tveee fav add more 4              # add a favourite (synced with the TV)
+    tveee status --watch              # the same plus power, volume, memory, storage; live
+    tveee launch youtube
+    tveee home --set projectivy       # choose the default home app (see --list)
+    tveee search youtube cat videos   # or: tveee search livetv news
+    tveee open https://youtu.be/...   # links go to the app that claims them
+    tveee vol 20
+    tveee seek 50%
+    tveee ui                          # full-screen remote (needs the ui feature)
+    tveee debloat apply --dry-run     # what the debloat profile would change
 
-Every command takes `--help`. The full list, from `tvbee help`:
+Every command takes `--help`. The full list, from `tveee help`:
 
 <!-- commands:start (checked by a test: cargo test readme) -->
 ```text
-Usage: tvbee <command> [args]
+Usage: tveee <command> [args]
 
-Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
+Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
 
 [apps]
     apps         list app aliases installed on the TV
@@ -170,11 +173,11 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     vol          change volume
 
 [options]
-    options      tvbee's own settings: list them, or set one
+    options      tveee's own settings: list them, or set one
 
 [pairing]
-    pair         pair tvbee with a service on the TV
-    pairings     services tvbee can pair with, and whether it has
+    pair         pair tveee with a service on the TV
+    pairings     services tveee can pair with, and whether it has
     unpair       forget a saved pairing
 
 [power]
@@ -190,7 +193,7 @@ Type 'tvbee <command> --help' (or 'tvbee help <command>') for help on a command.
     plugins      list plugins and whether they are enabled
     wait         wait until the TV is reachable and booted
 
-Env: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tvbee/env
+Env: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tveee/env
 ```
 <!-- commands:end -->
 
@@ -202,41 +205,41 @@ YouTube (`youtube`).
 
 ## Plugins
 
-Commands are grouped by plugin in `tvbee help`, Django-style. A plugin is a
+Commands are grouped by plugin in `tveee help`, Django-style. A plugin is a
 module in `src/plugins/` exporting `commands()`, registered in
 `src/plugins/mod.rs`; it can also add apps (`with_apps`) and ui menu items
 (`with_menu`). Built-in plugins are always on. Vendor plugins (e.g.
 `philips`) carry a detection check:
 
-- `TVBEE_PLUGINS=philips,-other` forces plugins on/off
-- otherwise the per-TV cache (`~/.cache/tvbee/<ip>.plugins`) is used
+- `TVEEE_PLUGINS=philips,-other` forces plugins on/off
+- otherwise the per-TV cache (`~/.cache/tveee/<ip>.plugins`) is used
 - otherwise the TV is probed, but only when one of that plugin's commands was
-  asked for (or `tvbee plugins --refresh`); `help` never contacts the TV
+  asked for (or `tveee plugins --refresh`); `help` never contacts the TV
 
-`tvbee plugins` shows what is enabled and why.
+`tveee plugins` shows what is enabled and why.
 
-    tvbee help            # all commands by category
-    tvbee help launch     # one command
-    tvbee launch --quiet iplayer
-    tvbee apps --all      # offline alias list
+    tveee help            # all commands by category
+    tveee help launch     # one command
+    tveee launch --quiet iplayer
+    tveee apps --all      # offline alias list
 
-Environment: `TVBEE_PLUGINS`, `TV_IP` (default 192.168.1.19).
+Environment: `TVEEE_PLUGINS`, `TV_IP` (default 192.168.1.19).
 
 These can also go in a `.env` file in the current directory, or in
-`~/.config/tvbee/env` for every directory (see `.env.example`). Settings
-already in the environment win, and only `TV_*` / `TVBEE_*` keys are read.
+`~/.config/tveee/env` for every directory (see `.env.example`). Settings
+already in the environment win, and only `TV_*` / `TVEEE_*` keys are read.
 
 Needs `adb` in PATH (and `scrcpy` for `mirror`). The default build uses no
 crates beyond std.
 
 ## Optional features
 
-- `ui`: `tvbee ui`, a full-screen remote (what's on, progress, volume; keys for
+- `ui`: `tveee ui`, a full-screen remote (what's on, progress, volume; keys for
   play/pause, seeking and volume). Pulls in `ratatui`/`crossterm`.
 
       cargo install --path . --features ui
 
-  Without it, `tvbee ui` says how to get it. Optional plugins are compiled in
+  Without it, `tveee ui` says how to get it. Optional plugins are compiled in
   with `#[cfg(feature = ...)]` in `src/plugins/mod.rs` and listed in
   `NOT_BUILT` when left out.
 

@@ -3,7 +3,7 @@
 //! plugins carry a detection check that decides whether they are enabled
 //! for the TV being talked to.
 //!
-//! Resolution order for a vendor plugin: `TVBEE_PLUGINS` override, then the
+//! Resolution order for a vendor plugin: `TVEEE_PLUGINS` override, then the
 //! per-TV cache, then (only when one of its commands was asked for, or on
 //! `plugins --refresh`) a live probe whose result is cached. Plain `help`
 //! never touches the TV.
@@ -159,13 +159,13 @@ pub fn format_cache(cache: &HashMap<String, bool>) -> String {
     lines.join("\n") + "\n"
 }
 
-/// `$XDG_CACHE_HOME/tvbee/<ip>.plugins` (or `~/.cache/...`).
+/// `$XDG_CACHE_HOME/tveee/<ip>.plugins` (or `~/.cache/...`).
 pub fn cache_path(ip: &str) -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))?;
-    Some(base.join("tvbee").join(format!("{ip}.plugins")))
+    Some(base.join("tveee").join(format!("{ip}.plugins")))
 }
 
 fn read_cache(path: &Path) -> HashMap<String, bool> {

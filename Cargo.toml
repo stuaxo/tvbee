@@ -1,5 +1,5 @@
 [package]
-name = "tvbee"
+name = "tveee"
 version = "0.1.0"
 edition = "2024"
 # Debian 13's packaged Rust; the optional `ui` feature needs 1.88 (ratatui)
@@ -7,7 +7,7 @@ rust-version = "1.85"
 description = "Command-line remote for Android TV over ADB (tested on Philips Android TV)"
 license = "GPL-3.0-or-later"
 authors = ["Stuart Axon"]
-repository = "https://github.com/stuaxo/tvbee"
+repository = "https://github.com/stuaxo/tveee"
 readme = "README.md"
 keywords = ["android-tv", "adb", "remote", "cli", "tv"]
 categories = ["command-line-utilities"]
@@ -21,7 +21,7 @@ ratatui = { version = "0.30.2", optional = true, features = ["unstable-rendered-
 
 [features]
 default = []
-# `tvbee ui`: interactive terminal remote (pulls in ratatui + crossterm)
+# `tveee ui`: interactive terminal remote (pulls in ratatui + crossterm)
 ui = ["dep:ratatui"]
 
 [profile.release]
@@ -41,10 +41,10 @@ recommends = "scrcpy"
 extended-description = """\
 Control an Android TV from the command line over ADB: launch apps, search,
 open links, change volume, seek, see what is playing (with title and progress)
-and the TV's memory and storage, and a full-screen terminal remote (tvbee ui).
+and the TV's memory and storage, and a full-screen terminal remote (tveee ui).
 So far only tested on a Philips Android TV."""
 assets = [
-    ["target/release/tvbee", "usr/bin/", "755"],
-    ["README.md", "usr/share/doc/tvbee/README.md", "644"],
-    [".env.example", "usr/share/doc/tvbee/env.example", "644"],
+    ["target/release/tveee", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/tveee/README.md", "644"],
+    [".env.example", "usr/share/doc/tveee/env.example", "644"],
 ]

@@ -23,7 +23,7 @@ pub fn is_probably_blank(png: &[u8]) -> bool {
 
 fn default_name() -> String {
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    format!("tvbee-{secs}.png")
+    format!("tveee-{secs}.png")
 }
 
 /// Menu version: save to the default name, report it on the status line.
@@ -105,7 +105,7 @@ fn mirror(c: &Ctx, args: &[String]) -> Result<()> {
 fn mirror_item(tv: &crate::tv::Tv) -> Result<String> {
     use std::process::Stdio;
     // a file, not a pipe: scrcpy keeps logging while it runs
-    let log_path = std::env::temp_dir().join("tvbee-scrcpy.log");
+    let log_path = std::env::temp_dir().join("tveee-scrcpy.log");
     let log = std::fs::File::create(&log_path)?;
     let mut child = scrcpy(tv)?.stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log).spawn()?;
     for _ in 0..20 {
@@ -123,9 +123,9 @@ fn mirror_item(tv: &crate::tv::Tv) -> Result<String> {
 pub fn commands() -> Vec<Command> {
     vec![
         Command::new(CAT, "screenshot", "[file]", "save a PNG of the screen", screenshot)
-            .long("Default file is ./tvbee-<unix-time>.png. The path is printed on stdout; notes go\nto stderr. TVs play video on a hardware layer that screencap can't capture, so the\npicture area comes out black (only app overlays/menus are captured); a note says\nwhen that applies."),
+            .long("Default file is ./tveee-<unix-time>.png. The path is printed on stdout; notes go\nto stderr. TVs play video on a hardware layer that screencap can't capture, so the\npicture area comes out black (only app overlays/menus are captured); a note says\nwhen that applies."),
         Command::new(CAT, "mirror", "[scrcpy args]", "show/control the screen on this PC with scrcpy", mirror)
-            .long("Extra arguments are passed straight to scrcpy, e.g. 'tvbee mirror --no-control'.")
+            .long("Extra arguments are passed straight to scrcpy, e.g. 'tveee mirror --no-control'.")
             .aliases(&["scrcpy"]),
     ]
 }

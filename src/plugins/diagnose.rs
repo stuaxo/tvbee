@@ -1,4 +1,4 @@
-//! Finding the TV on the network, and checking that tvbee's setup works.
+//! Finding the TV on the network, and checking that tveee's setup works.
 
 use crate::error::{failed, usage, Result};
 use crate::mdns;
@@ -191,7 +191,7 @@ fn findtv(c: &Ctx, args: &[String]) -> Result<()> {
     }
     if found.is_empty() {
         println!("no TVs answered.");
-        println!("Is the TV on and on this network? Some TVs advertise nothing: try 'tvbee findtv --scan'.");
+        println!("Is the TV on and on this network? Some TVs advertise nothing: try 'tveee findtv --scan'.");
         return failed("findtv: nothing found");
     }
     let states = adb_states();
@@ -216,7 +216,7 @@ fn findtv(c: &Ctx, args: &[String]) -> Result<()> {
     }
     if !found.iter().any(|d| d.ip.map(|i| i.to_string()) == Some(current.clone())) {
         if let Some(ip) = found.first().and_then(|d| d.ip) {
-            println!("\nTV_IP is {current}. To use {ip}, put TV_IP={ip} in ~/.config/tvbee/env (or ./.env).");
+            println!("\nTV_IP is {current}. To use {ip}, put TV_IP={ip} in ~/.config/tveee/env (or ./.env).");
         }
     }
     Ok(())
@@ -267,7 +267,7 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
             let ver = first_line(&p, "--version").unwrap_or_else(|| "version unknown".into());
             report(Some(true), "scrcpy", &format!("{} - {ver}", p.display()));
         }
-        None => report(None, "scrcpy", "not found (only needed for 'tvbee mirror'; Debian/Ubuntu: sudo apt install scrcpy)"),
+        None => report(None, "scrcpy", "not found (only needed for 'tveee mirror'; Debian/Ubuntu: sudo apt install scrcpy)"),
     }
 
     // yt-dlp (only for YouTube details)
@@ -276,7 +276,7 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
             let ver = first_line(&p, "--version").unwrap_or_else(|| "version unknown".into());
             report(Some(true), "yt-dlp", &format!("{} - {ver}", p.display()));
         }
-        None => report(None, "yt-dlp", "not found (only needed for 'tvbee details' on YouTube videos)"),
+        None => report(None, "yt-dlp", "not found (only needed for 'tveee details' on YouTube videos)"),
     }
 
     // curl (only for Philips' HTTPS API: jointspace pairing)
@@ -285,7 +285,7 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
             let ver = first_line(&p, "--version").map_or_else(|| "version unknown".into(), |v| v.split_whitespace().take(2).collect::<Vec<_>>().join(" "));
             report(Some(true), "curl", &format!("{} - {ver}", p.display()));
         }
-        None => report(None, "curl", "not found (only needed for 'tvbee pair jointspace' on Philips TVs)"),
+        None => report(None, "curl", "not found (only needed for 'tveee pair jointspace' on Philips TVs)"),
     }
 
     // which TV, and where that setting came from
@@ -293,13 +293,13 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
     let from = match crate::dotenv::source_of("TV_IP") {
         Some(f) => format!("from {}", f.display()),
         None if env("TV_IP").is_some() => "from the environment".into(),
-        None => "the built-in default; set TV_IP in .env or ~/.config/tvbee/env (try 'tvbee findtv')".to_string(),
+        None => "the built-in default; set TV_IP in .env or ~/.config/tveee/env (try 'tveee findtv')".to_string(),
     };
     report(Some(true), "TV_IP", &format!("{ip} ({from})"));
     for p in crate::pairing::all() {
         match crate::pairing::load(p.id(), &ip) {
             Some(_) => report(Some(true), p.id(), &format!("paired with {} ({})", p.name(), p.unlocks())),
-            None => report(None, p.id(), &format!("not paired: 'tvbee pair {}' for {}", p.id(), p.unlocks())),
+            None => report(None, p.id(), &format!("not paired: 'tveee pair {}' for {}", p.id(), p.unlocks())),
         }
     }
 
@@ -317,7 +317,7 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
         report(
             Some(false),
             "network",
-            &format!("nothing on {ip}:{ADB_PORT}: is the TV on, on this network, with network debugging on? ('tvbee findtv' looks for it)"),
+            &format!("nothing on {ip}:{ADB_PORT}: is the TV on, on this network, with network debugging on? ('tveee findtv' looks for it)"),
         );
         println!("\n{problems} problem(s) found");
         return failed("diagnose: problems found");
@@ -363,9 +363,9 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
     // plugins and optional parts
     let plugins: Vec<String> = c.plugins.iter().filter(|p| !matches!(p.source, crate::plugin::Source::Builtin)).map(|p| format!("{} {}", p.name, if p.enabled { "on" } else { "off" })).collect();
     if !plugins.is_empty() {
-        report(None, "plugins", &format!("{} (see 'tvbee plugins')", plugins.join(", ")));
+        report(None, "plugins", &format!("{} (see 'tveee plugins')", plugins.join(", ")));
     }
-    report(None, "ui", if cfg!(feature = "ui") { "built in ('tvbee ui')" } else { "not in this build (cargo install --features ui)" });
+    report(None, "ui", if cfg!(feature = "ui") { "built in ('tveee ui')" } else { "not in this build (cargo install --features ui)" });
 
     if problems > 0 {
         println!("\n{problems} problem(s) found");

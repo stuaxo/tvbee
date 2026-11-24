@@ -1,7 +1,7 @@
 //! Providers: sources of content an app gives access to. Live TV over the
 //! air (hosted by Philips' TV app), YouTube, later Kodi or the NetTV apps.
 //!
-//! An app is something you launch; a provider is what tvbee can show and do
+//! An app is something you launch; a provider is what tveee can show and do
 //! with it. Each capability is its own small trait ([`Guide`], [`Channels`],
 //! [`Details`]); a provider opts in by implementing the trait and returning
 //! itself from the matching accessor on [`Provider`]. Plugins register
@@ -193,7 +193,7 @@ pub trait Channels {
         None
     }
     /// The favourite channels (by id) as the TV has them; None if this
-    /// provider has no favourites. tvbee syncs with these (`favourites`).
+    /// provider has no favourites. tveee syncs with these (`favourites`).
     fn favourites(&self, _cx: &Cx) -> Option<Result<std::collections::BTreeSet<u32>>> {
         None
     }
@@ -212,7 +212,7 @@ pub trait Details {
 
 /// A source of content. Everything but the identity is optional.
 pub trait Provider: Sync {
-    /// Short id: `tvbee guide --provider <id>`.
+    /// Short id: `tveee guide --provider <id>`.
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
     /// The packages it lives in.
@@ -241,7 +241,7 @@ pub trait Provider: Sync {
     fn open_here(&self, _tv: &crate::tv::Tv, _link: &str) -> crate::error::Result<bool> {
         Ok(false)
     }
-    /// Fixed places in the app (`tvbee goto <id>`).
+    /// Fixed places in the app (`tveee goto <id>`).
     fn places(&self) -> &'static [Place] {
         &[]
     }
@@ -269,7 +269,7 @@ pub fn describe(net: &Network) -> String {
     if how.is_empty() { place } else { format!("{place} ({})", how.join(", ")) }
 }
 
-/// The capabilities a provider has, by name (for `tvbee providers`).
+/// The capabilities a provider has, by name (for `tveee providers`).
 pub fn capabilities(p: &dyn Provider) -> Vec<&'static str> {
     let mut v = Vec::new();
     if p.guide().is_some() {

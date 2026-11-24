@@ -1,7 +1,7 @@
 /target
 
-# screenshots tvbee saves in the current directory
-/tvbee-*.png
+# screenshots tveee saves in the current directory
+/tveee-*.png
 
 # editors and OS
 *.swp

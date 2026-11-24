@@ -62,12 +62,12 @@ fn guide(c: &Ctx, args: &[String]) -> Result<()> {
         match a.as_str() {
             "--provider" => id = it.next().cloned(),
             "--hours" => hours = it.next().and_then(|h| h.parse().ok()).filter(|h| *h > 0).map_or_else(|| usage("guide: --hours needs a number"), Ok)?,
-            x if x.starts_with("--") => return usage(format!("guide: unknown option '{x}' (usage: tvbee guide [<channel>] [--hours N] [--provider ID])")),
+            x if x.starts_with("--") => return usage(format!("guide: unknown option '{x}' (usage: tveee guide [<channel>] [--hours N] [--provider ID])")),
             x => words.push(x.to_string()),
         }
     }
     let Some(p) = provider::with_guide(id.as_deref()) else {
-        return failed("guide: no provider with a programme guide here (see 'tvbee providers')");
+        return failed("guide: no provider with a programme guide here (see 'tveee providers')");
     };
     let g = p.guide().expect("with_guide checked");
     let cx = Cx { tv: &c.tv };
@@ -102,7 +102,7 @@ fn guide(c: &Ctx, args: &[String]) -> Result<()> {
     let query = words.join(" ");
     let list = channels.unwrap_or_else(|| failed(format!("guide: {} has no channel list to find '{query}' in", p.name())))?;
     let Some(ch) = provider::find_channel(&list, &query) else {
-        return failed(format!("guide: no channel '{query}' (see 'tvbee channels')"));
+        return failed(format!("guide: no channel '{query}' (see 'tveee channels')"));
     };
     let events = g.schedule(&cx, ch.id, at, at + hours * 3600)?;
     if events.is_empty() {
@@ -122,7 +122,7 @@ fn channel_provider(id: Option<&str>) -> Result<&'static dyn provider::Provider>
         .iter()
         .copied()
         .find(|p| p.channels().is_some() && id.is_none_or(|i| p.id() == i))
-        .map_or_else(|| failed("no provider with channels here (see 'tvbee providers')"), Ok)
+        .map_or_else(|| failed("no provider with channels here (see 'tveee providers')"), Ok)
 }
 
 /// Split off a trailing `--provider ID`.
@@ -140,7 +140,7 @@ fn channels(c: &Ctx, args: &[String]) -> Result<()> {
         [] => None,
         [k] if k == "--tv" => Some(false),
         [k] if k == "--radio" => Some(true),
-        _ => return usage("usage: tvbee channels [--tv | --radio] [--provider ID]"),
+        _ => return usage("usage: tveee channels [--tv | --radio] [--provider ID]"),
     };
     let p = channel_provider(id.as_deref())?;
     let cx = Cx { tv: &c.tv };
@@ -176,7 +176,7 @@ fn channels(c: &Ctx, args: &[String]) -> Result<()> {
 fn watch(c: &Ctx, args: &[String]) -> Result<()> {
     let (words, id) = provider_flag(args);
     if words.is_empty() {
-        return usage("usage: tvbee watch <channel number or name> [--provider ID]");
+        return usage("usage: tveee watch <channel number or name> [--provider ID]");
     }
     let query = words.join(" ");
     let p = channel_provider(id.as_deref())?;
@@ -184,7 +184,7 @@ fn watch(c: &Ctx, args: &[String]) -> Result<()> {
     let chans = p.channels().expect("checked");
     let list = chans.list(&cx)?;
     let Some(ch) = provider::find_channel(&list, &query) else {
-        return failed(format!("watch: no channel '{query}' (see 'tvbee channels')"));
+        return failed(format!("watch: no channel '{query}' (see 'tveee channels')"));
     };
     println!("{}", chans.tune(&cx, ch)?);
     Ok(())
@@ -196,7 +196,7 @@ fn on_now(c: &Ctx, args: &[String]) -> Result<()> {
     let info = match words.as_slice() {
         [] => false,
         [w] if w == "--info" => true,
-        _ => return usage("usage: tvbee onnow [--info] [--provider ID]"),
+        _ => return usage("usage: tveee onnow [--info] [--provider ID]"),
     };
     let p = channel_provider(id.as_deref())?;
     let cx = Cx { tv: &c.tv };
@@ -238,7 +238,7 @@ fn fav(c: &Ctx, args: &[String]) -> Result<()> {
             }
             let favs: Vec<_> = list.iter().filter(|ch| ch.favourite).collect();
             if favs.is_empty() {
-                println!("no favourites yet ('tvbee fav add <channel>')");
+                println!("no favourites yet ('tveee fav add <channel>')");
             }
             for ch in favs {
                 let wait = if synced.pending.contains_key(&ch.id) { "  (not on the TV yet)" } else { "" };
@@ -252,10 +252,10 @@ fn fav(c: &Ctx, args: &[String]) -> Result<()> {
             return Ok(());
         }
         Some((cmd, rest)) if !rest.is_empty() && (cmd == "add" || cmd == "remove") => (cmd == "add", rest.join(" ")),
-        _ => return usage("usage: tvbee fav [add|remove <channel>] [--provider ID]"),
+        _ => return usage("usage: tveee fav [add|remove <channel>] [--provider ID]"),
     };
     let Some(ch) = provider::find_channel(&list, &query) else {
-        return failed(format!("fav: no channel '{query}' (see 'tvbee channels')"));
+        return failed(format!("fav: no channel '{query}' (see 'tveee channels')"));
     };
     let s = crate::favourites::set(p, &cx, ch.id, on)?;
     println!("{}", fav_message(ch, on, &s));
@@ -279,7 +279,7 @@ pub fn fav_message(ch: &provider::Channel, on: bool, s: &crate::favourites::Sync
 fn providers(c: &Ctx, _: &[String]) -> Result<()> {
     let all = provider::all();
     if all.is_empty() {
-        println!("no providers enabled (see 'tvbee plugins')");
+        println!("no providers enabled (see 'tveee plugins')");
     }
     for p in all {
         println!("{:<10} {:<24} {:<28} {}", p.id(), p.name(), p.hosts().join(","), provider::capabilities(*p).join(", "));
@@ -296,31 +296,31 @@ pub fn commands() -> Vec<Command> {
         Command::new(CAT, "guide", "[<channel>] [--hours N] [--provider ID]", "programme guide: now/next, or one channel's schedule", guide).long(
             "From the first provider with a guide (live TV over the air on Philips TVs,\n\
              from the broadcast EPG the TV collects).\n\
-             \x20 tvbee guide                now and next on every channel\n\
-             \x20 tvbee guide 4              channel 4's programmes for the next 24 hours\n\
-             \x20 tvbee guide bbc two --hours 6  ... by name, for the next 6\n\
+             \x20 tveee guide                now and next on every channel\n\
+             \x20 tveee guide 4              channel 4's programmes for the next 24 hours\n\
+             \x20 tveee guide bbc two --hours 6  ... by name, for the next 6\n\
              Channel numbers and names come from the TV's channel list, which on\n\
-             Philips TVs needs pairing ('tvbee pair'); without it the guide shows the\n\
+             Philips TVs needs pairing ('tveee pair'); without it the guide shows the\n\
              TV's internal channel ids.",
         ),
         Command::new(CAT, "channels", "[--tv | --radio] [--provider ID]", "channels you can watch, with what's on", channels)
-            .long("The live TV channel list with what's on each now, marking the one the TV is\ntuned to. On Philips TVs it needs pairing ('tvbee pair')."),
+            .long("The live TV channel list with what's on each now, marking the one the TV is\ntuned to. On Philips TVs it needs pairing ('tveee pair')."),
         Command::new(CAT, "watch", "<channel> [--provider ID]", "switch live TV to a channel, by number or name", watch)
-            .long("  tvbee watch 4\n  tvbee watch more 4\n  tvbee watch bbc two\nNames match from the start, then anywhere; the lowest channel number wins."),
+            .long("  tveee watch 4\n  tveee watch more 4\n  tveee watch bbc two\nNames match from the start, then anywhere; the lowest channel number wins."),
         Command::new(CAT, "onnow", "[--info] [--provider ID]", "the channel live TV is on, and what's on it now and next", on_now)
             .long("  --info   with each programme's description, from the broadcast guide (the first\n           time takes the TV about half a minute; then it's cached)"),
         Command::new(CAT, "fav", "[add|remove <channel>] [--provider ID]", "favourite channels: list, add, remove", fav).long(
-            "  tvbee fav                  list them\n\
-             \x20 tvbee fav add more 4       add a channel (by number or name)\n\
-             \x20 tvbee fav remove 18        remove one\n\
-             Changes are kept by tvbee and synced with the TV: they go to it as soon\n\
+            "  tveee fav                  list them\n\
+             \x20 tveee fav add more 4       add a channel (by number or name)\n\
+             \x20 tveee fav remove 18        remove one\n\
+             Changes are kept by tveee and synced with the TV: they go to it as soon\n\
              as it takes them (Philips TVs: only with live TV in front), and changes\n\
              made on the TV itself are noticed. If both sides changed a channel, the\n\
              later change wins. On Philips TVs new favourites go in Favourites 1, and\n\
              removing takes a channel out of every list.",
         ),
         Command::new(CAT, "providers", "", "content providers and what each can do", providers).long(
-            "Providers are the sources of content tvbee knows (live TV, YouTube, ...),\n\
+            "Providers are the sources of content tveee knows (live TV, YouTube, ...),\n\
              registered by plugins, with their capabilities: guide, channels, details,\n\
              places, search, now-playing.",
         ),

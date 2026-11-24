@@ -2,7 +2,7 @@
 //! fixed places in the app (history, subscriptions, ...), and links from
 //! what's on (the channel, chapters, links in the description).
 //!
-//! These are shapes the core shows (`tvbee details`, `tvbee goto`) and
+//! These are shapes the core shows (`tveee details`, `tveee goto`) and
 //! plugins fill in through their apps' hooks ([`crate::plugins::apps::App`]).
 
 /// How to get somewhere.
@@ -23,7 +23,7 @@ pub struct Link {
 /// A fixed destination in an app, reached by a link.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Place {
-    /// What to type: `tvbee goto <id>`.
+    /// What to type: `tveee goto <id>`.
     pub id: &'static str,
     pub label: &'static str,
     pub link: &'static str,

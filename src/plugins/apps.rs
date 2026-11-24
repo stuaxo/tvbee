@@ -40,7 +40,7 @@ impl Kind {
     }
 }
 
-/// An app tvbee knows about. Apps with an alias can be launched by it; the
+/// An app tveee knows about. Apps with an alias can be launched by it; the
 /// rest are only recognised in the foreground. The core lists general apps
 /// ([`CORE`]); plugins add their own (YouTube, Philips' NetTV apps).
 #[derive(Clone, Copy)]
@@ -80,7 +80,7 @@ pub const CORE: &[App] = &[
     app("fdroid", "F-Droid", "org.fdroid.fdroid", Kind::Store),
     app("vlc", "VLC", "org.videolan.vlc", Kind::Player),
     app("mx", "MX Player", "com.mxtech.videoplayer.pro", Kind::Player),
-    // streaming apps installed on this TV (checked with `tvbee apps --others`)
+    // streaming apps installed on this TV (checked with `tveee apps --others`)
     app("channel4", "Channel 4", "com.channel4.ondemand", Kind::Video),
     app("vimeo", "Vimeo", "com.vimeo.android.videoapp", Kind::Video),
     app("twitch", "Twitch", "tv.twitch.android.app", Kind::Video),
@@ -126,7 +126,7 @@ pub fn install(plugin_apps: Vec<App>) {
     let _ = REGISTRY.set(registry(plugin_apps));
 }
 
-/// Every app tvbee knows. Without [`install`] (tests) that's every plugin's.
+/// Every app tveee knows. Without [`install`] (tests) that's every plugin's.
 pub fn all() -> &'static [App] {
     REGISTRY.get_or_init(|| registry(crate::plugins::all().iter().flat_map(|p| (p.apps)()).collect()))
 }
@@ -257,7 +257,7 @@ pub fn guesses(tv: &Tv) -> Vec<Guess> {
     gs
 }
 
-/// A name and kind for `pkg`: from [`all`] if tvbee knows it, else guessed
+/// A name and kind for `pkg`: from [`all`] if tveee knows it, else guessed
 /// (named by its package).
 pub fn identify(pkg: &str, guessed: &[Guess]) -> Option<(String, Kind)> {
     if let Some(a) = by_package(pkg) {
@@ -270,7 +270,7 @@ fn by_alias(alias: &str) -> Option<&'static App> {
     all().iter().find(|a| a.alias == Some(alias))
 }
 
-/// The app whose package is `pkg`, if tvbee knows it.
+/// The app whose package is `pkg`, if tveee knows it.
 pub fn by_package(pkg: &str) -> Option<&'static App> {
     all().iter().find(|a| a.target != "@home" && a.package() == pkg)
 }
@@ -288,7 +288,7 @@ const HOGS: &[&str] = &[
 ];
 
 /// Whether the TV passes through `pkg` on the way from one app to another:
-/// a home screen tvbee knows, or Android's own screens.
+/// a home screen tveee knows, or Android's own screens.
 #[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn passes_through(pkg: &str) -> bool {
     pkg == "android" || pkg == "com.android.systemui" || by_package(pkg).is_some_and(|a| a.kind == Kind::Launcher)
@@ -429,7 +429,7 @@ pub fn home(c: &Ctx, args: &[String]) -> Result<()> {
         None => {
             tv.key(3)?;
             if default_home(tv)?.is_none() {
-                eprintln!("note: no default home app is set, so the TV asks which to use; set one with 'tvbee home --set <app>' (see 'tvbee home --list')");
+                eprintln!("note: no default home app is set, so the TV asks which to use; set one with 'tveee home --set <app>' (see 'tveee home --list')");
             }
             Ok(())
         }
@@ -442,16 +442,16 @@ pub fn home(c: &Ctx, args: &[String]) -> Result<()> {
             }
             if def.is_none() {
                 println!("
-no default set: the TV asks which to use when Home is pressed ('tvbee home --set <app>')");
+no default set: the TV asks which to use when Home is pressed ('tveee home --set <app>')");
             }
             Ok(())
         }
         Some("--set") => {
-            let Some(app) = args.get(1) else { return usage("usage: tvbee home --set <app>  (see 'tvbee home --list')") };
+            let Some(app) = args.get(1) else { return usage("usage: tveee home --set <app>  (see 'tveee home --list')") };
             tv.connect()?;
             let homes = home_activities(tv)?;
             let Some(component) = pick_home(&homes, app) else {
-                return failed(format!("home: {app} isn't a home app on this TV (see 'tvbee home --list')"));
+                return failed(format!("home: {app} isn't a home app on this TV (see 'tveee home --list')"));
             };
             let out = tv.shell(&["cmd", "package", "set-home-activity", component])?;
             if out.contains("Error") || out.contains("Exception") {
@@ -465,7 +465,7 @@ no default set: the TV asks which to use when Home is pressed ('tvbee home --set
                 other => failed(format!("home: asked for {component}, but the default is {}", other.as_deref().unwrap_or("still unset"))),
             }
         }
-        Some(x) => usage(format!("home: unknown option '{x}' (usage: tvbee home [--list | --set <app>])")),
+        Some(x) => usage(format!("home: unknown option '{x}' (usage: tveee home [--list | --set <app>])")),
     }
 }
 
@@ -609,7 +609,7 @@ fn quit(c: &Ctx, args: &[String]) -> Result<()> {
     let force = match args.first().map(String::as_str) {
         None => false,
         Some("--force") => true,
-        Some(_) => return usage("usage: tvbee quit [--force]"),
+        Some(_) => return usage("usage: tveee quit [--force]"),
     };
     let tv = &c.tv;
     tv.connect()?;
@@ -635,7 +635,7 @@ fn apps(c: &Ctx, args: &[String]) -> Result<()> {
         None => false,
         Some("--all") => true,
         Some("--others") => return others(c),
-        Some(_) => return usage("usage: tvbee apps [--all | --others]"),
+        Some(_) => return usage("usage: tveee apps [--all | --others]"),
     };
     let mut installed = Vec::new();
     if !all {
@@ -643,7 +643,7 @@ fn apps(c: &Ctx, args: &[String]) -> Result<()> {
         let out = c.tv.shell(&["cmd", "package", "list", "packages"]).unwrap_or_default();
         installed = out.lines().filter_map(|l| l.strip_prefix("package:")).map(str::to_string).collect();
         if installed.is_empty() {
-            eprintln!("tvbee apps: can't reach the TV, showing every alias");
+            eprintln!("tveee apps: can't reach the TV, showing every alias");
             all = true;
         }
     }
@@ -668,7 +668,7 @@ fn others(c: &Ctx) -> Result<()> {
     gs.sort_by(|a, b| (kind_of(a), &a.package).cmp(&(kind_of(b), &b.package)));
     for g in gs {
         let launchable = if g.component.is_some() { "" } else { "  (not in the TV launcher)" };
-        // tvbee's own table wins over the guess (live TV, the NetTV browser)
+        // tveee's own table wins over the guess (live TV, the NetTV browser)
         println!("{:<8} {}{launchable}", kind_of(&g), g.package);
     }
     Ok(())
@@ -684,7 +684,7 @@ pub fn commands() -> Vec<Command> {
     cmds.extend(super::search::commands());
     cmds.extend([
         Command::new(CAT, "launch", "[--free] [--quiet] <app>", "launch an app", launch).long(
-            "<app> is an alias (see 'tvbee apps'), a package name, or package/activity.\n  'home' goes to the home screen (same as 'tvbee home').\n  --free   run 'tvbee free' first\n  --quiet  mute the TV first",
+            "<app> is an alias (see 'tveee apps'), a package name, or package/activity.\n  'home' goes to the home screen (same as 'tveee home').\n  --free   run 'tveee free' first\n  --quiet  mute the TV first",
         ),
         Command::new(CAT, "foreground", "<app>", "bring an app's existing task to the front", foreground)
             .long("Same app naming as 'launch'. Starts the app if it is not running.")
@@ -698,7 +698,7 @@ pub fn commands() -> Vec<Command> {
         Command::new(CAT, "kill", "<app>", "force-stop one app", kill),
         Command::new(CAT, "free", "", "force-stop idle RAM-hungry apps", free),
         Command::new(CAT, "apps", "[--all | --others]", "list app aliases installed on the TV", apps).long(
-            "Queries the TV and hides aliases whose package isn't installed.\n  --all     list every alias without contacting the TV\n  --others  installed apps without an alias, with the kind tvbee guesses\n            for them (player, store, home, app); cached for a day",
+            "Queries the TV and hides aliases whose package isn't installed.\n  --all     list every alias without contacting the TV\n  --others  installed apps without an alias, with the kind tveee guesses\n            for them (player, store, home, app); cached for a day",
         ),
     ]);
     cmds

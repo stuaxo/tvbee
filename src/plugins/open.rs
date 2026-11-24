@@ -90,7 +90,7 @@ fn candidates(tv: &Tv, url: &str, mime: Option<&str>) -> Result<Vec<String>> {
     Ok(parse_candidates(&tv.shell(&[&cmd])?))
 }
 
-/// The app's name ("YouTube"), or its package if tvbee doesn't know it.
+/// The app's name ("YouTube"), or its package if tveee doesn't know it.
 fn label(component: &str) -> String {
     let pkg = component.split('/').next().unwrap_or(component);
     apps::by_package(pkg).map_or_else(|| pkg.to_string(), |a| a.name.to_string())
@@ -117,12 +117,12 @@ fn choose(tv: &Tv, url: &str, mime: Option<&str>, app: Option<&str>) -> Result<S
             .or(all.first());
         return match pick {
             Some(c) => Ok(c.clone()),
-            None => failed("open: Android would ask which app to use; name one: tvbee open <app> <url>"),
+            None => failed("open: Android would ask which app to use; name one: tveee open <app> <url>"),
         };
     }
     if mime.is_none() && url.starts_with("http") && resolve(tv, PLAIN_WEB, None, None)?.as_deref() == Some(&found) {
         return failed(format!(
-            "open: no app claims this link; only the catch-all web handler ({}) would.\nName an app to force it: tvbee open <app> <url>",
+            "open: no app claims this link; only the catch-all web handler ({}) would.\nName an app to force it: tveee open <app> <url>",
             label(&found)
         ));
     }
@@ -170,10 +170,10 @@ pub fn parse_args(args: &[String]) -> Result<(Option<&str>, &str, bool)> {
         }
     }
     match pos.as_slice() {
-        [url] if apps::is_alias(url) => usage(format!("open: missing url (usage: tvbee open {USAGE})")),
+        [url] if apps::is_alias(url) => usage(format!("open: missing url (usage: tveee open {USAGE})")),
         [url] => Ok((None, url, dry)),
         [app, url] => Ok((Some(app), url, dry)),
-        _ => usage(format!("usage: tvbee open {USAGE}")),
+        _ => usage(format!("usage: tveee open {USAGE}")),
     }
 }
 
@@ -202,10 +202,10 @@ pub fn commands() -> Vec<Command> {
          then Kodi. Links no app claims are refused rather than opened in the\n\
          catch-all web handler.\n\
          \n\
-         <app> is an alias (see 'tvbee apps') or a package, e.g.\n\
-         \x20 tvbee open https://youtu.be/gwLRWgOWhBs\n\
-         \x20 tvbee open vlc http://example.com/film.mkv\n\
-         \x20 tvbee open \"$(tvbee status | sed -n 's/^url: *//p')\"\n\
+         <app> is an alias (see 'tveee apps') or a package, e.g.\n\
+         \x20 tveee open https://youtu.be/gwLRWgOWhBs\n\
+         \x20 tveee open vlc http://example.com/film.mkv\n\
+         \x20 tveee open \"$(tveee status | sed -n 's/^url: *//p')\"\n\
          \x20 --dry-run  say which app would open it, without opening",
     )]
 }

@@ -175,7 +175,7 @@ pub fn progress_bar(p: &Progress, width: usize) -> String {
 
 /// Everything `status` knows how to say about the foreground app `pkg`.
 pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> {
-    // only look the app up on the TV (cached a day) when tvbee doesn't know it
+    // only look the app up on the TV (cached a day) when tveee doesn't know it
     let who = match apps::by_package(pkg) {
         Some(a) => Some((a.name.to_string(), a.kind)),
         None => apps::identify(pkg, &apps::guesses(tv)),

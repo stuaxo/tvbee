@@ -57,7 +57,7 @@ fn input(c: &Ctx, args: &[String]) -> Result<()> {
         None => {
             let mut names: Vec<_> = INPUTS.iter().map(|(n, _)| *n).collect();
             names.sort();
-            usage(format!("usage: tvbee input {}", names.join("|")))
+            usage(format!("usage: tveee input {}", names.join("|")))
         }
     }
 }
@@ -74,7 +74,7 @@ fn inputs(c: &Ctx, args: &[String]) -> Result<()> {
     let all = match args.first().map(String::as_str) {
         None => false,
         Some("--all") => true,
-        Some(_) => return usage("usage: tvbee inputs [--all]"),
+        Some(_) => return usage("usage: tveee inputs [--all]"),
     };
     if !all {
         // what the TV's own input framework reports (format varies by firmware)
@@ -92,7 +92,7 @@ fn inputs(c: &Ctx, args: &[String]) -> Result<()> {
             println!("{}", found.join("\n"));
             return Ok(());
         }
-        eprintln!("tvbee inputs: nothing from the TV, showing the inputs this program supports");
+        eprintln!("tveee inputs: nothing from the TV, showing the inputs this program supports");
     }
     supported_inputs();
     Ok(())
@@ -106,7 +106,7 @@ fn channel(c: &Ctx, args: &[String]) -> Result<()> {
             c.tv.connect()?;
             channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))
         }
-        _ => usage("usage: tvbee channel up|down|<number>"),
+        _ => usage("usage: tveee channel up|down|<number>"),
     }
 }
 
@@ -117,17 +117,17 @@ pub fn commands() -> Vec<Command> {
         Command::new(CAT, "home", "[--list | --set <app>]", "go to the home screen, or choose the home app", super::apps::home).long(
             "With no options, presses Home.\n\
              \x20 --list        the installed home apps (launchers); * marks the default\n\
-             \x20 --set <app>   make <app> the default home app, e.g. 'tvbee home --set projectivy'\n\
+             \x20 --set <app>   make <app> the default home app, e.g. 'tveee home --set projectivy'\n\
              \x20               (an alias, a package, or package/activity)\n\
              \n\
              With no default set, Android asks which home app to use every time Home is\n\
-             pressed (including tvbee's 'home' and the ui's h key).",
+             pressed (including tveee's 'home' and the ui's h key).",
         ),
         Command::new(CAT, "back", "", "press the back button", |c, _| c.tv.key(4)),
         Command::new(CAT, "text", "\"<string>\"", "type text into the focused field", text),
         Command::new(CAT, "input", "<name>", "switch input source", input),
         Command::new(CAT, "inputs", "[--all]", "list the TV's input sources", inputs)
-            .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tvbee input' supports, without contacting the TV"),
+            .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
         Command::new(CAT, "channel", "up|down|<number>", "change TV channel", channel).aliases(&["ch"]),
     ]
 }

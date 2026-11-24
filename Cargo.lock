@@ -1560,7 +1560,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tvbee"
+name = "tveee"
 version = "0.1.0"
 dependencies = [
  "diesel",

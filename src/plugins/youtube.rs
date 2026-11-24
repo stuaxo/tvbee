@@ -2,7 +2,7 @@
 //! and commands that look inside the app.
 //!
 //! The YouTube TV app is a web app run by Google's Cobalt engine, which opens
-//! a devtools socket. tvbee reads the page through it ([`crate::devtools`]):
+//! a devtools socket. tveee reads the page through it ([`crate::devtools`]):
 //! the route (`tv#/watch?v=...`), the focused element, the video. Enabled when
 //! the app is installed.
 
@@ -292,7 +292,7 @@ fn youtube(c: &Ctx, args: &[String]) -> Result<()> {
             println!("{}", restart(&c.tv)?);
             Ok(())
         }
-        None => usage("usage: tvbee youtube page [--json] | restart"),
+        None => usage("usage: tveee youtube page [--json] | restart"),
         Some(x) => usage(format!("youtube: unknown action '{x}' (try: page, restart)")),
     }
 }
@@ -314,7 +314,7 @@ pub fn commands() -> Vec<Command> {
          \n\
          \x20 restart       close YouTube and reopen it at the same point of the same\n\
          \x20               video (or at home). Fixes a frozen picture: you hear the\n\
-         \x20               video but see an old screen. tvbee also closes YouTube before\n\
+         \x20               video but see an old screen. tveee also closes YouTube before\n\
          \x20               sending it links (open, search, goto), which avoids that,\n\
          \x20               unless it's in front: then the link is handed to the page\n\
          \x20               it's showing, as Android would, without closing it.",

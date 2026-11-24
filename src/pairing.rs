@@ -1,12 +1,12 @@
-//! Pairing: one-time trust set up between tvbee and a service on the TV
+//! Pairing: one-time trust set up between tveee and a service on the TV
 //! (Philips' JointSpace API today; others such as Android TV Remote, Sony or
 //! LG APIs could follow). Plugins register pairings with
-//! `Plugin::with_pairings`; `tvbee pair`, `unpair` and `pairings` drive them,
+//! `Plugin::with_pairings`; `tveee pair`, `unpair` and `pairings` drive them,
 //! and anything that needs one calls [`require`] to get the saved
 //! credentials or a "pairing required" error.
 //!
 //! Credentials are saved per pairing and TV in
-//! `~/.config/tvbee/pairings/<id>-<ip>.txt` (readable only by you).
+//! `~/.config/tveee/pairings/<id>-<ip>.txt` (readable only by you).
 
 use crate::error::{failed, usage, Error, Result};
 use crate::registry::Command;
@@ -42,12 +42,12 @@ impl Saved {
     }
 }
 
-/// A service tvbee can pair with.
+/// A service tveee can pair with.
 pub trait Pairing: Sync {
-    /// Short id: `tvbee pair <id>`.
+    /// Short id: `tveee pair <id>`.
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
-    /// What pairing makes possible, for `tvbee pairings` and errors.
+    /// What pairing makes possible, for `tveee pairings` and errors.
     fn unlocks(&self) -> &'static str;
     /// What the user will have to do ("the TV shows a PIN; type it here").
     fn how(&self) -> &'static str;
@@ -90,7 +90,7 @@ fn save(id: &str, ip: &str, saved: &Saved) -> Result<PathBuf> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(&path, saved.render(&format!("{id} pairing with {ip} (tvbee pair {id})")))?;
+    std::fs::write(&path, saved.render(&format!("{id} pairing with {ip} (tveee pair {id})")))?;
     // it's a password for the TV
     #[cfg(unix)]
     {
@@ -104,7 +104,7 @@ fn save(id: &str, ip: &str, saved: &Saved) -> Result<PathBuf> {
 pub fn required_error(id: &str, what: &str) -> Error {
     let how = by_id(id).map_or(String::new(), |p| format!(" ({})", p.how()));
     let name = by_id(id).map_or(id, |p| p.name());
-    Error::Failed(format!("{what} needs tvbee to be paired with {name}: run 'tvbee pair {id}'{how}"))
+    Error::Failed(format!("{what} needs tveee to be paired with {name}: run 'tveee pair {id}'{how}"))
 }
 
 /// The saved credentials for `id`, or the "pairing required" error.
@@ -114,13 +114,13 @@ pub fn require(id: &str, tv: &Tv, what: &str) -> Result<Saved> {
 
 fn pair(c: &Ctx, args: &[String]) -> Result<()> {
     let p = match args {
-        [id] => by_id(id).map_or_else(|| usage(format!("pair: no pairing called '{id}' here (see 'tvbee pairings')")), Ok)?,
+        [id] => by_id(id).map_or_else(|| usage(format!("pair: no pairing called '{id}' here (see 'tveee pairings')")), Ok)?,
         [] => match all() {
             [one] => *one,
-            [] => return failed("pair: nothing to pair with on this TV (see 'tvbee pairings')"),
-            _ => return usage("pair: say which: tvbee pair <id> (see 'tvbee pairings')"),
+            [] => return failed("pair: nothing to pair with on this TV (see 'tveee pairings')"),
+            _ => return usage("pair: say which: tveee pair <id> (see 'tveee pairings')"),
         },
-        _ => return usage("usage: tvbee pair [<id>]"),
+        _ => return usage("usage: tveee pair [<id>]"),
     };
     if load(p.id(), &c.tv.ip).is_some() {
         println!("(already paired with {} on {}; pairing again replaces it)", p.name(), c.tv.ip);
@@ -135,11 +135,11 @@ fn pair(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 fn unpair(c: &Ctx, args: &[String]) -> Result<()> {
-    let [id] = args else { return usage("usage: tvbee unpair <id>") };
+    let [id] = args else { return usage("usage: tveee unpair <id>") };
     match file(id, &c.tv.ip).filter(|f| f.exists()) {
         Some(f) => {
             std::fs::remove_file(f)?;
-            println!("forgot the {id} pairing with {} (the TV may still list tvbee; remove it there if you like)", c.tv.ip);
+            println!("forgot the {id} pairing with {} (the TV may still list tveee; remove it there if you like)", c.tv.ip);
             Ok(())
         }
         None => failed(format!("unpair: not paired with {id} on {}", c.tv.ip)),
@@ -159,14 +159,14 @@ fn pairings(c: &Ctx, _: &[String]) -> Result<()> {
 
 pub fn commands() -> Vec<Command> {
     vec![
-        Command::new("pairing", "pair", "[<id>]", "pair tvbee with a service on the TV", pair).long(
-            "Some TV services need a one-time pairing before tvbee can use them (on\n\
+        Command::new("pairing", "pair", "[<id>]", "pair tveee with a service on the TV", pair).long(
+            "Some TV services need a one-time pairing before tveee can use them (on\n\
              Philips TVs, the JointSpace API: the TV shows a PIN, you type it here).\n\
-             With one pairing available, the id can be left out. 'tvbee pairings' lists\n\
-             them. Saved in ~/.config/tvbee/pairings/ (readable only by you).",
+             With one pairing available, the id can be left out. 'tveee pairings' lists\n\
+             them. Saved in ~/.config/tveee/pairings/ (readable only by you).",
         ),
         Command::new("pairing", "unpair", "<id>", "forget a saved pairing", unpair),
-        Command::new("pairing", "pairings", "", "services tvbee can pair with, and whether it has", pairings),
+        Command::new("pairing", "pairings", "", "services tveee can pair with, and whether it has", pairings),
     ]
 }
 
@@ -188,6 +188,6 @@ mod tests {
     fn registry_and_errors() {
         assert!(by_id("jointspace").is_some());
         let e = required_error("jointspace", "the channel list").to_string();
-        assert!(e.starts_with("the channel list needs tvbee to be paired with") && e.contains("tvbee pair jointspace"), "{e}");
+        assert!(e.starts_with("the channel list needs tveee to be paired with") && e.contains("tveee pair jointspace"), "{e}");
     }
 }

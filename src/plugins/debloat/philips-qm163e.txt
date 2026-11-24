@@ -1,5 +1,5 @@
-# tvbee debloat profile. One entry per line; after the fields, the rest of the
-# line is the reason, shown by `tvbee debloat list` and `status`.
+# tveee debloat profile. One entry per line; after the fields, the rest of the
+# line is the reason, shown by `tveee debloat list` and `status`.
 #
 #   profile   <name>
 #   model     <ro.product.model this was made for>   (warns on other TVs)

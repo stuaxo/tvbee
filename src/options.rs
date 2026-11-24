@@ -1,6 +1,6 @@
-//! tvbee's own settings (not the TV's): on/off options kept in
-//! `~/.config/tvbee/options.txt` as `name=on|off`. Set from the UI's options
-//! dialog (`,`) or `tvbee options`.
+//! tveee's own settings (not the TV's): on/off options kept in
+//! `~/.config/tveee/options.txt` as `name=on|off`. Set from the UI's options
+//! dialog (`,`) or `tveee options`.
 
 use crate::error::{failed, usage, Result};
 use crate::registry::Command;
@@ -68,7 +68,7 @@ pub fn get(name: &str) -> bool {
 /// Set option `name` and save every option.
 pub fn set(name: &str, on: bool) -> Result<()> {
     if !OPTIONS.iter().any(|o| o.name == name) {
-        return usage(format!("options: no option '{name}' (see 'tvbee options')"));
+        return usage(format!("options: no option '{name}' (see 'tveee options')"));
     }
     let mut all = saved();
     all.retain(|(k, _)| k != name);
@@ -77,7 +77,7 @@ pub fn set(name: &str, on: bool) -> Result<()> {
     if let Some(dir) = f.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mut text = String::from("# tvbee options (tvbee options, or , in the ui)\n");
+    let mut text = String::from("# tveee options (tveee options, or , in the ui)\n");
     for o in OPTIONS {
         if let Some((_, v)) = all.iter().find(|(k, _)| k == o.name) {
             text.push_str(&format!("{}={}\n", o.name, if *v { "on" } else { "off" }));
@@ -100,19 +100,19 @@ fn options(_: &Ctx, args: &[String]) -> Result<()> {
             let on = match v.as_str() {
                 "on" => true,
                 "off" => false,
-                _ => return usage("usage: tvbee options [<name> on|off]"),
+                _ => return usage("usage: tveee options [<name> on|off]"),
             };
             set(name, on)?;
             println!("{name}: {v}");
             Ok(())
         }
-        _ => usage("usage: tvbee options [<name> on|off]"),
+        _ => usage("usage: tveee options [<name> on|off]"),
     }
 }
 
 pub fn commands() -> Vec<Command> {
-    vec![Command::new("options", "options", "[<name> on|off]", "tvbee's own settings: list them, or set one", options).long(
-        "Saved in ~/.config/tvbee/options.txt. In the ui, ',' opens the same options.",
+    vec![Command::new("options", "options", "[<name> on|off]", "tveee's own settings: list them, or set one", options).long(
+        "Saved in ~/.config/tveee/options.txt. In the ui, ',' opens the same options.",
     )]
 }
 

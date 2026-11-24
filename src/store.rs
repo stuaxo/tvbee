@@ -1,4 +1,4 @@
-//! tvbee's local cache of what it reads from TVs (the programme guide and
+//! tveee's local cache of what it reads from TVs (the programme guide and
 //! its descriptions so far), in SQLite through Diesel.
 //!
 //! Everything here is a copy of something on a TV, kept with where it came
@@ -8,7 +8,7 @@
 //! only the user has (options, pairings, favourite changes not on the TV
 //! yet) stays in files in the config folder instead.
 //!
-//! The database is `~/.cache/tvbee/tvbee.sqlite`, shared by every TV (rows
+//! The database is `~/.cache/tveee/tveee.sqlite`, shared by every TV (rows
 //! carry the TV's address).
 
 use crate::error::{Error, Result};
@@ -104,11 +104,11 @@ struct FetchRow<'a> {
 }
 
 fn db_err(e: impl std::fmt::Display) -> Error {
-    Error::Failed(format!("tvbee's cache database: {e}"))
+    Error::Failed(format!("tveee's cache database: {e}"))
 }
 
 fn path() -> Option<std::path::PathBuf> {
-    Some(crate::plugin::cache_path("x")?.with_file_name("tvbee.sqlite"))
+    Some(crate::plugin::cache_path("x")?.with_file_name("tveee.sqlite"))
 }
 
 /// Open the database at `path`, (re)building it if it's from another schema.
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn keeps_descriptions_and_rebuilds_on_a_new_schema() {
-        let dir = std::env::temp_dir().join(format!("tvbee-store-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tveee-store-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("t.sqlite").to_string_lossy().into_owned();
         let mut c = open_at(&file).unwrap();
