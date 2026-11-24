@@ -175,6 +175,61 @@ pub fn lights(tv: &Tv, swatch: bool) -> Result<Vec<String>> {
         .collect())
 }
 
+/// Whether `system` (a `/6/system` reply) lists Ambilight among the TV's features.
+pub fn lists_ambilight(system: &str) -> bool {
+    system.find("\"ambilight\"").is_some_and(|i| system[i..].split(']').next().is_some_and(|l| l.contains("\"Ambilight\"")))
+}
+
+/// Whether the TV has Ambilight tveee can control: Philips support on
+/// (the plugin), and the TV says so in its public system info (no pairing
+/// needed). Asked once a run (when the TV answers).
+pub fn has_ambilight(tv: &Tv) -> bool {
+    static KNOWN: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+    if crate::pairing::by_id("jointspace").is_none() {
+        return false;
+    }
+    let mut known = KNOWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(k) = *known {
+        return k;
+    }
+    let Ok((200, system)) = crate::http::get(&tv.ip, 1925, "/6/system") else { return false };
+    let has = lists_ambilight(&system);
+    *known = Some(has);
+    has
+}
+
+/// What the ui's Ambilight panel shows.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub enum Panel {
+    /// No Ambilight here (or no way to control it).
+    Missing,
+    /// It has one, but tveee isn't paired with the TV yet.
+    NeedsPairing,
+    /// The state (as [`status`] lines) and each light's colour now.
+    Shown { status: Vec<String>, lights: Vec<Light> },
+    Failed(String),
+}
+
+/// Everything the panel shows, read in one go.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn panel(tv: &Tv) -> Panel {
+    if !has_ambilight(tv) {
+        return Panel::Missing;
+    }
+    if crate::pairing::load("jointspace", &tv.ip).is_none() {
+        return Panel::NeedsPairing;
+    }
+    let (status, lights) = std::thread::scope(|sc| {
+        let l = sc.spawn(|| get(tv, "/6/ambilight/processed").map(|j| parse_lights(&j)));
+        (status(tv), l.join().unwrap_or_else(|_| failed("ambilight: a read failed")))
+    });
+    match status {
+        Ok(status) => Panel::Shown { status, lights: lights.unwrap_or_default() },
+        Err(e) => Panel::Failed(e.to_string()),
+    }
+}
+
 /// What the lights are doing, as lines.
 pub fn status(tv: &Tv) -> Result<Vec<String>> {
     tv.connect()?;
@@ -400,6 +455,13 @@ mod tests {
         assert_eq!(l[0], Light { layer: 1, side: "left".into(), n: 0, rgb: (35, 40, 44) });
         assert_eq!((l[2].side.as_str(), l[2].n, l[2].rgb), ("right", 0, (29, 29, 54)));
         assert!(parse_lights("{}").is_empty());
+    }
+
+    #[test]
+    fn finds_ambilight_in_the_features() {
+        assert!(lists_ambilight(r#"{"featuring":{"jsonfeatures":{"ambilight":["LoungeLight","Hue","Ambilight"],"menuitems":["Setup_Menu"]}}}"#));
+        assert!(!lists_ambilight(r#"{"featuring":{"jsonfeatures":{"ambilight":[],"menuitems":["Ambilight"]}}}"#));
+        assert!(!lists_ambilight(r#"{"featuring":{"jsonfeatures":{"menuitems":["Setup_Menu"]}}}"#));
     }
 
     #[test]

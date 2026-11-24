@@ -90,6 +90,50 @@ fn read_pin() -> Result<String> {
     Ok(pin)
 }
 
+/// A JointSpace pairing under way: the TV is showing a PIN.
+#[derive(Debug, Clone)]
+pub struct PairStart {
+    id: String,
+    key: String,
+    timestamp: i64,
+}
+
+/// Ask the TV to pair: it shows a PIN for about a minute (for [`pair_finish`]).
+pub fn pair_start(tv: &Tv) -> Result<PairStart> {
+    let id = new_device_id();
+    let ask = format!(r#"{{"scope":["read","write","control"],"device":{}}}"#, device_json(&id));
+    let (status, reply) =
+        crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, "/6/pair/request"), body: Some(&ask), digest: None, timeout_secs: 15 })?;
+    let key = crate::http::string_field(&reply, "auth_key");
+    let timestamp = crate::http::number_field(&reply, "timestamp").map(|t| t as i64);
+    let (Some(key), Some(timestamp)) = (key, timestamp) else {
+        return failed(format!("pair: the TV didn't start pairing (HTTP {status}): {}", reply.trim()));
+    };
+    Ok(PairStart { id, key, timestamp })
+}
+
+/// Finish pairing with the PIN the TV showed; returns what to save.
+pub fn pair_finish(tv: &Tv, s: &PairStart, pin: &str) -> Result<crate::pairing::Saved> {
+    let pin = pin.trim();
+    let grant = format!(
+        r#"{{"auth":{{"auth_AppId":"1","pin":"{pin}","auth_timestamp":{},"auth_signature":"{}"}},"device":{}}}"#,
+        s.timestamp,
+        pairing_signature(s.timestamp, pin),
+        device_json(&s.id)
+    );
+    let (status, reply) = crate::https::request(&crate::https::Request {
+        url: &https_url(&tv.ip, "/6/pair/grant"),
+        body: Some(&grant),
+        digest: Some((&s.id, &s.key)),
+        timeout_secs: 15,
+    })?;
+    let ok = status == 200 && crate::http::string_field(&reply, "error_id").is_none_or(|e| e == "SUCCESS");
+    if !ok {
+        return failed(format!("pair: the TV refused (HTTP {status}): {}", reply.trim()));
+    }
+    Ok(crate::pairing::Saved(vec![("user".into(), s.id.clone()), ("key".into(), s.key.clone())]))
+}
+
 /// Pairing with Philips' JointSpace API: the TV shows a PIN, the user types
 /// it, and the TV grants a key used for digest auth from then on.
 pub struct JointSpace;
@@ -110,33 +154,10 @@ impl crate::pairing::Pairing for JointSpace {
     }
 
     fn pair(&self, tv: &Tv) -> Result<crate::pairing::Saved> {
-        let id = new_device_id();
-        let device = device_json(&id);
-        let ask = format!(r#"{{"scope":["read","write","control"],"device":{device}}}"#);
         println!("asking {} to pair...", tv.ip);
-        let (status, reply) =
-            crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, "/6/pair/request"), body: Some(&ask), digest: None, timeout_secs: 15 })?;
-        let key = crate::http::string_field(&reply, "auth_key");
-        let timestamp = crate::http::number_field(&reply, "timestamp").map(|t| t as i64);
-        let (Some(key), Some(timestamp)) = (key, timestamp) else {
-            return failed(format!("pair: the TV didn't start pairing (HTTP {status}): {}", reply.trim()));
-        };
+        let started = pair_start(tv)?;
         let pin = read_pin()?;
-        let grant = format!(
-            r#"{{"auth":{{"auth_AppId":"1","pin":"{pin}","auth_timestamp":{timestamp},"auth_signature":"{}"}},"device":{device}}}"#,
-            pairing_signature(timestamp, &pin)
-        );
-        let (status, reply) = crate::https::request(&crate::https::Request {
-            url: &https_url(&tv.ip, "/6/pair/grant"),
-            body: Some(&grant),
-            digest: Some((&id, &key)),
-            timeout_secs: 15,
-        })?;
-        let ok = status == 200 && crate::http::string_field(&reply, "error_id").is_none_or(|e| e == "SUCCESS");
-        if !ok {
-            return failed(format!("pair: the TV refused (HTTP {status}): {}", reply.trim()));
-        }
-        Ok(crate::pairing::Saved(vec![("user".into(), id), ("key".into(), key)]))
+        pair_finish(tv, &started, &pin)
     }
 
     /// What the TV is doing now: a read only pairing allows.

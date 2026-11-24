@@ -40,6 +40,11 @@ pub enum Action {
     Jump(f64),
     Volume(i32),
     Mute,
+    /// The Ambilight panel opened (true) or closed: the refresh reads it while open.
+    AmbilightPanel(bool),
+    /// Ask the TV to pair (it shows a PIN), then finish with the PIN typed.
+    PairStart,
+    PairFinish(String),
     /// Mute or unmute, the ui knowing which it is now (true: muted): one key,
     /// without reading the audio state first.
     MuteKnown(bool),
@@ -101,6 +106,10 @@ pub enum Input {
     ToggleMode,
     ToggleHelp,
     ToggleInfo,
+    /// The Ambilight panel (TVs that have one).
+    ToggleAmbilight,
+    /// Pair with the TV's API (from the Ambilight panel).
+    Pair,
     OpenMenu,
     OpenApps,
     OpenSearch,
@@ -136,6 +145,8 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('?'), _) => Input::ToggleHelp,
         (KeyCode::Char('.'), _) => Input::OpenMenu,
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
+        (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
+        (KeyCode::Char('P'), _) => Input::Pair,
         (KeyCode::Char('a'), _) => Input::OpenApps,
         (KeyCode::Char('g'), _) => Input::OpenGuide,
         (KeyCode::Char(','), _) => Input::OpenOptions,
@@ -195,7 +206,7 @@ pub enum Lane {
 pub fn lane(a: &Action) -> Lane {
     match a {
         Action::Key(_) | Action::Text(_) => Lane::Keys,
-        Action::LoadGuide | Action::CheckRunning => Lane::Read,
+        Action::LoadGuide | Action::CheckRunning | Action::AmbilightPanel(_) => Lane::Read,
         Action::PrefetchInfo => Lane::Idle,
         _ => Lane::Act,
     }
@@ -205,6 +216,11 @@ pub fn lane(a: &Action) -> Lane {
 /// something. Ends when the UI hangs up.
 fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender<Action>)]) {
     for a in actions {
+        // not work for anyone: what the refresh should read
+        if let Action::AmbilightPanel(on) = a {
+            shared.ambilight.store(on, Ordering::Relaxed);
+            continue;
+        }
         let l = lane(&a);
         if l != Lane::Idle {
             shared.touched();
@@ -290,6 +306,8 @@ struct Snapshot {
     standby: bool,
     /// For the system panel.
     system: info::System,
+    /// For the Ambilight panel, while it's open.
+    ambilight: Option<crate::plugins::ambilight::Panel>,
     /// "player" or "player, guessed": what kind of app is in front.
     kind: Option<String>,
     power: Option<String>,
@@ -319,6 +337,10 @@ enum Msg {
     Guide(std::result::Result<Guide, String>),
     /// A programme's description (channel, start).
     Info((u32, i64), std::result::Result<Option<String>, String>),
+    /// Whether the TV has Ambilight tveee can control.
+    Ambilight(bool),
+    /// Pairing: the TV is showing a PIN; ask for it.
+    AskPin,
 }
 
 /// A channel in the guide pop-up, with its programmes for the next day.
@@ -641,6 +663,8 @@ struct Shared {
     channel_stale: AtomicBool,
     /// The first refresh has been shown (background work waits for it).
     shown: AtomicBool,
+    /// The Ambilight panel is open: the refresh reads the lights too.
+    ambilight: AtomicBool,
     /// The launcher's apps have been sent (held while they're being read, so
     /// they're read once, by whichever lane gets there first).
     apps_sent: std::sync::Mutex<bool>,
@@ -669,6 +693,7 @@ impl Shared {
             input_at: std::sync::Mutex::new(Instant::now()),
             channel_stale: AtomicBool::new(true),
             shown: AtomicBool::new(false),
+            ambilight: AtomicBool::new(false),
             apps_sent: std::sync::Mutex::new(false),
         }
     }
@@ -799,7 +824,9 @@ impl Refresher {
     fn snapshot(&mut self) -> Result<Snapshot> {
         self.tv.connect()?;
         let tv = &self.tv;
-        let (power, window, media_dump, audio, system) = std::thread::scope(|sc| {
+        let watch_lights = self.shared.ambilight.load(Ordering::Relaxed);
+        let (power, window, media_dump, audio, system, ambilight) = std::thread::scope(|sc| {
+            let l = sc.spawn(move || watch_lights.then(|| crate::plugins::ambilight::panel(tv)));
             let p = sc.spawn(|| tv.shell(&["dumpsys", "power"]));
             let w = sc.spawn(|| tv.window_dump());
             let m = sc.spawn(|| tv.shell(&["dumpsys", "media_session"]));
@@ -808,7 +835,7 @@ impl Refresher {
             let j = |h: std::thread::ScopedJoinHandle<'_, Result<String>>| h.join().unwrap_or_else(|_| Ok(String::new()));
             // the system figures only feed the optional panel
             let y = y.join().ok().and_then(|r| r.ok()).unwrap_or_default();
-            (j(p), j(w), j(m), a, y)
+            (j(p), j(w), j(m), a, y, l.join().ok().flatten())
         });
         let (power, window, audio) = (power?, window?, audio?);
         let media_dump = media_dump.unwrap_or_default();
@@ -865,6 +892,7 @@ impl Refresher {
             power: power.lines().find_map(|l| l.trim().strip_prefix("mWakefulness=")).map(str::to_string),
             focus: info::focus_window(&window),
             system,
+            ambilight,
         })
     }
 }
@@ -880,6 +908,8 @@ struct Actor {
     wake: Sender<()>,
     /// The read lane (to update the running apps after launching, closing).
     reads: Sender<Action>,
+    /// A pairing under way: the TV is showing a PIN.
+    pairing: Option<crate::plugins::philips::PairStart>,
 }
 
 impl Actor {
@@ -1030,7 +1060,18 @@ impl Actor {
             }
             Action::Refresh => "refreshed".into(),
             // other lanes' actions don't come here
-            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo => String::new(),
+            Action::PairStart => {
+                self.pairing = Some(crate::plugins::philips::pair_start(&self.tv)?);
+                let _ = tx.send(Msg::AskPin);
+                "the TV is showing a PIN: type it in".into()
+            }
+            Action::PairFinish(pin) => {
+                let Some(started) = self.pairing.take() else { return Err(crate::error::Error::Failed("pairing: start again (P)".into())) };
+                let saved = crate::plugins::philips::pair_finish(&self.tv, &started, &pin)?;
+                crate::pairing::save("jointspace", &self.tv.ip, &saved)?;
+                "paired with the TV".into()
+            }
+            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo | Action::AmbilightPanel(_) => String::new(),
         })
     }
 }
@@ -1069,6 +1110,10 @@ fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg>) {
 /// asked to.
 fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
     let tv = shared.tv();
+    // whether there's an Ambilight panel to offer (one quick, public read)
+    if tx.send(Msg::Ambilight(crate::plugins::ambilight::has_ambilight(&tv))).is_err() {
+        return;
+    }
     // the launcher's apps (unless opening the launcher got them first), then
     // the apps the search box can search
     loop {
@@ -1169,6 +1214,9 @@ struct App {
     settling: Option<Settling>,
     /// Off (`--no-settle`): show every state the TV reports, as it comes.
     settle: bool,
+    /// The TV has Ambilight tveee can control; and whether its panel is open.
+    ambi_supported: bool,
+    ambi_open: bool,
     /// The guide pop-up's rows; None until fetched.
     guide: Option<std::result::Result<Guide, String>>,
     /// How many GUIDE_STEPs ahead of now the guide shows.
@@ -1293,6 +1341,8 @@ const GRAPH_ROWS: u16 = 3;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Overlay {
     None,
+    /// Typing the PIN the TV shows, to pair (the text is `App::prompt`).
+    Pin,
     Help,
     /// The "more" menu, with the highlighted item.
     Menu(usize),
@@ -1627,6 +1677,8 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
             // anything else, including Enter on "No", cancels
             _ => (Overlay::None, None),
         },
+        // handled where it's typed (the PIN is `App::prompt`)
+        Overlay::Pin => (Overlay::Pin, None),
     }
 }
 
@@ -1688,7 +1740,7 @@ const fn button(key: &'static str, label: &'static str, input: Input) -> Button 
     Button { key, label, input }
 }
 
-fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
+fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
     use Action::*;
     use Input::{Do, OpenMenu, Quit, ToggleHelp, ToggleMode};
     let mut b = match mode {
@@ -1718,6 +1770,7 @@ fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
                 button("", "vol+", Do(Volume(1))),
                 button("", "vol-", Do(Volume(-1))),
                 button("", "info", Input::ToggleInfo),
+                button("", "ambilight", Input::ToggleAmbilight),
                 button("", "apps", Input::OpenApps),
                 button("", "search", Input::OpenSearch),
                 button("", "guide", Input::OpenGuide),
@@ -1732,6 +1785,7 @@ fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
         button("h", "home", Do(Key(KEY_HOME))),
         button("tab", if mode == Mode::Player { "remote" } else { "player" }, ToggleMode),
         button("i", "info", Input::ToggleInfo),
+        button("l", "ambilight", Input::ToggleAmbilight),
         button("a", "apps", Input::OpenApps),
         button("/", "search", Input::OpenSearch),
         button("g", "guide", Input::OpenGuide),
@@ -1740,6 +1794,9 @@ fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
         button("?", "help", ToggleHelp),
         button("q", "quit", Quit),
     ]);
+    if !ambilight {
+        b.retain(|x| x.label != "ambilight");
+    }
     b
 }
 
@@ -1793,6 +1850,11 @@ impl App {
             Msg::Apps(list) => self.apps = Some(list),
             Msg::Searchable(list) => self.searchable = Some(list),
             Msg::Running(set, fixed) => (self.running, self.fixed) = (set, fixed),
+            Msg::Ambilight(has) => self.ambi_supported = has,
+            Msg::AskPin => {
+                self.prompt.clear();
+                self.overlay = Overlay::Pin;
+            }
             Msg::Info(key, info) => {
                 self.infos_asked.remove(&key);
                 let info = info.unwrap_or_else(|e| Some(format!("(couldn't read the description: {e})")));
@@ -2072,6 +2134,17 @@ impl App {
             }
             Input::ToggleHelp => self.overlay = Overlay::Help,
             Input::ToggleInfo => self.info = !self.info,
+            Input::ToggleAmbilight if !self.ambi_supported => {
+                self.note = "no Ambilight here that tveee can control".into();
+            }
+            Input::ToggleAmbilight => {
+                self.ambi_open = !self.ambi_open;
+                let _ = actions.send(Action::AmbilightPanel(self.ambi_open));
+            }
+            Input::Pair => {
+                self.note = "asking the TV to pair...".into();
+                let _ = actions.send(Action::PairStart);
+            }
             Input::OpenSearch => self.open_search(None),
             Input::OpenGuide => self.open_guide(None, actions),
             Input::OpenOptions => self.overlay = Overlay::Options(0),
@@ -2238,6 +2311,12 @@ impl App {
                 }
             }
             (Overlay::None, _) => {}
+            // the PIN box: a click outside it cancels
+            (Overlay::Pin, Some(Hit::Popup)) => {}
+            (Overlay::Pin, _) => {
+                self.overlay = Overlay::None;
+                self.note = "pairing cancelled".into();
+            }
         }
         false
     }
@@ -2283,7 +2362,7 @@ impl App {
         let area = outer.inner(f.area());
         f.render_widget(outer, f.area());
 
-        let bs = buttons(self.mode, self.snap.as_ref().is_some_and(|s| s.exact));
+        let bs = buttons(self.mode, self.snap.as_ref().is_some_and(|s| s.exact), self.ambi_supported);
         let places = flow(&bs, area.width);
         let rows = places.iter().map(|(r, _)| r + 1).max().unwrap_or(1);
         let [body, _, footer, status] = Layout::vertical([
@@ -2294,6 +2373,15 @@ impl App {
         ])
         .areas(area);
 
+        let body = if self.ambi_open && self.ambi_supported {
+            let want = self.ambilight_height();
+            let h = want.min(body.height.saturating_sub(4));
+            let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
+            self.draw_ambilight(f, panel);
+            top
+        } else {
+            body
+        };
         let body = if self.info {
             let want = self.panel_height();
             // keep at least 4 rows for what's playing
@@ -2442,6 +2530,73 @@ impl App {
     }
 
     /// Rows the system panel wants, borders included.
+    /// The Ambilight panel's lines: state, or what's needed.
+    fn ambilight_lines(&self) -> Vec<(Line<'static>, Option<Hit>)> {
+        use crate::plugins::ambilight::Panel;
+        let dim = Style::new().fg(Color::DarkGray);
+        match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+            None => vec![(Line::from("reading the Ambilight...").italic(), None)],
+            Some(Panel::Missing) => vec![(Line::from("no Ambilight here that tveee can control"), None)],
+            Some(Panel::NeedsPairing) => vec![
+                (Line::from("tveee isn't paired with the TV yet, which Ambilight needs."), None),
+                (
+                    Line::from(vec![Span::styled(" P ", Style::new().fg(Color::Black).bg(Color::Yellow)), Span::raw(" pair now: the TV shows a PIN to type in")]),
+                    Some(Hit::Input(Input::Pair)),
+                ),
+            ],
+            Some(Panel::Failed(e)) => vec![(Line::from(format!("! {e}")).fg(Color::Red), None)],
+            Some(Panel::Shown { status, lights }) => {
+                let mut out: Vec<(Line<'static>, Option<Hit>)> = status
+                    .iter()
+                    .filter(|l| !l.starts_with("lights:"))
+                    .map(|l| {
+                        let (k, v) = l.split_once(':').unwrap_or((l, ""));
+                        (Line::from(vec![Span::styled(format!("{k:<9}"), dim), Span::raw(v.trim().to_string())]), None)
+                    })
+                    .collect();
+                // a block of each light's colour, a row per side
+                let mut sides: Vec<&str> = Vec::new();
+                for l in lights {
+                    if !sides.contains(&l.side.as_str()) {
+                        sides.push(&l.side);
+                    }
+                }
+                for side in sides {
+                    let mut spans = vec![Span::styled(format!("{side:<9}"), dim)];
+                    for l in lights.iter().filter(|l| l.side == side) {
+                        let (r, g, b) = l.rgb;
+                        spans.push(Span::styled("      ", Style::new().bg(Color::Rgb(r, g, b))));
+                        spans.push(Span::raw(" "));
+                    }
+                    out.push((Line::from(spans), None));
+                }
+                out
+            }
+        }
+    }
+
+    fn ambilight_height(&self) -> u16 {
+        u16::try_from(self.ambilight_lines().len()).unwrap_or(1) + 2
+    }
+
+    /// The Ambilight panel: power, mode, style, Hue, and each light's colour now.
+    fn draw_ambilight(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let block = Block::bordered().title(" ambilight - l hides, . for styles ").border_style(Style::new().fg(Color::DarkGray));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        for (i, (line, hit)) in self.ambilight_lines().into_iter().enumerate() {
+            let y = inner.y + u16::try_from(i).unwrap_or(u16::MAX);
+            if y >= inner.y + inner.height {
+                break;
+            }
+            let r = ratatui::layout::Rect { x: inner.x, y, width: inner.width, height: 1 };
+            f.render_widget(Paragraph::new(line), r);
+            if let Some(h) = hit {
+                self.hits.push((r, h));
+            }
+        }
+    }
+
     fn panel_height(&self) -> u16 {
         // power, app, memory text, graph (3), swap, disks..., load
         let disks = u16::try_from(self.panel_disks().len()).unwrap_or(0);
@@ -3005,6 +3160,19 @@ impl App {
                 let r = popup(f, &format!(" {} ", it.label), text, Color::Yellow);
                 self.hits.push((r, Hit::Popup));
             }
+            Overlay::Pin => {
+                let text = vec![
+                    Line::from("Type the PIN the TV is showing:"),
+                    Line::from(vec![
+                        Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray)),
+                        Span::styled(" ".repeat(8usize.saturating_sub(self.prompt.chars().count() + 1)), Style::new().bg(Color::DarkGray)),
+                    ]),
+                    Line::default(),
+                    Line::from("⏎ pair   esc cancel").fg(Color::DarkGray),
+                ];
+                let r = popup(f, " pair with the TV ", text, Color::Yellow);
+                self.hits.push((r, Hit::Popup));
+            }
             Overlay::Confirm { item, yes } => {
                 let Some(it) = self.menu.get(item) else { return };
                 let mut text: Vec<Line> = it.confirm.unwrap_or("Are you sure?").lines().map(Line::from).collect();
@@ -3090,6 +3258,7 @@ const HELP: &str = " everywhere
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
    i        system info      a      launch an app (space there: front / restart / close)
+   l        Ambilight panel (TVs with one; P there pairs if needed)
    /        search the app in front (tab picks another app)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
@@ -3202,6 +3371,23 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
                     let rows = tab_list(app.apps.as_deref().unwrap_or_default(), tab);
                     let pkg = rows.get(sel).map(|e| e.package.clone());
                     app.open_search(pkg);
+                } else if let Overlay::Pin = app.overlay {
+                    match k.code {
+                        KeyCode::Esc => {
+                            app.overlay = Overlay::None;
+                            app.note = "pairing cancelled".into();
+                        }
+                        KeyCode::Enter if !app.prompt.is_empty() => {
+                            app.overlay = Overlay::None;
+                            app.note = "pairing...".into();
+                            let _ = actions.send(Action::PairFinish(std::mem::take(&mut app.prompt)));
+                        }
+                        KeyCode::Backspace => {
+                            app.prompt.pop();
+                        }
+                        KeyCode::Char(c) if c.is_ascii_digit() && app.prompt.len() < 8 => app.prompt.push(c),
+                        _ => {}
+                    }
                 } else if let Overlay::Prompt(item) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
                     let (next, action) = prompt_key(item, k.code, k.modifiers, &mut text);
@@ -3279,7 +3465,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     std::thread::spawn(move || route(&act_rx, &sh, &lanes));
     let (key_msgs, key_tv) = (msg_tx.clone(), shared.tv());
     std::thread::spawn(move || send_keys(key_tv, &key_rx, &key_msgs));
-    let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), conn: None, menu: c.menu.clone(), wake: wake_tx, reads: read_tx };
+    let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), conn: None, menu: c.menu.clone(), wake: wake_tx, reads: read_tx, pairing: None };
     let actor_msgs = msg_tx.clone();
     std::thread::spawn(move || actor.run(&do_rx, actor_msgs));
     let (read_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
@@ -3310,6 +3496,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         search_targets: Vec::new(),
         settling: None,
         settle,
+        ambi_supported: false,
+        ambi_open: false,
         guide: None,
         guide_later: 0,
         guide_view: 0,
@@ -3353,6 +3541,8 @@ pub fn commands() -> Vec<Command> {
          \x20 up/down + -   volume       m      mute/unmute\n\
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
+         \x20 l  Ambilight panel (Philips TVs that have it): state and each light's\n\
+         \x20    colour; its styles are in the . menu; P pairs with the TV if needed\n\
          \x20 a  launcher: the installed apps tveee has aliases for (see 'tveee apps'); ● marks\n\
          \x20    running ones (Enter brings them to the front), ⊘ ones Android keeps running\n\
          \x20    (live TV: they can't be closed); Space or right-click opens actions:\n\
@@ -3620,7 +3810,7 @@ mod tests {
     #[test]
     fn buttons_wrap_and_have_unique_keys() {
         for mode in [Mode::Player, Mode::Remote] {
-            let bs = buttons(mode, true);
+            let bs = buttons(mode, true, true);
             let mut keys: Vec<_> = bs.iter().map(|b| b.key).filter(|k| !k.is_empty()).collect();
             keys.sort();
             keys.dedup();

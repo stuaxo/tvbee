@@ -85,7 +85,7 @@ pub fn load(id: &str, ip: &str) -> Option<Saved> {
     (!saved.0.is_empty()).then_some(saved)
 }
 
-fn save(id: &str, ip: &str, saved: &Saved) -> Result<PathBuf> {
+pub fn save(id: &str, ip: &str, saved: &Saved) -> Result<PathBuf> {
     let Some(path) = file(id, ip) else { return failed("pair: no config folder to save the pairing in") };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
