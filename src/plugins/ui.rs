@@ -28,6 +28,21 @@ use std::time::{Duration, Instant};
 
 const CAT: &str = "ui";
 const REFRESH: Duration = Duration::from_secs(1);
+/// The volume to show as current (this refresh's, or a recent one), and
+/// the last known one when that's too old to (shown greyed). `last`: the
+/// last reported volume and how long ago.
+pub fn volume_shown(now: Option<(u32, u32)>, last: Option<((u32, u32), Duration)>) -> (Option<(u32, u32)>, Option<(u32, u32)>) {
+    match (now, last) {
+        (Some(v), _) => (Some(v), None),
+        (None, Some((v, age))) if age < VOLUME_STALE => (Some(v), None),
+        (None, Some((v, _))) => (None, Some(v)),
+        (None, None) => (None, None),
+    }
+}
+
+/// How long the last known volume is shown as current when a refresh can't
+/// read it; after that it's greyed.
+const VOLUME_STALE: Duration = Duration::from_secs(10);
 /// What one fast-forward/rewind key press is assumed to skip, for apps we
 /// can't seek exactly.
 const KEY_STEP: f64 = 10.0;
@@ -1220,6 +1235,9 @@ struct App {
     settling: Option<Settling>,
     /// Off (`--no-settle`): show every state the TV reports, as it comes.
     settle: bool,
+    /// The last volume the TV reported (level, max), and when: shown while a
+    /// refresh can't read it, greyed once it's [`VOLUME_STALE`] old.
+    last_volume: Option<((u32, u32), Instant)>,
     /// The TV has Ambilight tveee can control; and whether its panel is open.
     ambi_supported: bool,
     ambi_open: bool,
@@ -1852,6 +1870,9 @@ impl App {
                 let headline = s.activity.as_ref().map(Activity::headline);
                 if let Some(st) = &mut self.settling {
                     st.observe(front_pkg(&s).as_deref(), headline.as_deref(), Instant::now());
+                }
+                if let Some(v) = s.volume {
+                    self.last_volume = Some((v, Instant::now()));
                 }
                 (self.snap, self.at, self.error) = (Some(*s), at, None);
             }
@@ -2518,19 +2539,24 @@ impl App {
                 }
                 lines.push((Line::default(), None));
                 let vol_w = width.saturating_sub(9 + 8).clamp(10, 40);
-                let (vol, hit) = match (s.volume, s.muted) {
-                    (_, Some(true)) => (
+                // this refresh's volume, else the last one: as it is while
+                // recent, greyed once it's old; a grey empty bar before any
+                let (known, stale) = volume_shown(s.volume, self.last_volume.map(|(v, at)| (v, at.elapsed())));
+                let vol_hit = Some(Hit::Volume { x0: body.x + LABEL, width: u16::try_from(vol_w).unwrap_or(u16::MAX) });
+                let (vol, hit) = match (known, stale, s.muted) {
+                    (_, _, Some(true)) => (
                         Span::styled("muted (click to unmute)", Style::new().fg(Color::Yellow)),
                         Some(Hit::Input(Input::Do(Action::Mute))),
                     ),
-                    (Some((v, max)), _) if max > 0 => (
-                        Span::styled(
-                            format!("{} {v}/{max}", bar(f64::from(v) / f64::from(max), vol_w)),
-                            Style::new().fg(Color::Green),
-                        ),
-                        Some(Hit::Volume { x0: body.x + LABEL, width: u16::try_from(vol_w).unwrap_or(u16::MAX) }),
+                    (Some((v, max)), _, _) if max > 0 => (
+                        Span::styled(format!("{} {v}/{max}", bar(f64::from(v) / f64::from(max), vol_w)), Style::new().fg(Color::Green)),
+                        vol_hit,
                     ),
-                    _ => (Span::raw("unknown"), None),
+                    (None, Some((v, max)), _) if max > 0 => (
+                        Span::styled(format!("{} {v}/{max}", bar(f64::from(v) / f64::from(max), vol_w)), Style::new().fg(Color::DarkGray)),
+                        vol_hit,
+                    ),
+                    _ => (Span::styled(bar(0.0, vol_w), Style::new().fg(Color::DarkGray)), None),
                 };
                 lines.push((Line::from(vec![label("volume"), vol]), hit));
             }
@@ -3691,6 +3717,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         settle,
         ambi_supported: false,
         ambi_open: false,
+        last_volume: None,
         guide: None,
         guide_later: 0,
         guide_view: 0,
@@ -4231,6 +4258,18 @@ mod tests {
         );
         assert_eq!(key_name(4), "back");
         assert_eq!(key_name(20), "down");
+    }
+
+    #[test]
+    fn volume_when_a_refresh_cant_read_it() {
+        let s = Duration::from_secs;
+        assert_eq!(volume_shown(Some((5, 60)), Some(((3, 60), s(1)))), (Some((5, 60)), None));
+        // missed a read: the last one, as current, while recent
+        assert_eq!(volume_shown(None, Some(((3, 60), s(4)))), (Some((3, 60)), None));
+        // too old: greyed
+        assert_eq!(volume_shown(None, Some(((3, 60), s(11)))), (None, Some((3, 60))));
+        // never read: a grey empty bar
+        assert_eq!(volume_shown(None, None), (None, None));
     }
 
     #[test]
