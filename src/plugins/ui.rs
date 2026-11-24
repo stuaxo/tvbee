@@ -880,6 +880,8 @@ struct App {
     search_targets: Vec<SearchTarget>,
     /// An action still settling: its label stands in for the what line.
     settling: Option<Settling>,
+    /// Off (`--no-settle`): show every state the TV reports, as it comes.
+    settle: bool,
     /// The guide pop-up's rows; None until fetched.
     guide: Option<std::result::Result<Guide, String>>,
     /// How many GUIDE_STEPs ahead of now the guide shows.
@@ -902,15 +904,24 @@ struct App {
     want_info: Option<(u32, i64)>,
 }
 
-/// How long an action gets to settle before the screen shows whatever the
-/// TV last reported (see [`Settling`]).
-const SETTLE: Duration = Duration::from_millis(2500);
+/// An action under way waits this long for its next step: each change on
+/// the way (see [`Settling`]) starts the wait again, and when nothing comes
+/// the screen shows what the TV last reported.
+const SETTLE: Duration = Duration::from_secs(4);
+/// Once the action has arrived, the what line has to stay put this long (more
+/// than a refresh) to count as settled: apps go on changing as they load.
+const SETTLE_STEADY: Duration = Duration::from_millis(1600);
+/// However it goes, the label gives way after this.
+const SETTLE_MAX: Duration = Duration::from_secs(12);
 
-/// An action in flight (launching, searching, ...). Apps take a moment to
-/// come up, and the snapshots in between show half-way states (the old app,
-/// the launcher), so the "what" line shows `label` instead until the
-/// expected change shows up, or [`SETTLE`] passes and the latest snapshot,
-/// buffered meanwhile, is shown as it is.
+/// An action in flight (launching, searching, ...). On the way the TV goes
+/// through in-between states (the old app, the home screen, the new app
+/// loading), and the "what" line shows `label` instead of them. It ends when
+/// the action has arrived (the expected app is in front, or something
+/// changed, and it has something to say: an app coming up shows nothing at
+/// first) and then stayed the same for [`SETTLE_STEADY`]; when something
+/// unexpected comes up; when nothing changes for [`SETTLE`]; or after
+/// [`SETTLE_MAX`] in all. Then the latest snapshot is shown as it is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settling {
     /// e.g. "launching Netflix..."
@@ -920,25 +931,70 @@ pub struct Settling {
     /// What was showing when it started (package in front, what line).
     pub before_pkg: Option<String>,
     pub before_what: Option<String>,
+    /// Packages the TV can pass through on the way (home screens, Android's).
+    pub passing: Vec<String>,
     pub since: Instant,
+    /// When the last change on the way was seen.
+    pub moved: Instant,
+    /// Where it arrived: the package that came up.
+    pub arrived: Option<Option<String>>,
+    /// The last (package, what line) seen.
+    pub last: (Option<String>, Option<String>),
+    /// Something unexpected came up.
+    pub off_course: bool,
+    /// The expected app is in front but has nothing to say yet: loading.
+    pub loading: bool,
 }
 
 impl Settling {
-    /// Whether a snapshot showing `pkg` in front with `what` means the
-    /// action has landed: the expected app came to the front, or (when it
-    /// was in front already, or nothing in particular is expected) the
-    /// what line changed.
-    pub fn landed(&self, pkg: Option<&str>, what: Option<&str>) -> bool {
-        let changed = what != self.before_what.as_deref();
-        match self.expect.as_deref() {
-            Some(e) if pkg == Some(e) => self.before_pkg.as_deref() != Some(e) || changed,
-            Some(_) => false,
-            None => changed,
+    pub fn new(label: String, expect: Option<String>, before_pkg: Option<String>, before_what: Option<String>, passing: Vec<String>, now: Instant) -> Settling {
+        let last = (before_pkg.clone(), before_what.clone());
+        Settling { label, expect, before_pkg, before_what, passing, since: now, moved: now, arrived: None, last, off_course: false, loading: false }
+    }
+
+    /// Take in a snapshot showing `pkg` in front with `what`.
+    pub fn observe(&mut self, pkg: Option<&str>, what: Option<&str>, now: Instant) {
+        let state = (pkg.map(str::to_string), what.map(str::to_string));
+        if state == self.last {
+            return;
+        }
+        self.last = state;
+        // an app coming up shows nothing at first: that's not there yet
+        self.loading = self.arrived.is_none() && what.is_none() && pkg.is_some() && pkg == self.expect.as_deref();
+        let on_the_way = match &self.arrived {
+            // arrived: the app it arrived in can go on changing
+            Some(at) => at.as_deref() == pkg,
+            None => {
+                let changed = what != self.before_what.as_deref();
+                let arrives = !self.loading
+                    && match self.expect.as_deref() {
+                        Some(e) => pkg == Some(e) && (self.before_pkg.as_deref() != Some(e) || changed),
+                        None => true,
+                    };
+                if arrives {
+                    self.arrived = Some(pkg.map(str::to_string));
+                }
+                let passing = pkg.is_none_or(|p| self.passing.iter().any(|x| x == p));
+                arrives || self.loading || passing || pkg == self.before_pkg.as_deref()
+            }
+        };
+        if on_the_way {
+            self.moved = now;
+        } else {
+            self.off_course = true;
         }
     }
 
-    pub fn expired(&self, now: Instant) -> bool {
-        now.duration_since(self.since) >= SETTLE
+    /// Whether to stop showing the label and show what's really on.
+    pub fn done(&self, now: Instant) -> bool {
+        let quiet = now.duration_since(self.moved);
+        let wait = match (&self.arrived, self.loading) {
+            (Some(_), _) => SETTLE_STEADY,
+            // the app is coming up: however long it takes, up to SETTLE_MAX
+            (None, true) => SETTLE_MAX,
+            (None, false) => SETTLE,
+        };
+        self.off_course || now.duration_since(self.since) >= SETTLE_MAX || quiet >= wait
     }
 }
 
@@ -1415,10 +1471,10 @@ impl App {
                     }
                 }
                 // the latest snapshot is always kept; while an action
-                // settles it's only shown once it shows the action landed
+                // settles it's only shown once the action has got there
                 let headline = s.activity.as_ref().map(Activity::headline);
-                if self.settling.as_ref().is_some_and(|st| st.landed(front_pkg(&s).as_deref(), headline.as_deref())) {
-                    self.settling = None;
+                if let Some(st) = &mut self.settling {
+                    st.observe(front_pkg(&s).as_deref(), headline.as_deref(), Instant::now());
                 }
                 (self.snap, self.at, self.error) = (Some(*s), at, None);
             }
@@ -1489,19 +1545,32 @@ impl App {
     /// Show `label` in place of the what line until the action lands (with
     /// `expect` in front, if given) or it's had time to.
     fn settle(&mut self, label: String, expect: Option<String>) {
+        if !self.settle {
+            return;
+        }
         let snap = self.snap.as_ref();
-        self.settling = Some(Settling {
+        // home screens on the way: the ones tvbee knows, and those on the TV
+        let mut passing: Vec<String> = self
+            .apps
+            .iter()
+            .flatten()
+            .filter(|e| e.section == SECTIONS[0] || apps::passes_through(&e.package))
+            .map(|e| e.package.clone())
+            .collect();
+        passing.extend(["android", "com.android.systemui"].map(String::from));
+        self.settling = Some(Settling::new(
             label,
             expect,
-            before_pkg: snap.and_then(front_pkg),
-            before_what: snap.and_then(|s| s.activity.as_ref()).map(Activity::headline),
-            since: Instant::now(),
-        });
+            snap.and_then(front_pkg),
+            snap.and_then(|s| s.activity.as_ref()).map(Activity::headline),
+            passing,
+            Instant::now(),
+        ));
     }
 
     /// The settling label to show now, if an action is still settling.
     fn settling_label(&mut self) -> Option<String> {
-        if self.settling.as_ref().is_some_and(|s| s.expired(Instant::now())) {
+        if self.settling.as_ref().is_some_and(|s| s.done(Instant::now())) {
             self.settling = None;
         }
         self.settling.as_ref().map(|s| s.label.clone())
@@ -2805,11 +2874,12 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
 }
 
 fn ui(c: &Ctx, args: &[String]) -> Result<()> {
-    let mut mouse = true;
+    let (mut mouse, mut settle) = (true, true);
     for a in args {
         match a.as_str() {
             "--no-mouse" => mouse = false,
-            _ => return crate::error::usage(format!("usage: tvbee ui [--no-mouse]  (unexpected '{a}')")),
+            "--no-settle" => settle = false,
+            _ => return crate::error::usage(format!("usage: tvbee ui [--no-mouse] [--no-settle]  (unexpected '{a}')")),
         }
     }
     use std::io::IsTerminal;
@@ -2849,6 +2919,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         searchable: None,
         search_targets: Vec::new(),
         settling: None,
+        settle,
         guide: None,
         guide_later: 0,
         guide_view: 0,
@@ -2880,7 +2951,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn commands() -> Vec<Command> {
-    vec![Command::new(CAT, "ui", "[--no-mouse]", "interactive remote: what's on, volume, seeking", ui).long(
+    vec![Command::new(CAT, "ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking", ui).long(
         "A full-screen remote showing what is playing (as 'tvbee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
          the arrows seek and change volume; in remote mode they move around the TV's\n\
@@ -2903,7 +2974,12 @@ pub fn commands() -> Vec<Command> {
          \n\
          The mouse works too: click the buttons along the bottom, the progress bar\n\
          (jump there) or the volume bar (set that level); the wheel changes the\n\
-         volume. Hold Shift to select text as usual. --no-mouse turns this off.",
+         volume. Hold Shift to select text as usual. --no-mouse turns this off.\n\
+         \n\
+         While an action is under way (launching, searching, switching channel) the\n\
+         what line says so (\"launching Netflix...\") instead of showing each step\n\
+         the TV passes through, until the action has arrived and settled.\n\
+         --no-settle shows every step as it comes (for debugging).",
     )]
 }
 
@@ -3006,30 +3082,60 @@ mod tests {
 
 
     #[test]
-    fn settling_lands_on_the_expected_app() {
-        let st = |expect: Option<&str>, before: Option<&str>| Settling {
-            label: "launching Netflix...".into(),
-            expect: expect.map(str::to_string),
-            before_pkg: before.map(str::to_string),
-            before_what: Some("In Projectivy".into()),
-            since: Instant::now(),
+    fn settling_waits_out_the_steps_on_the_way() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let st = |expect: Option<&str>, before: &str| {
+            let passing = vec!["projectivy".to_string(), "android".to_string()];
+            Settling::new("launching Netflix...".into(), expect.map(str::to_string), Some(before.into()), Some(format!("In {before}")), passing, t0)
         };
-        // launching from the home screen: the launcher, then Netflix
-        let s = st(Some("com.netflix"), Some("projectivy"));
-        assert!(!s.landed(Some("projectivy"), Some("In Projectivy")));
-        assert!(!s.landed(Some("android"), Some("In Android"))); // half-way
-        assert!(s.landed(Some("com.netflix"), Some("In Netflix")));
-        // searching the app already in front: only once the what line changes
-        let s = st(Some("projectivy"), Some("projectivy"));
-        assert!(!s.landed(Some("projectivy"), Some("In Projectivy")));
-        assert!(s.landed(Some("projectivy"), Some("Watching something")));
-        // nothing expected (closing): any change
-        let s = st(None, Some("projectivy"));
-        assert!(!s.landed(Some("projectivy"), Some("In Projectivy")));
-        assert!(s.landed(Some("x"), Some("In X")));
-        // and it gives up after SETTLE
-        assert!(!s.expired(s.since));
-        assert!(s.expired(s.since + SETTLE));
+        // launching from YouTube: the home screen, then Netflix loading
+        let mut s = st(Some("netflix"), "youtube");
+        s.observe(Some("youtube"), Some("In youtube"), ms(1000)); // nothing new
+        assert!(!s.done(ms(2000)));
+        s.observe(Some("projectivy"), Some("In Projectivy"), ms(2000)); // on the way
+        assert!(!s.done(ms(4000)) && s.arrived.is_none());
+        s.observe(Some("netflix"), None, ms(3000)); // in front, nothing to say yet
+        assert!(!s.done(ms(6500)) && s.arrived.is_none());
+        s.observe(Some("netflix"), Some("In Netflix"), ms(4000)); // arrived
+        s.observe(Some("netflix"), Some("Browsing Netflix"), ms(5000)); // still loading
+        assert!(!s.done(ms(6000)));
+        // then it stays put: settled
+        assert!(s.done(ms(5000) + SETTLE_STEADY));
+
+        // nothing at all happens: give up after SETTLE
+        let s = st(Some("netflix"), "youtube");
+        assert!(!s.done(ms(2000)) && s.done(t0 + SETTLE));
+
+        // something else comes up on the way: show it
+        let mut s = st(Some("netflix"), "youtube");
+        s.observe(Some("dialog.app"), Some("In Dialog"), ms(500));
+        assert!(s.done(ms(500)));
+        // or leaves the app it arrived in
+        let mut s = st(Some("netflix"), "youtube");
+        s.observe(Some("netflix"), Some("In Netflix"), ms(500));
+        s.observe(Some("projectivy"), Some("In Projectivy"), ms(1000));
+        assert!(s.done(ms(1000)));
+
+        // searching the app in front: arrives when the what line changes
+        let mut s = st(Some("youtube"), "youtube");
+        s.observe(Some("youtube"), Some("In youtube"), ms(500));
+        assert!(s.arrived.is_none());
+        s.observe(Some("youtube"), Some("Searching YouTube"), ms(1000));
+        assert!(s.arrived.is_some());
+
+        // nothing expected (switching channel): any change arrives
+        let mut s = st(None, "zapster");
+        s.observe(Some("zapster"), Some("BBC Two"), ms(500));
+        s.observe(Some("zapster"), Some("BBC Two: Newsnight"), ms(1500));
+        assert!(!s.done(ms(2500)) && s.done(ms(1500) + SETTLE_STEADY));
+
+        // a run of changes can't hold it forever
+        let mut s = st(None, "zapster");
+        for i in 1..20 {
+            s.observe(Some("zapster"), Some(&format!("step {i}")), ms(i * 1000));
+        }
+        assert!(s.done(t0 + SETTLE_MAX));
     }
 
     use super::*;

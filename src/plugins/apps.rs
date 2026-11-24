@@ -287,6 +287,13 @@ const HOGS: &[&str] = &[
     "com.amazon.aiv.eu",
 ];
 
+/// Whether the TV passes through `pkg` on the way from one app to another:
+/// a home screen tvbee knows, or Android's own screens.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn passes_through(pkg: &str) -> bool {
+    pkg == "android" || pkg == "com.android.systemui" || by_package(pkg).is_some_and(|a| a.kind == Kind::Launcher)
+}
+
 /// Never force-stopped by `quit` without --force: launchers, live TV, system UI.
 const PROTECTED: &[&str] = &[
     "com.spocky.projengmenu",
