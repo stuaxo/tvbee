@@ -210,6 +210,14 @@ pub trait Details {
     fn details(&self, link: &str) -> Result<crate::more::Details>;
 }
 
+/// A place in an app to come back to: opening `link` in the app gets there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Session {
+    pub link: String,
+    /// What it is, for messages: "at 12:34 in the same video".
+    pub said: String,
+}
+
 /// A source of content. Everything but the identity is optional.
 pub trait Provider: Sync {
     /// Short id: `tveee guide --provider <id>`.
@@ -234,6 +242,12 @@ pub trait Provider: Sync {
     /// Close the app before sending it a link (see the YouTube provider).
     fn fresh_for_links(&self) -> bool {
         false
+    }
+    /// Where the user is in the app (a video, and how far in), so it can be
+    /// brought back there: after restarting the app, say. None: nothing
+    /// worth keeping, or the app can't say.
+    fn save_session(&self, _tv: &crate::tv::Tv) -> Option<Session> {
+        None
     }
     /// Hand `link` to the app where it is, when it's already in front,
     /// without starting an activity (which, with `fresh_for_links`, means

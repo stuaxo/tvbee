@@ -87,6 +87,10 @@ impl crate::provider::Provider for YouTube {
     fn places(&self) -> &'static [Place] {
         PLACES
     }
+    // the video and how far in: restarting comes back to it
+    fn save_session(&self, tv: &Tv) -> Option<crate::provider::Session> {
+        session(tv)
+    }
     fn details(&self) -> Option<&dyn crate::provider::Details> {
         Some(self)
     }
@@ -263,26 +267,27 @@ fn page(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Restart the app where it was: the same video at the same point, or home.
-/// Fixes a frozen picture (sound but no video) by giving it fresh surfaces.
+/// Where YouTube is: the video and how far in (or home), from its page.
+fn session(tv: &Tv) -> Option<crate::provider::Session> {
+    let c = devtools::Conn::open(tv, PACKAGE)?;
+    let raw = c.eval("JSON.stringify({h:location.hash,t:(document.querySelector('video')||{}).currentTime||0})").ok()?;
+    let hash = crate::http::string_field(&raw, "h")?;
+    Some(match video_id(&hash) {
+        Some(id) => {
+            let t = crate::http::number_field(&raw, "t").unwrap_or(0.0).floor() as u64;
+            crate::provider::Session {
+                link: format!("https://www.youtube.com/watch?v={id}&t={t}s"),
+                said: format!("at {} in the same video", crate::nowplaying::clock(t as f64)),
+            }
+        }
+        None => crate::provider::Session { link: "https://www.youtube.com/".into(), said: String::new() },
+    })
+}
+
+/// Restart YouTube where it was (see `apps::restart`).
 pub fn restart(tv: &Tv) -> Result<String> {
     tv.connect()?;
-    let at = devtools::Conn::open(tv, PACKAGE).and_then(|c| {
-        let raw = c.eval("JSON.stringify({h:location.hash,t:(document.querySelector('video')||{}).currentTime||0})").ok()?;
-        let hash = crate::http::string_field(&raw, "h")?;
-        Some((video_id(&hash), crate::http::number_field(&raw, "t").unwrap_or(0.0)))
-    });
-    tv.shell(&["am", "force-stop", PACKAGE])?;
-    let (link, said) = match at {
-        Some((Some(id), t)) => {
-            let t = t.floor() as u64;
-            (format!("https://www.youtube.com/watch?v={id}&t={t}s"), format!("restarted YouTube at {} in the same video", crate::nowplaying::clock(t as f64)))
-        }
-        _ => ("https://www.youtube.com/".to_string(), "restarted YouTube".to_string()),
-    };
-    let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {PACKAGE}", crate::plugins::open::sh_quote(&link));
-    tv.shell(&[&cmd])?;
-    Ok(said)
+    crate::plugins::apps::restart(tv, PACKAGE, PACKAGE)
 }
 
 fn youtube(c: &Ctx, args: &[String]) -> Result<()> {
@@ -295,10 +300,6 @@ fn youtube(c: &Ctx, args: &[String]) -> Result<()> {
         None => usage("usage: tveee youtube page [--json] | restart"),
         Some(x) => usage(format!("youtube: unknown action '{x}' (try: page, restart)")),
     }
-}
-
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    vec![crate::menu::MenuItem::new("youtube", 'Y', "restart YouTube here (fixes a frozen picture)", restart)]
 }
 
 pub fn commands() -> Vec<Command> {

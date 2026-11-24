@@ -592,6 +592,43 @@ fn currentapp(c: &Ctx, _: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Close `pkg` and start it again: back where it was when its provider can
+/// save its session (see `Provider::save_session`), else fresh (`target`
+/// is what to start). Returns what happened.
+pub fn restart(tv: &Tv, pkg: &str, target: &str) -> Result<String> {
+    let name = by_package(pkg).map_or_else(|| crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()), |a| list_name(a.name));
+    let saved = crate::provider::for_package(pkg).and_then(|p| p.save_session(tv));
+    tv.shell(&["am", "force-stop", pkg])?;
+    match saved {
+        Some(s) => {
+            let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(&s.link), super::open::sh_quote(pkg));
+            let out = tv.shell(&[&cmd])?;
+            if let Some(err) = out.lines().find(|l| l.starts_with("Error")) {
+                return failed(format!("restart: {err}"));
+            }
+            Ok(format!("restarted {name} {}", s.said).trim_end().to_string())
+        }
+        None => {
+            start(tv, target)?;
+            Ok(format!("restarted {name}"))
+        }
+    }
+}
+
+fn restart_cmd(c: &Ctx, args: &[String]) -> Result<()> {
+    c.tv.connect()?;
+    let (pkg, target) = match args.first() {
+        Some(app) if target(app) == "@home" => return usage("restart: 'home' is not an app"),
+        Some(app) => (pkg_of(app).to_string(), app.clone()),
+        None => match super::info::focus_package(&c.tv.window_dump()?) {
+            Some(p) => (p.clone(), p),
+            None => return failed("restart: can't tell which app is in front"),
+        },
+    };
+    println!("{}", restart(&c.tv, &pkg, &target)?);
+    Ok(())
+}
+
 fn kill(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(app) = args.first() else { return usage("kill: missing app") };
     if target(app) == "@home" {
@@ -697,6 +734,12 @@ pub fn commands() -> Vec<Command> {
             "Prints the foreground window, with the app alias first if it has one,\ne.g. 'kodi (org.xbmc.kodi/.Splash)'. The NetTV webapps (iPlayer, Arte, ...) all run\ninside org.droidtv.nettvbrowser, so they show as that package.",
         ),
         Command::new(CAT, "kill", "<app>", "force-stop one app", kill),
+        Command::new(CAT, "restart", "[app]", "close an app and start it again, back where it was if tveee knows how", restart_cmd).long(
+            "Closes the app (the one in front, if none is named) and starts it again.\n\
+             For apps whose session tveee can save, it comes back where it was:\n\
+             YouTube reopens the same video at the same point. Restarting fixes a\n\
+             frozen picture in YouTube (sound but an old screen).",
+        ),
         Command::new(CAT, "free", "", "force-stop idle RAM-hungry apps", free),
         Command::new(CAT, "apps", "[--all | --others]", "list app aliases installed on the TV", apps).long(
             "Queries the TV and hides aliases whose package isn't installed.\n  --all     list every alias without contacting the TV\n  --others  installed apps without an alias, with the kind tveee guesses\n            for them (player, store, home, app); cached for a day",

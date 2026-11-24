@@ -1002,10 +1002,10 @@ impl Actor {
                 format!("closed {}", app_name(&pkg))
             }
             Action::Restart { pkg, target } => {
-                self.tv.shell(&["am", "force-stop", &pkg])?;
-                apps::start(&self.tv, &target)?;
+                // back where it was, for apps whose session tveee can save
+                let said = apps::restart(&self.tv, &pkg, &target)?;
                 let _ = self.reads.send(Action::CheckRunning);
-                format!("restarted {}", app_name(&pkg))
+                said
             }
             Action::Search { pkg, query, keys: true } => search::keys_search(&self.tv, &pkg, &query, false)?,
             Action::Search { pkg, query, keys: false } => {
@@ -1330,7 +1330,7 @@ impl AppChoice {
         match self {
             AppChoice::Open => "open".into(),
             AppChoice::Front => "bring to front".into(),
-            AppChoice::Restart => "restart (close, then start fresh)".into(),
+            AppChoice::Restart => "restart (close, then start again)".into(),
             AppChoice::Close => "close (force-stop)".into(),
             AppChoice::Search => format!("search {app}"),
             AppChoice::Cancel => "cancel".into(),

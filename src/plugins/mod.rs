@@ -49,8 +49,7 @@ pub fn all() -> Vec<Plugin> {
         .with_pairings(philips::pairings),
         Plugin::detect("youtube", "the YouTube app: what's on, search, looking inside it", youtube::detect, youtube::commands)
             .with_apps(youtube::apps)
-            .with_providers(youtube::providers)
-            .with_menu(youtube::menu),
+            .with_providers(youtube::providers),
         #[cfg(feature = "ui")]
         Plugin::builtin("ui", "interactive terminal remote (ratatui)", ui::commands),
     ]
