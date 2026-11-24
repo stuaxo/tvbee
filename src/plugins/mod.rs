@@ -5,6 +5,7 @@ pub mod diagnose;
 pub mod guide;
 pub mod display;
 pub mod info;
+pub mod kodi;
 pub mod input;
 pub mod media;
 pub mod open;
@@ -49,6 +50,9 @@ pub fn all() -> Vec<Plugin> {
         .with_providers(philips::providers)
         .with_pairings(philips::pairings)
         .with_menu(ambilight::menu),
+        Plugin::detect("kodi", "Kodi: what it's playing, exact seeking, artwork, places (its remote control)", kodi::detect, kodi::commands)
+            .with_providers(kodi::providers)
+            .with_pairings(kodi::pairings),
         Plugin::detect("youtube", "the YouTube app: what's on, search, looking inside it", youtube::detect, youtube::commands)
             .with_apps(youtube::apps)
             .with_providers(youtube::providers),

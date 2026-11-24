@@ -76,7 +76,8 @@ impl crate::provider::Provider for YouTube {
     // devtools, rather than closing the app for it (the screen would drop
     // to home, then reopen). The app ignores changes to location.hash.
     fn open_here(&self, tv: &Tv, link: &str) -> Result<bool> {
-        if crate::plugins::info::focus_package(&tv.window_dump()?).as_deref() != Some(PACKAGE) {
+        // anything amiss: the usual way
+        if crate::plugins::info::focus_package(&tv.window_dump().unwrap_or_default()).as_deref() != Some(PACKAGE) {
             return Ok(false);
         }
         let Some(c) = devtools::Conn::open(tv, PACKAGE) else { return Ok(false) };
@@ -228,11 +229,12 @@ fn session(tv: &Tv) -> Option<crate::provider::Session> {
         Some(id) => {
             let t = crate::http::number_field(&raw, "t").unwrap_or(0.0).floor() as u64;
             crate::provider::Session {
+                resume: None,
                 link: format!("https://www.youtube.com/watch?v={id}&t={t}s"),
                 said: format!("at {} in the same video", crate::nowplaying::clock(t as f64)),
             }
         }
-        None => crate::provider::Session { link: "https://www.youtube.com/".into(), said: String::new() },
+        None => crate::provider::Session { link: "https://www.youtube.com/".into(), said: String::new(), resume: None },
     })
 }
 

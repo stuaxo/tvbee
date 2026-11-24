@@ -21,7 +21,7 @@ ratatui = { version = "0.30.2", optional = true, features = ["unstable-rendered-
 # the ui's preview panel: pictures in the terminal (sixel, kitty, iTerm2, or
 # unicode half-blocks), and JPEG decoding for YouTube's storyboard frames
 ratatui-image = { version = "11.1", optional = true, default-features = false, features = ["crossterm"] }
-image = { version = "0.25.6", optional = true, default-features = false, features = ["jpeg"] }
+image = { version = "0.25.6", optional = true, default-features = false, features = ["jpeg", "png"] }
 
 [features]
 default = []

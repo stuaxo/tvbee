@@ -180,7 +180,40 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
         Some(a) => Some((a.name.to_string(), a.kind)),
         None => apps::identify(pkg, &apps::guesses(tv)),
     };
-    live(tv, pkg).or_else(|| activity_with(pkg, who, sessions, || devtools::pages(tv, pkg)))
+    let a = live(tv, pkg).or_else(|| activity_with(pkg, who, sessions, || devtools::pages(tv, pkg)));
+    match crate::provider::for_package(pkg).and_then(|p| p.player()) {
+        Some(player) => with_player(tv, pkg, player, a).0,
+        None => a,
+    }
+}
+
+/// `a`, filled in from an app's own player API when it says what's playing
+/// (title, show, exact position, stream details); and the picture of it,
+/// if there is one. Anything amiss there: `a` as it was.
+pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: Option<Activity>) -> (Option<Activity>, Option<String>) {
+    let Ok(Some(p)) = player.playing(tv) else { return (a, None) };
+    (Some(merge_playing(pkg, a, p.clone())), p.art)
+}
+
+/// `a` (from the media session) with what the player said.
+pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing) -> Activity {
+    let what = a.as_ref().map_or_else(
+        || format!("Watching {}", apps::by_package(pkg).map_or(pkg, |x| x.name)),
+        |a| a.what.clone(),
+    );
+    let mut out = a.unwrap_or_else(|| Activity::just(what.clone()));
+    out.what = what;
+    if p.title.is_some() {
+        out.title = p.title;
+    }
+    if p.progress.is_some() {
+        out.progress = p.progress;
+    }
+    if let Some(s) = p.subtitle {
+        out.fields.push(Field { label: "from", value: s, place: Place::Top, open: None });
+    }
+    out.fields.extend(p.extra.into_iter().map(|(label, value)| Field { label, value, place: Place::Bottom, open: None }));
+    out
 }
 
 /// The app's devtools hook, if it has one (only then is `pages` worth calling).
@@ -214,6 +247,26 @@ pub fn activity_with(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn player_fills_in() {
+        use crate::provider::Playing;
+        let session = Some(Activity { what: "Watching Kodi".into(), title: Some("S03E04".into()), url: None, progress: None, fields: vec![] });
+        let p = Playing {
+            title: Some("A Very Nuanced Character".into()),
+            subtitle: Some("Taskmaster S03E04".into()),
+            progress: Some(crate::devtools::Progress { position: 200.0, duration: Some(2700.0), paused: false }),
+            art: None,
+            extra: vec![("video", "1080p H264".into())],
+        };
+        let a = merge_playing("org.xbmc.kodi", session, p.clone());
+        assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching Kodi", Some("A Very Nuanced Character")));
+        assert_eq!(a.progress.map(|p| p.position), Some(200.0));
+        assert_eq!(a.field("from").map(|f| f.value.as_str()), Some("Taskmaster S03E04"));
+        assert_eq!(a.field("video").map(|f| f.place), Some(Place::Bottom));
+        // no media session at all: still says what's on
+        assert_eq!(merge_playing("org.xbmc.kodi", None, p).what, "Watching Kodi");
+    }
 
     #[test]
     fn live_tv_line() {

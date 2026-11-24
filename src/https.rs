@@ -13,6 +13,10 @@ pub struct Request<'a> {
     pub body: Option<&'a str>,
     /// Digest authentication (user, password).
     pub digest: Option<(&'a str, &'a str)>,
+    /// Basic authentication (user, password), e.g. Kodi's.
+    pub basic: Option<(&'a str, &'a str)>,
+    /// Keep trying a refused connection for a while (see [`RETRY_FOR`]).
+    pub retry: bool,
     pub timeout_secs: u32,
 }
 
@@ -43,6 +47,8 @@ pub fn curl_config(r: &Request) -> String {
     if let Some((user, pass)) = r.digest {
         c.push_str("digest\n");
         c.push_str(&format!("user = {}\n", quote(&format!("{user}:{pass}"))));
+    } else if let Some((user, pass)) = r.basic {
+        c.push_str(&format!("user = {}\n", quote(&format!("{user}:{pass}"))));
     }
     if let Some(body) = r.body {
         c.push_str("header = \"Content-Type: application/json\"\n");
@@ -68,7 +74,7 @@ pub fn request(r: &Request) -> Result<(u16, String)> {
     let start = std::time::Instant::now();
     loop {
         match request_once(r) {
-            Err(Refused(_)) if start.elapsed() < RETRY_FOR => std::thread::sleep(std::time::Duration::from_millis(700)),
+            Err(Refused(_)) if r.retry && start.elapsed() < RETRY_FOR => std::thread::sleep(std::time::Duration::from_millis(700)),
             Err(Refused(e)) | Err(Other(e)) => return Err(e),
             Ok(reply) => return Ok(reply),
         }
@@ -118,7 +124,7 @@ mod tests {
 
     #[test]
     fn builds_curl_calls() {
-        let r = Request { url: "https://tv:1926/6/pair/grant", body: Some(r#"{"a":"b\"c"}"#), digest: Some(("dev", "k\"ey")), timeout_secs: 10 };
+        let r = Request { url: "https://tv:1926/6/pair/grant", body: Some(r#"{"a":"b\"c"}"#), digest: Some(("dev", "k\"ey")), basic: None, retry: true, timeout_secs: 10 };
         let args = curl_args(&r);
         assert!(args.contains(&"--insecure".to_string()) && args.last().unwrap() == "https://tv:1926/6/pair/grant");
         // the password and body never appear as arguments
@@ -127,7 +133,7 @@ mod tests {
         assert!(c.contains("digest\n"));
         assert!(c.contains(r#"user = "dev:k\"ey""#));
         assert!(c.contains(r#"data-binary = "{\"a\":\"b\\\"c\"}""#));
-        let get = Request { url: "https://tv/x", body: None, digest: None, timeout_secs: 5 };
+        let get = Request { url: "https://tv/x", body: None, digest: None, basic: None, retry: true, timeout_secs: 5 };
         assert_eq!(curl_config(&get), "");
     }
 

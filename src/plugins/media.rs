@@ -301,9 +301,37 @@ fn session(c: &Ctx) -> Result<Session> {
     }
 }
 
+/// The app in front's own player API (Kodi's), if it has one that answers.
+fn player_in_front(tv: &crate::tv::Tv) -> Option<&'static dyn crate::provider::Player> {
+    let pkg = super::info::focus_package(&tv.window_dump().ok()?)?;
+    let player = crate::provider::for_package(&pkg)?.player()?;
+    player.playing(tv).ok().flatten().map(|_| player)
+}
+
+/// Seek through the app's own player when it has one; false: do it with keys.
+fn player_seek(c: &Ctx, to: crate::devtools::SeekTo) -> Result<bool> {
+    let Some(player) = player_in_front(&c.tv) else { return Ok(false) };
+    let at = player.seek(&c.tv, to)?;
+    println!("now at {}", crate::nowplaying::clock(at));
+    Ok(true)
+}
+
+fn playpause(c: &Ctx, _: &[String]) -> Result<()> {
+    c.tv.connect()?;
+    if let Some(player) = player_in_front(&c.tv) {
+        return player.play_pause(&c.tv);
+    }
+    c.tv.keyevent(85)
+}
+
 fn skip(c: &Ctx, name: &str, args: &[String], sign: f64) -> Result<()> {
     let (amount, step) = parse_skip_args(name, args)?;
     c.tv.connect()?;
+    if let Amount::Seconds(s) = amount {
+        if player_seek(c, crate::devtools::SeekTo::By(sign * s))? {
+            return Ok(());
+        }
+    }
     let secs = match amount {
         Amount::Seconds(s) => s,
         Amount::Fraction(f) => match session(c)?.duration_ms {
@@ -326,6 +354,13 @@ fn rew(c: &Ctx, args: &[String]) -> Result<()> {
 fn seek(c: &Ctx, args: &[String]) -> Result<()> {
     let (amount, step) = parse_skip_args("seek", args)?;
     c.tv.connect()?;
+    let exact = match amount {
+        Amount::Seconds(s) => crate::devtools::SeekTo::At(s),
+        Amount::Fraction(f) => crate::devtools::SeekTo::Fraction(f),
+    };
+    if player_seek(c, exact)? {
+        return Ok(());
+    }
     let sess = session(c)?;
     let target = match amount {
         Amount::Seconds(s) => s,
@@ -349,13 +384,13 @@ pub fn commands() -> Vec<Command> {
         Command::new(CAT, "play", "", "media play", |c, _| c.tv.key(126)),
         Command::new(CAT, "pause", "", "media pause", |c, _| c.tv.key(127)),
         Command::new(CAT, "stop", "", "media stop", |c, _| c.tv.key(86)),
-        Command::new(CAT, "playpause", "", "toggle play/pause", |c, _| c.tv.key(85)),
+        Command::new(CAT, "playpause", "", "toggle play/pause", playpause),
         Command::new(CAT, "mute", "", "mute (no-op if already muted)", mute),
         Command::new(CAT, "unmute", "", "unmute (no-op if not muted)", unmute),
         Command::new(CAT, "ffw", SKIP_USAGE, "fast-forward by an amount", ffw).long(SKIP_LONG),
         Command::new(CAT, "rew", SKIP_USAGE, "rewind by an amount", rew).long(SKIP_LONG),
         Command::new(CAT, "seek", SKIP_USAGE, "jump to a position (time or percent of the way through)", seek).long(
-            "Like ffw/rew but absolute: reads the current position from the TV's media\nsession, then skips the difference. Needs an app that publishes a media session\nwith a position (and a duration for percentages). Approximate: accuracy is\nlimited by --step, so seeking lands within about one step of the target.",
+            "Like ffw/rew but absolute. Apps tveee can control directly (Kodi, with its\nremote control on) seek exactly. Otherwise it reads the current position from\nthe TV's media session, then skips the difference. Needs an app that publishes a media session\nwith a position (and a duration for percentages). Approximate: accuracy is\nlimited by --step, so seeking lands within about one step of the target.",
         ),
         Command::new(CAT, "vol", "up|down|<level>", "change volume", vol)
             .long("A number sets an absolute level with 'media volume'."),

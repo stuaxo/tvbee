@@ -216,6 +216,34 @@ pub struct Session {
     pub link: String,
     /// What it is, for messages: "at 12:34 in the same video".
     pub said: String,
+    /// Where to start `link`, for apps the link alone can't say it to.
+    pub resume: Option<f64>,
+}
+
+/// What a player app says is on: more than Android's media session gives.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Playing {
+    pub title: Option<String>,
+    /// The show and episode ("Taskmaster S03E04"), or the artist.
+    pub subtitle: Option<String>,
+    pub progress: Option<crate::devtools::Progress>,
+    /// A picture of it (poster, fanart), for [`Player::picture`].
+    pub art: Option<String>,
+    /// More to say: ("video", "1080p H.264"), ("audio", "English AC3 5.1"), ...
+    pub extra: Vec<(&'static str, String)>,
+}
+
+/// An app tveee can ask what it's playing and tell what to do, through an
+/// API of its own (Kodi's JSON-RPC).
+pub trait Player: Sync {
+    /// What's playing (None: nothing).
+    fn playing(&self, tv: &crate::tv::Tv) -> crate::error::Result<Option<Playing>>;
+    /// Move what's playing; returns the new position in seconds.
+    fn seek(&self, tv: &crate::tv::Tv, to: crate::devtools::SeekTo) -> crate::error::Result<f64>;
+    fn play_pause(&self, tv: &crate::tv::Tv) -> crate::error::Result<()>;
+    /// The bytes of picture `art` (from [`Playing::art`]), for the ui's preview.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    fn picture(&self, tv: &crate::tv::Tv, art: &str) -> crate::error::Result<Vec<u8>>;
 }
 
 /// A source of content. Everything but the identity is optional.
@@ -253,9 +281,20 @@ pub trait Provider: Sync {
     fn has_sessions(&self) -> bool {
         false
     }
+    /// Start the app (closed: `target` is what to start) and bring it back
+    /// to a saved session. Ok(false): it didn't, so open the session's link
+    /// the usual way.
+    fn restore_session(&self, _tv: &crate::tv::Tv, _target: &str, _s: &Session) -> crate::error::Result<bool> {
+        Ok(false)
+    }
+    /// The app's own API for what's playing and controlling it.
+    fn player(&self) -> Option<&dyn Player> {
+        None
+    }
     /// Hand `link` to the app where it is, when it's already in front,
     /// without starting an activity (which, with `fresh_for_links`, means
-    /// closing it first). Ok(false): it couldn't, so send the link as usual.
+    /// closing it first). Ok(false): it couldn't, so send the link as usual;
+    /// an error: the link can only go this way, and it failed.
     fn open_here(&self, _tv: &crate::tv::Tv, _link: &str) -> crate::error::Result<bool> {
         Ok(false)
     }
@@ -310,6 +349,9 @@ pub fn capabilities(p: &dyn Provider) -> Vec<&'static str> {
     }
     if p.has_sessions() {
         v.push("sessions");
+    }
+    if p.player().is_some() {
+        v.push("player");
     }
     v
 }

@@ -202,7 +202,12 @@ that are enabled when the TV has what they're for: `jointspace` and `ambilight`
 (`philips`; Ambilight: power, styles, each light's colour, handing the lights
 to outside control). Those plugins
 also add their apps: iPlayer, Arte, Dailymotion and live TV (`philips`),
-YouTube (`youtube`).
+YouTube (`youtube`). The `kodi` plugin (when Kodi is installed) uses Kodi's own
+remote control, once it's on in Kodi (Settings > Services > Control > Allow
+remote control via HTTP): what's playing with its exact position, exact
+seeking, artwork in the ui's preview, `goto kodi movies|tvshows|music|...`,
+links played in Kodi, and restarting it where it was. `tveee pair kodi` saves
+its login if it has a password.
 
 ## Plugins
 

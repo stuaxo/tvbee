@@ -703,6 +703,9 @@ struct Shared {
     ambilight: AtomicBool,
     /// The preview panel is open: its lane makes pictures.
     preview: AtomicBool,
+    /// A picture of what an app's player is playing (package, art), for
+    /// the preview: what to show when its video can't be seen.
+    art: std::sync::Mutex<Option<(String, String)>>,
     /// The YouTube video playing (id, position in seconds, paused, when read),
     /// for the preview's storyboard frames.
     playing: std::sync::Mutex<Option<(String, f64, bool, Instant)>>,
@@ -736,6 +739,7 @@ impl Shared {
             shown: AtomicBool::new(false),
             ambilight: AtomicBool::new(false),
             preview: AtomicBool::new(false),
+            art: Default::default(),
             playing: Default::default(),
             apps_sent: std::sync::Mutex::new(false),
         }
@@ -922,6 +926,22 @@ impl Refresher {
             }
             (None, true) => None,
         };
+        // an app with its own player API (Kodi): its title, show, exact
+        // position, stream details, and artwork for the preview
+        let mut art = None;
+        let activity = match (pkg.as_deref(), awake) {
+            (Some(p), true) => match crate::provider::for_package(p).and_then(|pr| pr.player()) {
+                Some(player) => {
+                    let (a, picture) = nowplaying::with_player(&self.tv, p, player, activity);
+                    art = picture.map(|a| (p.to_string(), a));
+                    exact = exact || a.as_ref().is_some_and(|a| a.progress.is_some_and(|p| p.duration.is_some()));
+                    a
+                }
+                None => activity,
+            },
+            _ => activity,
+        };
+        *lock(&self.shared.art) = art;
         // a YouTube video and how far in, for the preview's storyboard frames
         *lock(&self.shared.playing) = activity.as_ref().and_then(|a| {
             let id = crate::plugins::youtube::video_id(a.url.as_deref()?)?;
@@ -991,6 +1011,10 @@ impl Actor {
 
     fn exact_seek(&mut self, to: SeekTo) -> Option<f64> {
         let pkg = lock(&self.shared.pkg).clone()?;
+        // an app with its own player API (Kodi)
+        if let Some(player) = crate::provider::for_package(&pkg).and_then(|p| p.player()) {
+            return player.seek(&self.tv, to).ok();
+        }
         if !nowplaying::has_devtools(&pkg) {
             return None;
         }
@@ -1019,7 +1043,12 @@ impl Actor {
                 said
             }
             Action::PlayPause => {
-                self.tv.keyevent(85)?;
+                let pkg = lock(&self.shared.pkg).clone();
+                let player = pkg.as_deref().and_then(crate::provider::for_package).and_then(|p| p.player());
+                // through the app's own player API when it has one, else the key
+                if !player.is_some_and(|p| p.play_pause(&self.tv).is_ok()) {
+                    self.tv.keyevent(85)?;
+                }
                 "play/pause".into()
             }
             Action::Volume(0) => "volume".into(),
@@ -1206,6 +1235,8 @@ fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
         let mut still_at: Option<Instant> = None;
         // the last YouTube frame sent (video, tenths of a second): not again
         let mut shown: Option<(String, i64)> = None;
+        // the last artwork sent
+        let mut shown_art: Option<String> = None;
         while open() {
             let playing = lock(&shared.playing).clone();
             if let Some((id, pos, paused, at)) = playing {
@@ -1262,6 +1293,32 @@ fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
                 }
                 continue;
             }
+            // an app's player says what's on and has a picture of it (Kodi,
+            // whose video scrcpy can't see): that
+            let art = lock(&shared.art).clone();
+            if let Some((pkg, art)) = art {
+                live = None;
+                if shown_art.as_ref() != Some(&art) {
+                    let bytes = crate::provider::for_package(&pkg).and_then(|p| p.player()).and_then(|p| p.picture(&tv, &art).ok());
+                    match bytes.and_then(|b| image::load_from_memory(&b).ok()) {
+                        Some(img) => {
+                            let rgb = img.to_rgb8();
+                            let p = crate::preview::Picture { width: rgb.width(), height: rgb.height(), rgb: rgb.into_raw(), source: "artwork" };
+                            if !send(Msg::Preview(p)) {
+                                return;
+                            }
+                            let _ = send(Msg::PreviewNote(String::new()));
+                        }
+                        None => {
+                            let _ = send(Msg::PreviewNote("couldn't get the artwork".into()));
+                        }
+                    }
+                    shown_art = Some(art);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+            shown_art = None;
             // anything else: scrcpy, the default
             let ready = crate::preview::scrcpy_ready();
             if live.is_none() && ready && scrcpy_failed.is_none_or(|t| t.elapsed() >= Duration::from_secs(15)) {

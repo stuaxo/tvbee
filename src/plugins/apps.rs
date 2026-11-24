@@ -506,8 +506,10 @@ pub fn before_link(tv: &Tv, pkg: &str) -> Result<bool> {
 /// front): Ok(true), and the caller has nothing more to do. Otherwise the app
 /// is got ready for a link ([`before_link`]) and the caller sends it.
 pub fn link_here_or_prepare(tv: &Tv, pkg: &str, url: &str) -> Result<bool> {
-    if crate::provider::for_package(pkg).is_some_and(|p| p.open_here(tv, url).unwrap_or(false)) {
-        return Ok(true);
+    if let Some(p) = crate::provider::for_package(pkg) {
+        if p.open_here(tv, url)? {
+            return Ok(true);
+        }
     }
     before_link(tv, pkg)?;
     Ok(false)
@@ -600,6 +602,8 @@ pub fn restart(tv: &Tv, pkg: &str, target: &str, restore: bool) -> Result<String
     let saved = if restore { crate::provider::for_package(pkg).and_then(|p| p.save_session(tv)) } else { None };
     tv.shell(&["am", "force-stop", pkg])?;
     match saved {
+        // apps that take the session back their own way
+        Some(s) if crate::provider::for_package(pkg).map_or(Ok(false), |p| p.restore_session(tv, target, &s))? => Ok(format!("restarted {name} {}", s.said).trim_end().to_string()),
         Some(s) => {
             let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(&s.link), super::open::sh_quote(pkg));
             let out = tv.shell(&[&cmd])?;
