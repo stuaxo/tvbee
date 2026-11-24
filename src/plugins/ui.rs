@@ -1038,14 +1038,15 @@ pub enum AppChoice {
 }
 
 impl AppChoice {
-    pub fn label(self) -> &'static str {
+    /// What it says in the menu for the app called `app`.
+    pub fn label(self, app: &str) -> String {
         match self {
-            AppChoice::Open => "open",
-            AppChoice::Front => "bring to front",
-            AppChoice::Restart => "restart (close, then start fresh)",
-            AppChoice::Close => "close (force-stop)",
-            AppChoice::Search => "search in it",
-            AppChoice::Cancel => "cancel",
+            AppChoice::Open => "open".into(),
+            AppChoice::Front => "bring to front".into(),
+            AppChoice::Restart => "restart (close, then start fresh)".into(),
+            AppChoice::Close => "close (force-stop)".into(),
+            AppChoice::Search => format!("search {app}"),
+            AppChoice::Cancel => "cancel".into(),
         }
     }
 }
@@ -2590,7 +2591,7 @@ impl App {
                     Line::default(),
                 ];
                 for (i, c) in choices.iter().enumerate() {
-                    let line = Line::from(format!("  {}", c.label()));
+                    let line = Line::from(format!("  {}", c.label(&e.name)));
                     text.push(if i == at { line.reversed() } else { line });
                 }
                 text.push(Line::default());
