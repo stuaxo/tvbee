@@ -42,6 +42,8 @@ pub enum Action {
     Mute,
     /// Any remote key (back, home, d-pad, OK), by Android keycode.
     Key(u32),
+    /// Type this text into the TV (remote mode).
+    Text(String),
     /// Run menu item N (an index into the plugins' menu items).
     Menu(usize),
     /// Run menu item N with the text the user typed for it.
@@ -76,6 +78,11 @@ pub const KEY_HOME: u32 = 3;
 const DPAD: [(KeyCode, u32, &str); 4] =
     [(KeyCode::Up, 19, "up"), (KeyCode::Down, 20, "down"), (KeyCode::Left, 21, "left"), (KeyCode::Right, 22, "right")];
 pub const KEY_OK: u32 = 23;
+/// Delete (backspace), forward delete, page up / down.
+pub const KEY_DEL: u32 = 67;
+pub const KEY_FORWARD_DEL: u32 = 112;
+pub const KEY_PAGE_UP: u32 = 92;
+pub const KEY_PAGE_DOWN: u32 = 93;
 
 /// What the arrow keys do: seek/volume, or move around the TV's menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +112,10 @@ pub fn key_name(code: u32) -> &'static str {
         KEY_BACK => "back",
         KEY_HOME => "home",
         KEY_OK => "ok",
+        KEY_DEL => "delete",
+        KEY_FORWARD_DEL => "forward delete",
+        KEY_PAGE_UP => "page up",
+        KEY_PAGE_DOWN => "page down",
         c => DPAD.iter().find(|(_, k, _)| *k == c).map_or("key", |(_, _, n)| n),
     }
 }
@@ -114,9 +125,11 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
     use Action::*;
     let act = |a| Input::Do(a);
     match (code, mode) {
-        (KeyCode::Char('q') | KeyCode::Esc, _) => Input::Quit,
         (KeyCode::Char('c'), _) if mods.contains(KeyModifiers::CONTROL) => Input::Quit,
         (KeyCode::Tab, _) => Input::ToggleMode,
+        // remote mode: the keyboard is the TV's (Tab leaves, Ctrl-C quits)
+        (_, Mode::Remote) => remote_input(code, mods),
+        (KeyCode::Char('q') | KeyCode::Esc, _) => Input::Quit,
         (KeyCode::Char('?'), _) => Input::ToggleHelp,
         (KeyCode::Char('.'), _) => Input::OpenMenu,
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
@@ -135,14 +148,31 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('m'), _) => act(Mute),
         (KeyCode::Char('r'), _) => act(Refresh),
         // player mode: arrows seek and change volume
-        (KeyCode::Left, Mode::Player) => act(Seek(-10.0)),
-        (KeyCode::Right, Mode::Player) => act(Seek(10.0)),
-        (KeyCode::Up, Mode::Player) => act(Volume(1)),
-        (KeyCode::Down, Mode::Player) => act(Volume(-1)),
-        // remote mode: arrows are the d-pad, Enter is OK
-        (KeyCode::Enter, Mode::Remote) => act(Key(KEY_OK)),
-        (c, Mode::Remote) => DPAD.iter().find(|(k, _, _)| *k == c).map_or(Input::Nothing, |(_, code, _)| act(Key(*code))),
+        (KeyCode::Left, _) => act(Seek(-10.0)),
+        (KeyCode::Right, _) => act(Seek(10.0)),
+        (KeyCode::Up, _) => act(Volume(1)),
+        (KeyCode::Down, _) => act(Volume(-1)),
         _ => Input::Nothing,
+    }
+}
+
+/// A key in remote mode: arrows are the d-pad, Enter is OK, Esc is back,
+/// and what you type is typed into the TV.
+fn remote_input(code: KeyCode, mods: KeyModifiers) -> Input {
+    let key = |k| Input::Do(Action::Key(k));
+    match code {
+        KeyCode::Enter => key(KEY_OK),
+        KeyCode::Esc => key(KEY_BACK),
+        KeyCode::Backspace => key(KEY_DEL),
+        KeyCode::Delete => key(KEY_FORWARD_DEL),
+        KeyCode::Home => key(KEY_HOME),
+        KeyCode::PageUp => key(KEY_PAGE_UP),
+        KeyCode::PageDown => key(KEY_PAGE_DOWN),
+        // Android's `input text` takes plain ASCII
+        KeyCode::Char(c) if !mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) && c.is_ascii() && !c.is_ascii_control() => {
+            Input::Do(Action::Text(c.to_string()))
+        }
+        c => DPAD.iter().find(|(k, _, _)| *k == c).map_or(Input::Nothing, |(_, code, _)| key(*code)),
     }
 }
 
@@ -155,6 +185,8 @@ pub fn coalesce(actions: Vec<Action>) -> Vec<Action> {
             (Some(Action::Seek(x)), Action::Seek(y)) => *x += y,
             (Some(Action::Volume(x)), Action::Volume(y)) => *x += y,
             (Some(Action::Refresh), Action::Refresh) => {}
+            // typing quickly: one round trip
+            (Some(Action::Text(x)), Action::Text(y)) => x.push_str(y),
             _ => out.push(a),
         }
     }
@@ -720,6 +752,10 @@ impl Worker {
             Action::Key(code) => {
                 self.tv.keyevent(code)?;
                 key_name(code).into()
+            }
+            Action::Text(t) => {
+                self.tv.shell(&["input", "text", &super::input::escape_text(&t)])?;
+                format!("typed \"{t}\"")
             }
             Action::Menu(i) => match self.menu.get(i).map(|m| m.run) {
                 Some(Run::Now(run)) => run(&self.tv)?,
@@ -1418,16 +1454,31 @@ fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
             button("↓", "vol-", Do(Volume(-1))),
             button("m", "mute", Do(Mute)),
         ],
-        Mode::Remote => vec![
-            button("↑", "up", Do(Key(19))),
-            button("↓", "down", Do(Key(20))),
-            button("←", "left", Do(Key(21))),
-            button("→", "right", Do(Key(22))),
-            button("⏎", "ok", Do(Key(KEY_OK))),
-            button("space", "play/pause", Do(PlayPause)),
-            button("+", "vol+", Do(Volume(1))),
-            button("-", "vol-", Do(Volume(-1))),
-        ],
+        // keys go to the TV: the rest are buttons to click (no key)
+        Mode::Remote => {
+            return vec![
+                button("↑", "up", Do(Key(19))),
+                button("↓", "down", Do(Key(20))),
+                button("←", "left", Do(Key(21))),
+                button("→", "right", Do(Key(22))),
+                button("⏎", "ok", Do(Key(KEY_OK))),
+                button("esc", "back", Do(Key(KEY_BACK))),
+                button("⌫", "delete", Do(Key(KEY_DEL))),
+                button("home", "home", Do(Key(KEY_HOME))),
+                button("tab", "player mode", ToggleMode),
+                button("^c", "quit", Quit),
+                button("", "play/pause", Do(PlayPause)),
+                button("", "vol+", Do(Volume(1))),
+                button("", "vol-", Do(Volume(-1))),
+                button("", "info", Input::ToggleInfo),
+                button("", "apps", Input::OpenApps),
+                button("", "search", Input::OpenSearch),
+                button("", "guide", Input::OpenGuide),
+                button("", "options", Input::OpenOptions),
+                button("", "more", OpenMenu),
+                button("", "help", ToggleHelp),
+            ];
+        }
     };
     b.extend([
         button("⌫", "back", Do(Key(KEY_BACK))),
@@ -1446,8 +1497,9 @@ fn buttons(mode: Mode, exact: bool) -> Vec<Button> {
 }
 
 fn button_width(b: &Button) -> u16 {
-    // " key " + " label"
-    u16::try_from(Span::raw(b.key).width() + Span::raw(b.label).width() + 3).unwrap_or(u16::MAX)
+    // " key " + " label", or " label " for a button with no key
+    let key = if b.key.is_empty() { 0 } else { Span::raw(b.key).width() + 2 };
+    u16::try_from(key + Span::raw(b.label).width() + 1 + usize::from(b.key.is_empty())).unwrap_or(u16::MAX)
 }
 
 /// Lay buttons out left to right, wrapping at `width`: (row, x offset) of each.
@@ -1767,7 +1819,7 @@ impl App {
             Input::ToggleMode => {
                 self.mode = if self.mode == Mode::Player { Mode::Remote } else { Mode::Player };
                 self.note = match self.mode {
-                    Mode::Remote => "remote mode: arrows move, Enter = OK".into(),
+                    Mode::Remote => "remote mode: keys go to the TV (typing too); Tab for player mode".into(),
                     Mode::Player => "player mode: arrows seek and change volume".into(),
                 };
             }
@@ -2008,10 +2060,15 @@ impl App {
             if rect.y >= footer.y + footer.height || rect.x + rect.width > footer.x + footer.width {
                 continue;
             }
-            let line = Line::from(vec![
-                Span::styled(format!(" {} ", b.key), Style::new().fg(Color::Black).bg(Color::Gray)),
-                Span::styled(format!(" {}", b.label), Style::new().fg(Color::Gray)),
-            ]);
+            let line = if b.key.is_empty() {
+                // click only: a button of its own
+                Line::from(Span::styled(format!(" {} ", b.label), Style::new().fg(Color::Black).bg(Color::DarkGray)))
+            } else {
+                Line::from(vec![
+                    Span::styled(format!(" {} ", b.key), Style::new().fg(Color::Black).bg(Color::Gray)),
+                    Span::styled(format!(" {}", b.label), Style::new().fg(Color::Gray)),
+                ])
+            };
             f.render_widget(Paragraph::new(line), rect);
             self.hits.push((rect, Hit::Input(b.input.clone())));
         }
@@ -2791,9 +2848,13 @@ const HELP: &str = " everywhere
    ← →      seek -/+ 10s (exact in YouTube; ff/rew keys elsewhere)
    ↑ ↓      volume
 
- remote mode
+ remote mode: the keyboard is the TV's (tab leaves, ctrl-c quits)
    arrows   move around the TV's menus
-   ⏎        OK
+   ⏎ esc    OK, back
+   ⌫ del    delete in a text box (backward, forward)
+   home     the TV's home screen    pgup pgdn  page up/down
+   typing   typed into the TV (a search box, say); pasting too
+   other actions: the buttons along the bottom
 
  mouse
    click the buttons, the progress bar (jump) or volume bar (set)
@@ -2885,8 +2946,16 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
                 }
             }
             Event::Paste(p) => {
-                if let Overlay::Prompt(_) | Overlay::Search(_) = app.overlay {
-                    app.prompt.push_str(&paste_text(&p));
+                match app.overlay {
+                    Overlay::Prompt(_) | Overlay::Search(_) => app.prompt.push_str(&paste_text(&p)),
+                    // remote mode: type it into the TV (what `input text` can)
+                    Overlay::None if app.mode == Mode::Remote => {
+                        let t: String = paste_text(&p).chars().filter(|c| c.is_ascii() && !c.is_ascii_control()).collect();
+                        if !t.is_empty() {
+                            let _ = actions.send(Action::Text(t));
+                        }
+                    }
+                    _ => {}
                 }
             }
             Event::Mouse(m) => match m.kind {
@@ -2991,8 +3060,9 @@ pub fn commands() -> Vec<Command> {
     vec![Command::new(CAT, "ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking", ui).long(
         "A full-screen remote showing what is playing (as 'tvbee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
-         the arrows seek and change volume; in remote mode they move around the TV's\n\
-         menus and Enter is OK.\n\
+         the arrows seek and change volume; in remote mode the keyboard is the TV's:\n\
+         arrows move around its menus, Enter is OK, Esc is back, and what you type\n\
+         (or paste) is typed into the TV. Tab switches back; Ctrl-C quits.\n\
          \n\
          \x20 space / p     play/pause   Backspace  back   h  home\n\
          \x20 left/right    seek 10s     [ / ]  seek 60s     0-9  jump to 0%-90%\n\
@@ -3190,9 +3260,22 @@ mod tests {
         assert_eq!(k(KeyCode::Enter, Mode::Remote), Input::Do(Action::Key(KEY_OK)));
         assert_eq!(k(KeyCode::Enter, Mode::Player), Input::Nothing);
         assert_eq!(k(KeyCode::Backspace, Mode::Player), Input::Do(Action::Key(KEY_BACK)));
-        assert_eq!(k(KeyCode::Char('h'), Mode::Remote), Input::Do(Action::Key(KEY_HOME)));
-        assert_eq!(k(KeyCode::Char('5'), Mode::Remote), Input::Do(Action::Jump(0.5)));
+        assert_eq!(k(KeyCode::Char('h'), Mode::Player), Input::Do(Action::Key(KEY_HOME)));
+        assert_eq!(k(KeyCode::Char('5'), Mode::Player), Input::Do(Action::Jump(0.5)));
         assert_eq!(k(KeyCode::Tab, Mode::Player), Input::ToggleMode);
+        // remote mode: the keyboard goes to the TV
+        let text = |s: &str| Input::Do(Action::Text(s.into()));
+        assert_eq!(k(KeyCode::Char('h'), Mode::Remote), text("h"));
+        assert_eq!(k(KeyCode::Char('q'), Mode::Remote), text("q"));
+        assert_eq!(k(KeyCode::Char(' '), Mode::Remote), text(" "));
+        assert_eq!(input_for(KeyCode::Char('A'), KeyModifiers::SHIFT, Mode::Remote), text("A"));
+        assert_eq!(k(KeyCode::Char('é'), Mode::Remote), Input::Nothing);
+        assert_eq!(k(KeyCode::Esc, Mode::Remote), Input::Do(Action::Key(KEY_BACK)));
+        assert_eq!(k(KeyCode::Backspace, Mode::Remote), Input::Do(Action::Key(KEY_DEL)));
+        assert_eq!(k(KeyCode::Home, Mode::Remote), Input::Do(Action::Key(KEY_HOME)));
+        // and these still get out
+        assert_eq!(k(KeyCode::Tab, Mode::Remote), Input::ToggleMode);
+        assert_eq!(k(KeyCode::Esc, Mode::Player), Input::Quit);
         assert_eq!(k(KeyCode::Char('x'), Mode::Player), Input::Nothing);
     }
 
@@ -3254,10 +3337,10 @@ mod tests {
     fn buttons_wrap_and_have_unique_keys() {
         for mode in [Mode::Player, Mode::Remote] {
             let bs = buttons(mode, true);
-            let mut keys: Vec<_> = bs.iter().map(|b| b.key).collect();
+            let mut keys: Vec<_> = bs.iter().map(|b| b.key).filter(|k| !k.is_empty()).collect();
             keys.sort();
             keys.dedup();
-            assert_eq!(keys.len(), bs.len(), "{mode:?}");
+            assert_eq!(keys.len(), bs.iter().filter(|b| !b.key.is_empty()).count(), "{mode:?}");
             // narrow terminal: several rows, and nothing past the edge
             let places = flow(&bs, 40);
             assert!(places.iter().any(|(r, _)| *r > 0));
@@ -3489,5 +3572,8 @@ mod tests {
             coalesce(vec![Seek(10.0), Seek(10.0), Volume(1), Volume(1), Volume(-1), Refresh, Refresh, Seek(-60.0)]),
             vec![Seek(20.0), Volume(1), Refresh, Seek(-60.0)]
         );
+        // typing fast: one `input text`
+        let t = |s: &str| Text(s.into());
+        assert_eq!(coalesce(vec![t("c"), t("a"), t("t"), Key(66), t("s")]), vec![t("cat"), Key(66), t("s")]);
     }
 }
