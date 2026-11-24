@@ -2273,8 +2273,9 @@ impl App {
             let on = if Some(e.package.as_str()) == pkg.as_deref() { "  (on now)" } else { "" };
             let extra = e.alias.or(e.tag).unwrap_or("");
             let dot = if self.running.contains(&e.package) && e.target != "home" { "●" } else { " " };
-            // fixed columns, so both tabs draw the same width
-            let line = Line::from(format!(" {dot}{:<wide$}  {extra:<12}{on:<10}", e.name));
+            // fixed columns, so both tabs draw the same width; a space after
+            // the dot, which some terminals draw wider than one cell
+            let line = Line::from(format!(" {dot} {:<wide$}  {extra:<12}{on:<10}", e.name));
             rows.push((if i == sel { line.reversed() } else { line }, Some(i)));
         }
         // scroll so the highlighted row stays in view
