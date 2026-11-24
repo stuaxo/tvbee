@@ -129,7 +129,7 @@ fn main() {
         }
         std::process::exit(match e {
             Error::Usage(_) => 2,
-            Error::Failed(_) => 1,
+            Error::Failed(_) | Error::Unavailable(_) => 1,
         });
     }
 }

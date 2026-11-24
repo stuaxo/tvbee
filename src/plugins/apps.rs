@@ -507,7 +507,7 @@ pub fn before_link(tv: &Tv, pkg: &str) -> Result<bool> {
 /// is got ready for a link ([`before_link`]) and the caller sends it.
 pub fn link_here_or_prepare(tv: &Tv, pkg: &str, url: &str) -> Result<bool> {
     if let Some(p) = crate::provider::for_package(pkg) {
-        if p.open_here(tv, url)? {
+        if p.open_here(tv, url).or_fallback()?.is_some() {
             return Ok(true);
         }
     }
@@ -599,11 +599,12 @@ fn currentapp(c: &Ctx, _: &[String]) -> Result<()> {
 /// (`target` is what to start). Returns what happened.
 pub fn restart(tv: &Tv, pkg: &str, target: &str, restore: bool) -> Result<String> {
     let name = by_package(pkg).map_or_else(|| crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()), |a| list_name(a.name));
-    let saved = if restore { crate::provider::for_package(pkg).and_then(|p| p.save_session(tv)) } else { None };
+    // where it is (nothing to keep, or the app can't say: start it fresh)
+    let saved = if restore { crate::provider::for_package(pkg).and_then(|p| p.save_session(tv).handled()) } else { None };
     tv.shell(&["am", "force-stop", pkg])?;
     match saved {
         // apps that take the session back their own way
-        Some(s) if crate::provider::for_package(pkg).map_or(Ok(false), |p| p.restore_session(tv, target, &s))? => Ok(format!("restarted {name} {}", s.said).trim_end().to_string()),
+        Some(s) if crate::provider::for_package(pkg).map_or(Ok(None), |p| p.restore_session(tv, target, &s).or_fallback())?.is_some() => Ok(format!("restarted {name} {}", s.said).trim_end().to_string()),
         Some(s) => {
             let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(&s.link), super::open::sh_quote(pkg));
             let out = tv.shell(&[&cmd])?;

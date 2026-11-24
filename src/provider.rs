@@ -220,6 +220,47 @@ pub struct Session {
     pub resume: Option<f64>,
 }
 
+/// What a provider hook did: it handled it; it can't here (the app's API
+/// isn't there, nothing's playing, ...), so do it the generic way (the media
+/// session, keys, an intent); or it tried and something broke.
+#[derive(Debug)]
+pub enum Outcome<T> {
+    Handled(T),
+    Fallback,
+    Failed(crate::error::Error),
+}
+
+impl<T> Outcome<T> {
+    /// The result if handled.
+    pub fn handled(self) -> Option<T> {
+        match self {
+            Outcome::Handled(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Handled: Some; fall back: None; failed: the error.
+    pub fn or_fallback(self) -> crate::error::Result<Option<T>> {
+        match self {
+            Outcome::Handled(t) => Ok(Some(t)),
+            Outcome::Fallback => Ok(None),
+            Outcome::Failed(e) => Err(e),
+        }
+    }
+}
+
+/// An API that isn't there (`Error::Unavailable`) is a fallback; other
+/// errors are failures.
+impl<T> From<crate::error::Result<T>> for Outcome<T> {
+    fn from(r: crate::error::Result<T>) -> Self {
+        match r {
+            Ok(t) => Outcome::Handled(t),
+            Err(crate::error::Error::Unavailable(_)) => Outcome::Fallback,
+            Err(e) => Outcome::Failed(e),
+        }
+    }
+}
+
 /// What a player app says is on: more than Android's media session gives.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Playing {
@@ -227,8 +268,13 @@ pub struct Playing {
     /// The show and episode ("Taskmaster S03E04"), or the artist.
     pub subtitle: Option<String>,
     pub progress: Option<crate::devtools::Progress>,
-    /// A picture of it (poster, fanart), for [`Player::picture`].
+    /// A link to it (`tveee goto`, `details`).
+    pub link: Option<String>,
+    /// A picture of it (poster, fanart, a frame), for [`Player::picture`].
     pub art: Option<String>,
+    /// The picture changes as it plays (a frame of the video): ask again
+    /// with the position, rather than once.
+    pub art_moves: bool,
     /// More to say: ("video", "1080p H.264"), ("audio", "English AC3 5.1"), ...
     pub extra: Vec<(&'static str, String)>,
 }
@@ -236,14 +282,19 @@ pub struct Playing {
 /// An app tveee can ask what it's playing and tell what to do, through an
 /// API of its own (Kodi's JSON-RPC).
 pub trait Player: Sync {
-    /// What's playing (None: nothing).
-    fn playing(&self, tv: &crate::tv::Tv) -> crate::error::Result<Option<Playing>>;
+    /// What's playing (fall back: nothing, or the app can't say).
+    fn playing(&self, tv: &crate::tv::Tv) -> Outcome<Playing>;
     /// Move what's playing; returns the new position in seconds.
-    fn seek(&self, tv: &crate::tv::Tv, to: crate::devtools::SeekTo) -> crate::error::Result<f64>;
-    fn play_pause(&self, tv: &crate::tv::Tv) -> crate::error::Result<()>;
-    /// The bytes of picture `art` (from [`Playing::art`]), for the ui's preview.
+    fn seek(&self, tv: &crate::tv::Tv, to: crate::devtools::SeekTo) -> Outcome<f64>;
+    fn play_pause(&self, _tv: &crate::tv::Tv) -> Outcome<()> {
+        Outcome::Fallback
+    }
+    /// Picture `art` (from [`Playing::art`]), as image file bytes, for the
+    /// ui's preview; `at`: how far in it is now, for pictures that move.
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
-    fn picture(&self, tv: &crate::tv::Tv, art: &str) -> crate::error::Result<Vec<u8>>;
+    fn picture(&self, _tv: &crate::tv::Tv, _art: &str, _at: Option<f64>) -> Outcome<Vec<u8>> {
+        Outcome::Fallback
+    }
 }
 
 /// A source of content. Everything but the identity is optional.
@@ -254,15 +305,6 @@ pub trait Provider: Sync {
     /// The packages it lives in.
     fn hosts(&self) -> &'static [&'static str];
 
-    /// Whether its app's page can be read through a devtools socket (for
-    /// what's playing, links, exact seeking).
-    fn uses_devtools(&self) -> bool {
-        false
-    }
-    /// A link to what's on, from the app's devtools page address.
-    fn watch_link(&self, _page: &str) -> Option<String> {
-        None
-    }
     /// A search-results link with `{q}` for the query.
     fn search_link(&self) -> Option<&'static str> {
         None
@@ -274,18 +316,17 @@ pub trait Provider: Sync {
     /// Where the user is in the app (a video, and how far in), so it can be
     /// brought back there: after restarting the app, say. None: nothing
     /// worth keeping, or the app can't say.
-    fn save_session(&self, _tv: &crate::tv::Tv) -> Option<Session> {
-        None
+    fn save_session(&self, _tv: &crate::tv::Tv) -> Outcome<Session> {
+        Outcome::Fallback
     }
     /// Whether [`Provider::save_session`] does anything (for listing).
     fn has_sessions(&self) -> bool {
         false
     }
     /// Start the app (closed: `target` is what to start) and bring it back
-    /// to a saved session. Ok(false): it didn't, so open the session's link
-    /// the usual way.
-    fn restore_session(&self, _tv: &crate::tv::Tv, _target: &str, _s: &Session) -> crate::error::Result<bool> {
-        Ok(false)
+    /// to a saved session. Fall back: open the session's link the usual way.
+    fn restore_session(&self, _tv: &crate::tv::Tv, _target: &str, _s: &Session) -> Outcome<()> {
+        Outcome::Fallback
     }
     /// The app's own API for what's playing and controlling it.
     fn player(&self) -> Option<&dyn Player> {
@@ -293,10 +334,9 @@ pub trait Provider: Sync {
     }
     /// Hand `link` to the app where it is, when it's already in front,
     /// without starting an activity (which, with `fresh_for_links`, means
-    /// closing it first). Ok(false): it couldn't, so send the link as usual;
-    /// an error: the link can only go this way, and it failed.
-    fn open_here(&self, _tv: &crate::tv::Tv, _link: &str) -> crate::error::Result<bool> {
-        Ok(false)
+    /// closing it first). Fall back: send the link as usual.
+    fn open_here(&self, _tv: &crate::tv::Tv, _link: &str) -> Outcome<()> {
+        Outcome::Fallback
     }
     /// Fixed places in the app (`tveee goto <id>`).
     fn places(&self) -> &'static [Place] {
@@ -344,9 +384,6 @@ pub fn capabilities(p: &dyn Provider) -> Vec<&'static str> {
     if p.search_link().is_some() {
         v.push("search");
     }
-    if p.uses_devtools() {
-        v.push("now-playing");
-    }
     if p.has_sessions() {
         v.push("sessions");
     }
@@ -383,11 +420,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn outcomes() {
+        use crate::error::Error;
+        let unavailable: Outcome<u8> = Err(Error::Unavailable("off".into())).into();
+        assert!(matches!(unavailable, Outcome::Fallback));
+        let broke: Outcome<u8> = Err(Error::Failed("bad".into())).into();
+        assert!(broke.or_fallback().is_err());
+        let done: Outcome<u8> = Ok(3).into();
+        assert_eq!(done.handled(), Some(3));
+        assert_eq!(Outcome::<u8>::Fallback.or_fallback().unwrap(), None);
+    }
+
+    #[test]
     fn registry_has_the_built_in_providers() {
         let ids: Vec<_> = all().iter().map(|p| p.id()).collect();
         assert!(ids.contains(&"youtube") && ids.contains(&"freeview"), "{ids:?}");
         let yt = for_package("com.google.android.youtube.tv").unwrap();
-        assert_eq!(capabilities(yt), vec!["details", "places", "search", "now-playing", "sessions"]);
+        assert_eq!(capabilities(yt), vec!["details", "places", "search", "sessions", "player"]);
         let tv = with_guide(None).unwrap();
         assert_eq!(tv.id(), "freeview");
         assert_eq!(capabilities(tv), vec!["guide", "channels"]);

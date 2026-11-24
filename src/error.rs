@@ -5,6 +5,9 @@ use std::fmt;
 pub enum Error {
     Usage(String),
     Failed(String),
+    /// An app's own API isn't there (not running, switched off): callers
+    /// can fall back to the generic way (see `provider::Outcome`).
+    Unavailable(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -12,7 +15,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Usage(m) | Error::Failed(m) => f.write_str(m),
+            Error::Usage(m) | Error::Failed(m) | Error::Unavailable(m) => f.write_str(m),
         }
     }
 }

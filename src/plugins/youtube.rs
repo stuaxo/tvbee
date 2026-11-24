@@ -9,6 +9,10 @@
 use crate::devtools;
 use crate::more::{Chapter, Details, Go, Link, Place};
 use crate::error::{failed, Result};
+use crate::provider::{Outcome, Playing};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use crate::registry::Command;
 use crate::tv::Tv;
 
@@ -57,11 +61,8 @@ impl crate::provider::Provider for YouTube {
     fn hosts(&self) -> &'static [&'static str] {
         &[PACKAGE]
     }
-    fn uses_devtools(&self) -> bool {
-        true
-    }
-    fn watch_link(&self, page: &str) -> Option<String> {
-        watch_link(page)
+    fn player(&self) -> Option<&dyn crate::provider::Player> {
+        Some(self)
     }
     // the TV app takes links, not the search intent
     fn search_link(&self) -> Option<&'static str> {
@@ -75,20 +76,22 @@ impl crate::provider::Provider for YouTube {
     // already in front: hand the page the link as Android would, through
     // devtools, rather than closing the app for it (the screen would drop
     // to home, then reopen). The app ignores changes to location.hash.
-    fn open_here(&self, tv: &Tv, link: &str) -> Result<bool> {
+    fn open_here(&self, tv: &Tv, link: &str) -> Outcome<()> {
         // anything amiss: the usual way
         if crate::plugins::info::focus_package(&tv.window_dump().unwrap_or_default()).as_deref() != Some(PACKAGE) {
-            return Ok(false);
+            return Outcome::Fallback;
         }
-        let Some(c) = devtools::Conn::open(tv, PACKAGE) else { return Ok(false) };
-        Ok(c.eval(&deep_link_expr(link)).is_ok_and(|v| v == "sent"))
+        match devtools::with_conn(tv, PACKAGE, |c| c.eval(&deep_link_expr(link))) {
+            Ok(v) if v == "sent" => Outcome::Handled(()),
+            _ => Outcome::Fallback,
+        }
     }
     fn places(&self) -> &'static [Place] {
         PLACES
     }
     // the video and how far in: restarting comes back to it
-    fn save_session(&self, tv: &Tv) -> Option<crate::provider::Session> {
-        session(tv)
+    fn save_session(&self, tv: &Tv) -> Outcome<crate::provider::Session> {
+        session(tv).map_or(Outcome::Fallback, Outcome::Handled)
     }
     fn has_sessions(&self) -> bool {
         true
@@ -122,6 +125,258 @@ fn deep_link_expr(link: &str) -> String {
          var e=new Event('deeplink');Object.defineProperty(e,'url',{{value:{quoted}}});\
          r.dispatchEvent(e);return 'sent'}})()"
     )
+}
+
+// --- the player: what's playing, seeking, and a picture of it ----------------
+
+impl crate::provider::Player for YouTube {
+    fn playing(&self, tv: &Tv) -> Outcome<Playing> {
+        let pages = match devtools::with_conn(tv, PACKAGE, |c| c.pages()) {
+            Ok(p) => p,
+            Err(e) => return Outcome::from(Err::<Playing, _>(e)),
+        };
+        let link = pages.iter().find_map(|p| watch_link(&p.url));
+        let progress = pages.iter().find_map(|p| p.progress);
+        if link.is_none() && progress.is_none() {
+            return Outcome::Fallback;
+        }
+        let art = link.as_deref().and_then(video_id).map(|id| format!("youtube:{id}"));
+        // the title is the media session's (it has the channel too)
+        Outcome::Handled(Playing { progress, art, art_moves: true, link, ..Playing::default() })
+    }
+    fn seek(&self, tv: &Tv, to: devtools::SeekTo) -> Outcome<f64> {
+        devtools::with_conn(tv, PACKAGE, |c| c.seek(to)).into()
+    }
+    // a frame of the video at `at`: from a small copy of it, or its
+    // storyboard until that's here
+    fn picture(&self, _tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {
+        let Some(id) = art.strip_prefix("youtube:") else { return Outcome::Fallback };
+        let at = at.unwrap_or(0.0);
+        if let Some(copy) = copy_of(id) {
+            if let Some(jpeg) = frame_of(&copy, at) {
+                return Outcome::Handled(jpeg);
+            }
+        }
+        storyboard_frame(id, at).map_or(Outcome::Fallback, Outcome::Handled)
+    }
+}
+
+fn program(name: &str) -> Option<PathBuf> {
+    crate::tv::search_path(name, std::env::var_os("PATH").as_deref())
+}
+
+/// Where small copies of videos and storyboard sheets are kept.
+fn previews_dir() -> Option<PathBuf> {
+    Some(crate::plugin::cache_path("x")?.parent()?.join("previews"))
+}
+
+/// How many copies of videos to keep.
+const KEEP: usize = 4;
+
+/// The smallest video-only download yt-dlp can find (a direct one, not a
+/// stream of pieces): 144p, a couple of MB for a few minutes.
+const SMALLEST: &[&str] = &["-f", "bv[protocol^=http]/bv/wv", "-S", "+size,+br,+res"];
+
+/// Copies being fetched (None: tried, failed) or here.
+fn copies() -> &'static Mutex<HashMap<String, Option<PathBuf>>> {
+    static COPIES: OnceLock<Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
+    COPIES.get_or_init(Default::default)
+}
+
+/// The small copy of video `id`, if it's here; the first ask starts
+/// fetching it (in the background).
+fn copy_of(id: &str) -> Option<PathBuf> {
+    let mut all = copies().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    match all.get(id) {
+        Some(Some(p)) if p.exists() => return Some(p.clone()),
+        Some(_) => return None,
+        None => {}
+    }
+    // fetching: None until done (or for good, if it fails)
+    all.insert(id.to_string(), None);
+    let id = id.to_string();
+    std::thread::spawn(move || {
+        if let Ok(p) = local_copy(&id) {
+            copies().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id, Some(p));
+        }
+    });
+    None
+}
+
+/// A copy of video `id`, at the lowest quality, made with yt-dlp (or the one
+/// made before). Slow-ish the first time.
+pub fn local_copy(id: &str) -> Result<PathBuf> {
+    let Some(dir) = previews_dir() else { return failed("preview: no cache folder") };
+    std::fs::create_dir_all(&dir)?;
+    let mine = |p: &PathBuf| {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        name.starts_with(&format!("{id}.")) && !name.ends_with(".part") && !name.ends_with(".ytdl")
+    };
+    let copies_here = || -> Vec<PathBuf> {
+        std::fs::read_dir(&dir).map(|d| d.flatten().map(|e| e.path()).filter(|p| !p.to_string_lossy().contains("-sb")).collect()).unwrap_or_default()
+    };
+    if let Some(p) = copies_here().into_iter().find(mine) {
+        return Ok(p);
+    }
+    // room for this one: the oldest go
+    let mut old: Vec<(std::time::SystemTime, PathBuf)> =
+        copies_here().into_iter().filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p))).collect();
+    old.sort();
+    for (_, p) in old.iter().rev().skip(KEEP - 1) {
+        let _ = std::fs::remove_file(p);
+    }
+    let Some(ytdlp) = program("yt-dlp") else { return failed("preview: yt-dlp isn't installed here") };
+    let out = std::process::Command::new(ytdlp)
+        .args(["-q", "--no-playlist", "--no-progress"])
+        .args(SMALLEST)
+        .arg("-o")
+        .arg(dir.join(format!("{id}.%(ext)s")))
+        .arg(format!("https://www.youtube.com/watch?v={id}"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()?;
+    match copies_here().into_iter().find(mine) {
+        Some(p) => Ok(p),
+        None => failed(format!("preview: yt-dlp couldn't fetch the video: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("").trim())),
+    }
+}
+
+/// `ffmpeg` over `input` with filter `vf`, one frame out as JPEG.
+fn ffmpeg_jpeg(seek: Option<f64>, input: &std::path::Path, vf: &str) -> Option<Vec<u8>> {
+    let mut cmd = std::process::Command::new(program("ffmpeg")?);
+    cmd.args(["-loglevel", "error"]);
+    if let Some(s) = seek {
+        cmd.args(["-ss", &format!("{:.2}", s.max(0.0))]);
+    }
+    let out = cmd
+        .arg("-i")
+        .arg(input)
+        .args(["-frames:v", "1", "-vf", vf, "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    (!out.stdout.is_empty()).then_some(out.stdout)
+}
+
+/// The frame at `secs` into a video file, as JPEG.
+pub fn frame_of(file: &std::path::Path, secs: f64) -> Option<Vec<u8>> {
+    ffmpeg_jpeg(Some(secs), file, "scale=320:-2")
+}
+
+/// A video's storyboard: sheets of `cols` x `rows` frames, each `width` x
+/// `height`, `fps` frames a second of video.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Storyboard {
+    pub cols: u32,
+    pub rows: u32,
+    pub fps: f64,
+    pub width: u32,
+    pub height: u32,
+    pub sheets: Vec<String>,
+}
+
+impl Storyboard {
+    /// Which sheet, and where on it (x, y), the frame at `secs` is.
+    pub fn frame_at(&self, secs: f64) -> Option<(usize, u32, u32)> {
+        let per_sheet = (self.cols * self.rows) as usize;
+        if per_sheet == 0 || self.sheets.is_empty() {
+            return None;
+        }
+        let i = (secs.max(0.0) * self.fps).floor() as usize;
+        // past the end: the last frame there is
+        let i = i.min(self.sheets.len() * per_sheet - 1);
+        let (sheet, cell) = (i / per_sheet, (i % per_sheet) as u32);
+        Some((sheet, (cell % self.cols) * self.width, (cell / self.cols) * self.height))
+    }
+}
+
+/// The strings in a JSON list of strings (`["a", "b\"c"]`).
+pub fn json_strings(list: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = list.chars();
+    while let Some(c) = chars.next() {
+        if c != '"' {
+            continue;
+        }
+        let mut s = String::new();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => {
+                    if let Some(e) = chars.next() {
+                        s.push(match e {
+                            'n' => '\n',
+                            't' => '\t',
+                            other => other,
+                        });
+                    }
+                }
+                '"' => break,
+                c => s.push(c),
+            }
+        }
+        out.push(s);
+    }
+    out
+}
+
+/// The storyboard from yt-dlp's two lines (see [`storyboard`]).
+pub fn parse_storyboard(out: &str) -> Option<Storyboard> {
+    let mut lines = out.lines().filter(|l| !l.trim().is_empty());
+    let nums: Vec<&str> = lines.next()?.split_whitespace().collect();
+    let [cols, rows, fps, width, height] = nums.as_slice() else { return None };
+    let sheets = json_strings(lines.next()?);
+    Some(Storyboard {
+        cols: cols.parse().ok()?,
+        rows: rows.parse().ok()?,
+        fps: fps.parse().ok()?,
+        width: width.parse().ok()?,
+        height: height.parse().ok()?,
+        sheets,
+    })
+    .filter(|s| !s.sheets.is_empty() && s.fps > 0.0)
+}
+
+/// Video `id`'s storyboard, from yt-dlp (asked once a run per video).
+pub fn storyboard(id: &str) -> Option<Storyboard> {
+    static KNOWN: OnceLock<Mutex<HashMap<String, Option<Storyboard>>>> = OnceLock::new();
+    let known = KNOWN.get_or_init(Default::default);
+    if let Some(s) = known.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(id) {
+        return s.clone();
+    }
+    let out = std::process::Command::new(program("yt-dlp")?)
+        .args(["--skip-download", "-f", "sb0", "-O", "%(columns)s %(rows)s %(fps)s %(width)s %(height)s", "-O", "%(fragments.:.url)j"])
+        .arg(format!("https://www.youtube.com/watch?v={id}"))
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let board = parse_storyboard(&String::from_utf8_lossy(&out.stdout));
+    known.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.to_string(), board.clone());
+    board
+}
+
+/// The storyboard frame of video `id` at `secs`, as JPEG.
+pub fn storyboard_frame(id: &str, secs: f64) -> Option<Vec<u8>> {
+    let board = storyboard(id)?;
+    let (n, x, y) = board.frame_at(secs)?;
+    // the sheet, fetched once
+    let dir = previews_dir()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    let sheet = dir.join(format!("{id}-sb{n}.jpg"));
+    if !sheet.exists() {
+        let ok = std::process::Command::new(program("curl")?)
+            .args(["-sSfL", "--max-time", "15", "-o"])
+            .arg(&sheet)
+            .arg(board.sheets.get(n)?)
+            .status()
+            .ok()?
+            .success();
+        if !ok {
+            return None;
+        }
+    }
+    ffmpeg_jpeg(None, &sheet, &format!("crop={}:{}:{x}:{y}", board.width, board.height))
 }
 
 pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
@@ -222,8 +477,7 @@ pub fn details(link: &str) -> Result<Details> {
 
 /// Where YouTube is: the video and how far in (or home), from its page.
 fn session(tv: &Tv) -> Option<crate::provider::Session> {
-    let c = devtools::Conn::open(tv, PACKAGE)?;
-    let raw = c.eval("JSON.stringify({h:location.hash,t:(document.querySelector('video')||{}).currentTime||0})").ok()?;
+    let raw = devtools::with_conn(tv, PACKAGE, |c| c.eval("JSON.stringify({h:location.hash,t:(document.querySelector('video')||{}).currentTime||0})")).ok()?;
     let hash = crate::http::string_field(&raw, "h")?;
     Some(match video_id(&hash) {
         Some(id) => {
@@ -246,6 +500,28 @@ pub fn commands() -> Vec<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn storyboard_frames() {
+        let board = parse_storyboard("WARNING: ignored\n5 5 0.1 120 90\n[\"https://a/M0.jpg?x=1\", \"https://a/M1.jpg\"]\n");
+        // the warning line is the first non-empty: not numbers
+        assert_eq!(board, None);
+        let b = parse_storyboard("5 5 0.1 120 90\n[\"https://a/M0.jpg?x=1\", \"https://a/M1.jpg\"]\n").unwrap();
+        assert_eq!((b.cols, b.width, b.sheets.len()), (5, 120, 2));
+        // 0.1 fps: frame 0 at 0s, frame 7 at 70s (row 1, column 2), frame 25 on sheet 1
+        assert_eq!(b.frame_at(0.0), Some((0, 0, 0)));
+        assert_eq!(b.frame_at(75.0), Some((0, 240, 90)));
+        assert_eq!(b.frame_at(250.0), Some((1, 0, 0)));
+        // past the end: the last frame
+        assert_eq!(b.frame_at(99999.0), Some((1, 480, 360)));
+    }
+
+    #[test]
+    fn reads_json_strings() {
+        assert_eq!(json_strings(r#"["a", "b\"c", "d\\e"]"#), ["a", "b\"c", "d\\e"]);
+        assert!(json_strings("[]").is_empty());
+    }
+
 
     #[test]
     fn deep_links_are_quoted() {

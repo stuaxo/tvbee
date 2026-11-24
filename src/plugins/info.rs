@@ -501,7 +501,8 @@ fn current(tv: &Tv) -> Result<(String, Option<&'static super::apps::App>, Option
     let window = tv.window_dump()?;
     let Some(pkg) = focus_package(&window) else { return failed("can't tell which app is in front") };
     let app = super::apps::by_package(&pkg);
-    let url = if nowplaying::has_devtools(&pkg) {
+    // only apps whose player can say (YouTube) have a link to what's on
+    let url = if crate::provider::for_package(&pkg).is_some_and(|p| p.player().is_some()) {
         let sessions = super::media::parse_media_sessions(&tv.shell(&["dumpsys", "media_session"]).unwrap_or_default());
         nowplaying::activity(tv, &pkg, &sessions).and_then(|a| a.url)
     } else {
@@ -551,9 +552,12 @@ fn details_cmd(c: &Ctx, args: &[String]) -> Result<()> {
 fn go(tv: &Tv, pkg: &str, to: &crate::more::Go) -> Result<String> {
     match to {
         crate::more::Go::Seek(t) => {
-            let conn = crate::devtools::Conn::open(tv, pkg).map_or_else(|| failed("goto: can't reach the app's video to seek"), Ok)?;
-            let at = conn.seek(crate::devtools::SeekTo::At(*t))?;
-            Ok(format!("seeked to {}", clock(at)))
+            let player = crate::provider::for_package(pkg).and_then(|p| p.player());
+            match player.map(|p| p.seek(tv, crate::devtools::SeekTo::At(*t)).or_fallback()) {
+                Some(Ok(Some(at))) => Ok(format!("seeked to {}", clock(at))),
+                Some(Err(e)) => Err(e),
+                _ => failed("goto: can't reach the app's video to seek"),
+            }
         }
         crate::more::Go::Link(url) => {
             // the app's own links go to it; anything else goes wherever it belongs

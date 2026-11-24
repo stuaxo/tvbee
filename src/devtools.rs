@@ -26,6 +26,46 @@ pub fn sockets(proc_net_unix: &str) -> Vec<String> {
     names
 }
 
+/// Keep connections open between calls (the ui, which asks every second);
+/// otherwise each call opens one and closes it (one-off commands).
+static KEEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static KEPT: std::sync::Mutex<Option<Conn>> = std::sync::Mutex::new(None);
+
+/// Keep connections open (the ui), or close the kept one and stop keeping.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn keep_open(on: bool) {
+    KEEP.store(on, std::sync::atomic::Ordering::Relaxed);
+    if !on {
+        KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    }
+}
+
+/// Run `f` with a connection to `pkg`'s devtools server: the kept one if
+/// there is (reopened once if it fails: the app restarted, say). No server:
+/// `Error::Unavailable`.
+pub fn with_conn<T>(tv: &Tv, pkg: &str, f: impl Fn(&Conn) -> Result<T>) -> Result<T> {
+    let none = || Error::Unavailable(format!("can't reach {pkg}'s page (is it running?)"));
+    if !KEEP.load(std::sync::atomic::Ordering::Relaxed) {
+        return f(&Conn::open(tv, pkg).ok_or_else(none)?);
+    }
+    let mut kept = KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if kept.as_ref().is_some_and(|c| c.pkg != pkg) {
+        *kept = None;
+    }
+    for fresh in [false, true] {
+        if fresh || kept.is_none() {
+            *kept = Conn::open(tv, pkg);
+        }
+        let Some(c) = kept.as_ref() else { return Err(none()) };
+        match f(c) {
+            Ok(t) => return Ok(t),
+            Err(e) if fresh => return Err(e),
+            Err(_) => *kept = None,
+        }
+    }
+    Err(none())
+}
+
 /// Where the page's `<video>` is.
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Progress {
@@ -158,12 +198,6 @@ if(!vs.length)return '';vs.sort((a,b)=>(b.duration||0)-(a.duration||0));const v=
 const t={target};if(isNaN(t))return '';\
 v.currentTime=Math.max(0,isFinite(v.duration)?Math.min(t,v.duration-1):t);return String(v.currentTime)}})()"
     )
-}
-
-/// The pages open in `pkg`'s devtools server, with their video progress.
-/// Never fails: no devtools just means no pages.
-pub fn pages(tv: &Tv, pkg: &str) -> Vec<Page> {
-    Conn::open(tv, pkg).and_then(|c| c.pages().ok()).unwrap_or_default()
 }
 
 /// `ws://127.0.0.1:9229/devtools/page/ID` -> `/devtools/page/ID`

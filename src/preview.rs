@@ -1,12 +1,7 @@
 //! Pictures of what's on the TV, for the ui's preview panel.
 //!
-//! - YouTube: a copy of the video at its lowest quality (144p, a few MB),
-//!   downloaded here with yt-dlp; each picture is the frame at the TV's
-//!   position (read from the app every second), so it keeps in step,
-//!   pauses and seeks with it. Its storyboard frames (small, every few
-//!   seconds of video, fetched here too) fill in while the copy downloads.
-//!
-//! Everything else:
+//! Apps with a player of their own give their own pictures (see
+//! `Player::picture`: YouTube's frames, Kodi's artwork). Everything else:
 //!
 //! - scrcpy's server, run on the TV at 320 pixels and one frame a second: the
 //!   TV's hardware encoder sends H.264, which `ffmpeg` here turns back into
@@ -16,11 +11,10 @@
 
 use crate::error::{failed, Result};
 use crate::tv::Tv;
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 /// The size pictures are made at.
@@ -205,204 +199,9 @@ pub fn screencap(tv: &Tv) -> Result<Picture> {
     from_screencap(&raw).map_or_else(|| failed("preview: the TV's screenshot wasn't what tveee expected"), Ok)
 }
 
-// --- YouTube storyboards ------------------------------------------------------
-
-/// A video's storyboard: sheets of `cols` x `rows` frames, each `width` x
-/// `height`, `fps` frames a second of video.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Storyboard {
-    pub cols: u32,
-    pub rows: u32,
-    pub fps: f64,
-    pub width: u32,
-    pub height: u32,
-    pub sheets: Vec<String>,
-}
-
-impl Storyboard {
-    /// Which sheet, and where on it (x, y), the frame at `secs` is.
-    pub fn frame_at(&self, secs: f64) -> Option<(usize, u32, u32)> {
-        let per_sheet = (self.cols * self.rows) as usize;
-        if per_sheet == 0 || self.sheets.is_empty() {
-            return None;
-        }
-        let i = (secs.max(0.0) * self.fps).floor() as usize;
-        // past the end: the last frame there is
-        let i = i.min(self.sheets.len() * per_sheet - 1);
-        let (sheet, cell) = (i / per_sheet, (i % per_sheet) as u32);
-        Some((sheet, (cell % self.cols) * self.width, (cell / self.cols) * self.height))
-    }
-}
-
-/// The strings in a JSON list of strings (`["a", "b\"c"]`).
-pub fn json_strings(list: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut chars = list.chars();
-    while let Some(c) = chars.next() {
-        if c != '"' {
-            continue;
-        }
-        let mut s = String::new();
-        while let Some(c) = chars.next() {
-            match c {
-                '\\' => {
-                    if let Some(e) = chars.next() {
-                        s.push(match e {
-                            'n' => '\n',
-                            't' => '\t',
-                            other => other,
-                        });
-                    }
-                }
-                '"' => break,
-                c => s.push(c),
-            }
-        }
-        out.push(s);
-    }
-    out
-}
-
-/// The storyboard from yt-dlp's two lines (see [`storyboard`]).
-pub fn parse_storyboard(out: &str) -> Option<Storyboard> {
-    let mut lines = out.lines().filter(|l| !l.trim().is_empty());
-    let nums: Vec<&str> = lines.next()?.split_whitespace().collect();
-    let [cols, rows, fps, width, height] = nums.as_slice() else { return None };
-    let sheets = json_strings(lines.next()?);
-    Some(Storyboard {
-        cols: cols.parse().ok()?,
-        rows: rows.parse().ok()?,
-        fps: fps.parse().ok()?,
-        width: width.parse().ok()?,
-        height: height.parse().ok()?,
-        sheets,
-    })
-    .filter(|s| !s.sheets.is_empty() && s.fps > 0.0)
-}
-
-/// Video `id`'s storyboard, from yt-dlp (asked once a run per video).
-pub fn storyboard(id: &str) -> Option<Storyboard> {
-    static KNOWN: OnceLock<Mutex<HashMap<String, Option<Storyboard>>>> = OnceLock::new();
-    let known = KNOWN.get_or_init(Default::default);
-    if let Some(s) = known.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(id) {
-        return s.clone();
-    }
-    let ytdlp = program("yt-dlp")?;
-    let out = std::process::Command::new(ytdlp)
-        .args(["--skip-download", "-f", "sb0", "-O", "%(columns)s %(rows)s %(fps)s %(width)s %(height)s", "-O", "%(fragments.:.url)j"])
-        .arg(format!("https://www.youtube.com/watch?v={id}"))
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    let board = parse_storyboard(&String::from_utf8_lossy(&out.stdout));
-    known.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.to_string(), board.clone());
-    board
-}
-
-/// A storyboard sheet, fetched (with curl) and decoded; kept for the run.
-fn sheet(url: &str) -> Option<image::RgbImage> {
-    static SHEETS: OnceLock<Mutex<HashMap<String, image::RgbImage>>> = OnceLock::new();
-    let sheets = SHEETS.get_or_init(Default::default);
-    if let Some(s) = sheets.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(url) {
-        return Some(s.clone());
-    }
-    let out = std::process::Command::new(program("curl")?).args(["-sSfL", "--max-time", "15", url]).output().ok()?;
-    let img = image::load_from_memory(&out.stdout).ok()?.to_rgb8();
-    sheets.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(url.to_string(), img.clone());
-    Some(img)
-}
-
-/// The storyboard frame of video `id` at `secs`.
-pub fn storyboard_frame(id: &str, secs: f64) -> Option<Picture> {
-    let board = storyboard(id)?;
-    let (n, x, y) = board.frame_at(secs)?;
-    let sheet = sheet(board.sheets.get(n)?)?;
-    let cell = image::imageops::crop_imm(&sheet, x, y, board.width.min(sheet.width().saturating_sub(x)), board.height.min(sheet.height().saturating_sub(y))).to_image();
-    Some(Picture { width: cell.width(), height: cell.height(), rgb: cell.into_raw(), source: "YouTube storyboard" })
-}
-
-// --- YouTube: a small copy of the video, shown in step with the TV ----------
-
-/// Where small copies of videos are kept (a few, newest first).
-fn copies_dir() -> Option<PathBuf> {
-    Some(crate::plugin::cache_path("x")?.parent()?.join("previews"))
-}
-
-/// How many copies to keep.
-const KEEP: usize = 4;
-
-/// The smallest video-only download yt-dlp can find (a direct one, not a
-/// stream of pieces): 144p, a couple of MB for a few minutes.
-const SMALLEST: &[&str] = &["-f", "bv[protocol^=http]/bv/wv", "-S", "+size,+br,+res"];
-
-/// A copy of video `id`, at the lowest quality, made with yt-dlp (or the one
-/// made before). Slow-ish the first time: for a thread of its own.
-pub fn local_copy(id: &str) -> Result<PathBuf> {
-    let Some(dir) = copies_dir() else { return failed("preview: no cache folder") };
-    std::fs::create_dir_all(&dir)?;
-    let mine = |p: &PathBuf| {
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        name.starts_with(&format!("{id}.")) && !name.ends_with(".part") && !name.ends_with(".ytdl")
-    };
-    let listed = || -> Vec<PathBuf> { std::fs::read_dir(&dir).map(|d| d.flatten().map(|e| e.path()).collect()).unwrap_or_default() };
-    if let Some(p) = listed().into_iter().find(mine) {
-        return Ok(p);
-    }
-    // room for this one: the oldest go
-    let mut old: Vec<(std::time::SystemTime, PathBuf)> =
-        listed().into_iter().filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p))).collect();
-    old.sort();
-    for (_, p) in old.iter().rev().skip(KEEP - 1).collect::<Vec<_>>() {
-        let _ = std::fs::remove_file(p);
-    }
-    let Some(ytdlp) = program("yt-dlp") else { return failed("preview: yt-dlp isn't installed here") };
-    let out = std::process::Command::new(ytdlp)
-        .args(["-q", "--no-playlist", "--no-progress"])
-        .args(SMALLEST)
-        .arg("-o")
-        .arg(dir.join(format!("{id}.%(ext)s")))
-        .arg(format!("https://www.youtube.com/watch?v={id}"))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .output()?;
-    match listed().into_iter().find(mine) {
-        Some(p) => Ok(p),
-        None => failed(format!("preview: yt-dlp couldn't fetch the video: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("").trim())),
-    }
-}
-
-/// The frame at `secs` into a video file, at [`WIDTH`] x [`HEIGHT`].
-pub fn frame_of(file: &std::path::Path, secs: f64) -> Option<Picture> {
-    let out = std::process::Command::new(program("ffmpeg")?)
-        .args(["-loglevel", "error", "-ss", &format!("{:.2}", secs.max(0.0)), "-i"])
-        .arg(file)
-        .args(["-frames:v", "1", "-vf", &format!("scale={WIDTH}:{HEIGHT}"), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    (out.stdout.len() == (WIDTH * HEIGHT * 3) as usize).then_some(Picture { width: WIDTH, height: HEIGHT, rgb: out.stdout, source: "YouTube, a small copy" })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn storyboard_frames() {
-        let board = parse_storyboard("WARNING: ignored\n5 5 0.1 120 90\n[\"https://a/M0.jpg?x=1\", \"https://a/M1.jpg\"]\n");
-        // the warning line is the first non-empty: not numbers
-        assert_eq!(board, None);
-        let b = parse_storyboard("5 5 0.1 120 90\n[\"https://a/M0.jpg?x=1\", \"https://a/M1.jpg\"]\n").unwrap();
-        assert_eq!((b.cols, b.width, b.sheets.len()), (5, 120, 2));
-        // 0.1 fps: frame 0 at 0s, frame 7 at 70s (row 1, column 2), frame 25 on sheet 1
-        assert_eq!(b.frame_at(0.0), Some((0, 0, 0)));
-        assert_eq!(b.frame_at(75.0), Some((0, 240, 90)));
-        assert_eq!(b.frame_at(250.0), Some((1, 0, 0)));
-        // past the end: the last frame
-        assert_eq!(b.frame_at(99999.0), Some((1, 480, 360)));
-    }
 
     #[test]
     fn black_pictures() {
@@ -411,12 +210,6 @@ mod tests {
         let mut some = vec![0; 30];
         some[..6].copy_from_slice(&[200, 200, 200, 200, 200, 200]);
         assert!(!p(some).black());
-    }
-
-    #[test]
-    fn reads_json_strings() {
-        assert_eq!(json_strings(r#"["a", "b\"c", "d\\e"]"#), ["a", "b\"c", "d\\e"]);
-        assert!(json_strings("[]").is_empty());
     }
 
     #[test]

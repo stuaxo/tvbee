@@ -11,7 +11,7 @@
 use crate::devtools::{Progress, SeekTo};
 use crate::error::{failed, Error, Result};
 use crate::more::Place;
-use crate::provider::{Playing, Session};
+use crate::provider::{Outcome, Playing, Session};
 use crate::registry::Command;
 use crate::tv::Tv;
 
@@ -156,7 +156,7 @@ fn login(tv: &Tv) -> (u16, String, String) {
 }
 
 fn off() -> Error {
-    Error::Failed(
+    Error::Unavailable(
         "Kodi isn't answering: it isn't running, or its remote control is off (in Kodi: Settings > Services > Control > Allow remote control via HTTP)"
             .into(),
     )
@@ -261,7 +261,8 @@ pub fn parse_playing(item: &str, props: &str) -> Playing {
     if let Some(s) = track("currentsubtitle").filter(|_| subs_on) {
         extra.push(("subtitles", s));
     }
-    Playing { title, subtitle, progress, art, extra }
+    let link = None;
+    Playing { title, subtitle, progress, link, art, art_moves: false, extra }
 }
 
 /// What Kodi is playing, and its file (for sessions).
@@ -333,49 +334,86 @@ impl crate::provider::Provider for Kodi {
         true
     }
     // what's playing and how far in: restarting comes back to it
-    fn save_session(&self, tv: &Tv) -> Option<Session> {
-        let (playing, file) = now(tv).ok()??;
-        let at = playing.progress.map(|p| p.position.floor())?;
-        Some(Session { link: file?, said: format!("at {} in the same file", crate::nowplaying::clock(at)), resume: Some(at) })
+    fn save_session(&self, tv: &Tv) -> Outcome<Session> {
+        let saved = now(tv).map(|n| {
+            let (playing, file) = n?;
+            let at = playing.progress.map(|p| p.position.floor())?;
+            Some(Session { link: file?, said: format!("at {} in the same file", crate::nowplaying::clock(at)), resume: Some(at) })
+        });
+        match Outcome::from(saved) {
+            Outcome::Handled(Some(s)) => Outcome::Handled(s),
+            Outcome::Handled(None) | Outcome::Fallback => Outcome::Fallback,
+            Outcome::Failed(e) => Outcome::Failed(e),
+        }
     }
-    fn restore_session(&self, tv: &Tv, target: &str, s: &Session) -> Result<bool> {
-        crate::plugins::apps::start(tv, target)?;
-        wait_ready(tv, 40)?;
-        let options = s.resume.map(|t| format!(r#","options":{{"resume":{}}}"#, time_json(t))).unwrap_or_default();
-        call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}{options}}}"#, quote(&s.link)))?;
-        Ok(true)
+    fn restore_session(&self, tv: &Tv, target: &str, s: &Session) -> Outcome<()> {
+        let restored = (|| {
+            crate::plugins::apps::start(tv, target)?;
+            wait_ready(tv, 40)?;
+            let options = s.resume.map(|t| format!(r#","options":{{"resume":{}}}"#, time_json(t))).unwrap_or_default();
+            call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}{options}}}"#, quote(&s.link))).map(drop)
+        })();
+        // started, but its remote control never answered: that's a failure,
+        // not "do it another way" (Kodi is already up)
+        match restored {
+            Err(Error::Unavailable(m)) => Outcome::Failed(Error::Failed(m)),
+            r => r.into(),
+        }
     }
     // places in Kodi, and media links played in the running Kodi
-    fn open_here(&self, tv: &Tv, link: &str) -> Result<bool> {
+    fn open_here(&self, tv: &Tv, link: &str) -> Outcome<()> {
         if let Some(params) = window_params(link) {
-            bring_up(tv)?;
-            call(tv, "GUI.ActivateWindow", &params)?;
-            return Ok(true);
+            // only this way: not reaching Kodi is a failure
+            return match bring_up(tv).and_then(|()| call(tv, "GUI.ActivateWindow", &params)) {
+                Ok(_) => Outcome::Handled(()),
+                Err(e) => Outcome::Failed(Error::Failed(e.to_string())),
+            };
         }
         // its remote control off (or Kodi not running): the usual way, an intent
         if !ping(tv) {
-            return Ok(false);
+            return Outcome::Fallback;
         }
-        call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}}}"#, quote(link)))?;
-        let _ = crate::plugins::apps::bring_to_front(tv, PACKAGE);
-        Ok(true)
+        let played = call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}}}"#, quote(link)));
+        if played.is_ok() {
+            let _ = crate::plugins::apps::bring_to_front(tv, PACKAGE);
+        }
+        played.map(drop).into()
     }
 }
 
 impl crate::provider::Player for Kodi {
-    fn playing(&self, tv: &Tv) -> Result<Option<Playing>> {
-        Ok(now(tv)?.map(|(p, _)| p))
+    fn playing(&self, tv: &Tv) -> Outcome<Playing> {
+        match Outcome::from(now(tv)) {
+            Outcome::Handled(Some((p, _))) => Outcome::Handled(p),
+            Outcome::Handled(None) | Outcome::Fallback => Outcome::Fallback,
+            Outcome::Failed(e) => Outcome::Failed(e),
+        }
     }
-    fn seek(&self, tv: &Tv, to: SeekTo) -> Result<f64> {
-        let Some((id, _)) = player_id(tv)? else { return failed("Kodi isn't playing anything") };
-        let r = call(tv, "Player.Seek", &format!(r#"{{"playerid":{id},"value":{}}}"#, seek_value(to)))?;
-        value_of(&r, "time").and_then(seconds).map_or_else(|| failed("Kodi didn't say where it seeked to"), Ok)
+    fn seek(&self, tv: &Tv, to: SeekTo) -> Outcome<f64> {
+        let seeked = player_id(tv).and_then(|p| {
+            // nothing playing: keys won't do better, but they can't hurt
+            let Some((id, _)) = p else { return Err(Error::Unavailable("Kodi isn't playing anything".into())) };
+            let r = call(tv, "Player.Seek", &format!(r#"{{"playerid":{id},"value":{}}}"#, seek_value(to)))?;
+            value_of(&r, "time").and_then(seconds).map_or_else(|| failed("Kodi didn't say where it seeked to"), Ok)
+        });
+        seeked.into()
     }
-    fn play_pause(&self, tv: &Tv) -> Result<()> {
-        let Some((id, _)) = player_id(tv)? else { return failed("Kodi isn't playing anything") };
-        call(tv, "Player.PlayPause", &format!(r#"{{"playerid":{id}}}"#)).map(drop)
+    fn play_pause(&self, tv: &Tv) -> Outcome<()> {
+        let done = player_id(tv).and_then(|p| {
+            let Some((id, _)) = p else { return Err(Error::Unavailable("Kodi isn't playing anything".into())) };
+            call(tv, "Player.PlayPause", &format!(r#"{{"playerid":{id}}}"#)).map(drop)
+        });
+        done.into()
     }
-    fn picture(&self, tv: &Tv, art: &str) -> Result<Vec<u8>> {
+    fn picture(&self, tv: &Tv, art: &str, _at: Option<f64>) -> Outcome<Vec<u8>> {
+        self.art_bytes(tv, art).into()
+    }
+}
+
+impl Kodi {
+    /// Kodi's picture `art` (an image:// address), fetched from it.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    fn art_bytes(&self, tv: &Tv, art: &str) -> Result<Vec<u8>> {
         let r = call(tv, "Files.PrepareDownload", &format!(r#"{{"path":{}}}"#, quote(art)))?;
         let Some(path) = value_of(&r, "details").and_then(|d| str_of(d, "path")) else { return failed("Kodi didn't offer the picture") };
         let (port, user, pass) = login(tv);

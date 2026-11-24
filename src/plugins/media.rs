@@ -305,21 +305,27 @@ fn session(c: &Ctx) -> Result<Session> {
 fn player_in_front(tv: &crate::tv::Tv) -> Option<&'static dyn crate::provider::Player> {
     let pkg = super::info::focus_package(&tv.window_dump().ok()?)?;
     let player = crate::provider::for_package(&pkg)?.player()?;
-    player.playing(tv).ok().flatten().map(|_| player)
+    player.playing(tv).handled().map(|_| player)
 }
 
 /// Seek through the app's own player when it has one; false: do it with keys.
 fn player_seek(c: &Ctx, to: crate::devtools::SeekTo) -> Result<bool> {
     let Some(player) = player_in_front(&c.tv) else { return Ok(false) };
-    let at = player.seek(&c.tv, to)?;
-    println!("now at {}", crate::nowplaying::clock(at));
-    Ok(true)
+    match player.seek(&c.tv, to).or_fallback()? {
+        Some(at) => {
+            println!("now at {}", crate::nowplaying::clock(at));
+            Ok(true)
+        }
+        None => Ok(false),
+    }
 }
 
 fn playpause(c: &Ctx, _: &[String]) -> Result<()> {
     c.tv.connect()?;
     if let Some(player) = player_in_front(&c.tv) {
-        return player.play_pause(&c.tv);
+        if player.play_pause(&c.tv).or_fallback()?.is_some() {
+            return Ok(());
+        }
     }
     c.tv.keyevent(85)
 }

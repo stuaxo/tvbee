@@ -5,7 +5,7 @@
 //! What an app is called and how to read a link out of its page lives with the
 //! app itself (`plugins::apps::all`); this module only combines the clues.
 
-use crate::devtools::{self, Progress};
+use crate::devtools::Progress;
 use crate::plugins::apps::{self, Kind};
 use crate::plugins::media::MediaInfo;
 use crate::tv::Tv;
@@ -180,7 +180,7 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
         Some(a) => Some((a.name.to_string(), a.kind)),
         None => apps::identify(pkg, &apps::guesses(tv)),
     };
-    let a = live(tv, pkg).or_else(|| activity_with(pkg, who, sessions, || devtools::pages(tv, pkg)));
+    let a = live(tv, pkg).or_else(|| activity_with(pkg, who, sessions));
     match crate::provider::for_package(pkg).and_then(|p| p.player()) {
         Some(player) => with_player(tv, pkg, player, a).0,
         None => a,
@@ -190,9 +190,10 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
 /// `a`, filled in from an app's own player API when it says what's playing
 /// (title, show, exact position, stream details); and the picture of it,
 /// if there is one. Anything amiss there: `a` as it was.
-pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: Option<Activity>) -> (Option<Activity>, Option<String>) {
-    let Ok(Some(p)) = player.playing(tv) else { return (a, None) };
-    (Some(merge_playing(pkg, a, p.clone())), p.art)
+pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: Option<Activity>) -> (Option<Activity>, Option<crate::provider::Playing>) {
+    // can't say, or broke: what the media session said
+    let Some(p) = player.playing(tv).handled() else { return (a, None) };
+    (Some(merge_playing(pkg, a, p.clone())), Some(p))
 }
 
 /// `a` (from the media session) with what the player said.
@@ -209,6 +210,9 @@ pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing
     if p.progress.is_some() {
         out.progress = p.progress;
     }
+    if p.link.is_some() {
+        out.url = p.link;
+    }
     if let Some(s) = p.subtitle {
         out.fields.push(Field { label: "from", value: s, place: Place::Top, open: None });
     }
@@ -216,33 +220,13 @@ pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing
     out
 }
 
-/// The app's devtools hook, if it has one (only then is `pages` worth calling).
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
-pub fn has_devtools(pkg: &str) -> bool {
-    crate::provider::for_package(pkg).is_some_and(|p| p.uses_devtools())
-}
 
 /// As [`activity`], with the devtools pages coming from `pages` (called only
 /// when the app has a devtools hook and something is playing or paused).
-pub fn activity_with(
-    pkg: &str,
-    who: Option<(String, Kind)>,
-    sessions: &[MediaInfo],
-    pages: impl FnOnce() -> Vec<devtools::Page>,
-) -> Option<Activity> {
+pub fn activity_with(pkg: &str, who: Option<(String, Kind)>, sessions: &[MediaInfo]) -> Option<Activity> {
     let session = session_for(pkg, sessions);
     let (what, title) = describe(pkg, who.as_ref().map(|(n, k)| (n.as_str(), *k)), session)?;
-    // the devtools round trip is only worth it while something is on
-    let (mut url, mut progress) = (None, None);
-    let on = session.filter(|s| s.playing() || s.paused());
-    let provider = crate::provider::for_package(pkg).filter(|p| p.uses_devtools());
-    if let (Some(p), Some(_)) = (provider, on) {
-        let link = |u: &str| p.watch_link(u);
-        let pages = pages();
-        url = pages.iter().find_map(|p| link(&p.url));
-        progress = pages.iter().find_map(|p| p.progress);
-    }
-    Some(Activity { what, title, url, progress, fields: Vec::new() })
+    Some(Activity { what, title, url: None, progress: None, fields: Vec::new() })
 }
 
 #[cfg(test)]
@@ -257,6 +241,8 @@ mod tests {
             subtitle: Some("Taskmaster S03E04".into()),
             progress: Some(crate::devtools::Progress { position: 200.0, duration: Some(2700.0), paused: false }),
             art: None,
+            link: None,
+            art_moves: false,
             extra: vec![("video", "1080p H264".into())],
         };
         let a = merge_playing("org.xbmc.kodi", session, p.clone());

@@ -680,6 +680,28 @@ pub fn guide_move(ids: &[u32], at: u32, code: KeyCode) -> u32 {
     ids[to]
 }
 
+/// What a player said it has a picture of, as of a refresh.
+#[derive(Debug, Clone, PartialEq)]
+struct ArtNow {
+    pkg: String,
+    art: String,
+    /// The picture changes as it plays (a video frame): ask for it again,
+    /// at the position now.
+    moves: bool,
+    position: Option<f64>,
+    paused: bool,
+    /// When that was read.
+    at: Instant,
+}
+
+impl ArtNow {
+    /// How far in it is now (moving on from the refresh if it's playing).
+    fn now(&self) -> Option<f64> {
+        let p = self.position?;
+        Some(if self.paused { p } else { p + self.at.elapsed().as_secs_f64() })
+    }
+}
+
 /// What the lanes share.
 struct Shared {
     ip: String,
@@ -703,12 +725,9 @@ struct Shared {
     ambilight: AtomicBool,
     /// The preview panel is open: its lane makes pictures.
     preview: AtomicBool,
-    /// A picture of what an app's player is playing (package, art), for
-    /// the preview: what to show when its video can't be seen.
-    art: std::sync::Mutex<Option<(String, String)>>,
-    /// The YouTube video playing (id, position in seconds, paused, when read),
-    /// for the preview's storyboard frames.
-    playing: std::sync::Mutex<Option<(String, f64, bool, Instant)>>,
+    /// A picture of what an app's player is playing, for the preview.
+    art: std::sync::Mutex<Option<ArtNow>>,
+
     /// The launcher's apps have been sent (held while they're being read, so
     /// they're read once, by whichever lane gets there first).
     apps_sent: std::sync::Mutex<bool>,
@@ -740,7 +759,7 @@ impl Shared {
             ambilight: AtomicBool::new(false),
             preview: AtomicBool::new(false),
             art: Default::default(),
-            playing: Default::default(),
+
             apps_sent: std::sync::Mutex::new(false),
         }
     }
@@ -808,23 +827,11 @@ fn send_running(tv: &Tv, tx: &Sender<Msg>) {
     }
 }
 
-/// A devtools connection for `pkg`, opened (or re-opened) on demand.
-fn devtools_for<'a>(slot: &'a mut Option<devtools::Conn>, tv: &Tv, pkg: &str, stopping: bool) -> Option<&'a devtools::Conn> {
-    if slot.as_ref().is_some_and(|c| c.pkg != pkg) {
-        *slot = None;
-    }
-    if slot.is_none() && !stopping {
-        *slot = devtools::Conn::open(tv, pkg);
-    }
-    slot.as_ref()
-}
-
 /// The refresh lane: what's on, every [`REFRESH`], or sooner when woken
 /// (after an action). Holds off while an action runs.
 struct Refresher {
     tv: Tv,
     shared: Arc<Shared>,
-    conn: Option<devtools::Conn>,
     /// Live TV's channel, and when it was read.
     channel: Option<(crate::provider::Channel, Instant)>,
 }
@@ -900,41 +907,28 @@ impl Refresher {
         let activity = match (&pkg, awake) {
             (_, false) => Some(Activity::just("In standby")),
             (Some(_), true) if live.is_some() => live.take(),
-            (Some(pkg), true) => {
-                let pkg = pkg.clone();
-                let who = apps::identify(&pkg, &guesses);
-                let use_dt = nowplaying::has_devtools(&pkg);
-                let stopping = self.shared.stopping();
-                let (tv, slot) = (&self.tv, &mut self.conn);
-                let mut pages = || {
-                    if !use_dt {
-                        return Vec::new();
-                    }
-                    let got = devtools_for(slot, tv, &pkg, stopping).map(|c| c.pages());
-                    match got {
-                        Some(Ok(p)) => p,
-                        // stale forward (app restarted?): drop it, try once more
-                        _ => {
-                            *slot = None;
-                            devtools_for(slot, tv, &pkg, stopping).and_then(|c| c.pages().ok()).unwrap_or_default()
-                        }
-                    }
-                };
-                let a = nowplaying::activity_with(&pkg, who, &sessions, &mut pages);
-                exact = a.as_ref().is_some_and(|a| a.progress.is_some());
-                a
-            }
+            (Some(pkg), true) => nowplaying::activity_with(pkg, apps::identify(pkg, &guesses), &sessions),
             (None, true) => None,
         };
-        // an app with its own player API (Kodi): its title, show, exact
-        // position, stream details, and artwork for the preview
+        // an app with its own player (YouTube, Kodi): exact position, the
+        // show, stream details, a link, and a picture for the preview
         let mut art = None;
         let activity = match (pkg.as_deref(), awake) {
             (Some(p), true) => match crate::provider::for_package(p).and_then(|pr| pr.player()) {
                 Some(player) => {
-                    let (a, picture) = nowplaying::with_player(&self.tv, p, player, activity);
-                    art = picture.map(|a| (p.to_string(), a));
-                    exact = exact || a.as_ref().is_some_and(|a| a.progress.is_some_and(|p| p.duration.is_some()));
+                    let (a, playing) = nowplaying::with_player(&self.tv, p, player, activity);
+                    exact = a.as_ref().is_some_and(|a| a.progress.is_some());
+                    art = playing.and_then(|pl| {
+                        let progress = pl.progress;
+                        Some(ArtNow {
+                            pkg: p.to_string(),
+                            art: pl.art?,
+                            moves: pl.art_moves,
+                            position: progress.map(|x| x.position),
+                            paused: progress.is_none_or(|x| x.paused),
+                            at: Instant::now(),
+                        })
+                    });
                     a
                 }
                 None => activity,
@@ -942,12 +936,6 @@ impl Refresher {
             _ => activity,
         };
         *lock(&self.shared.art) = art;
-        // a YouTube video and how far in, for the preview's storyboard frames
-        *lock(&self.shared.playing) = activity.as_ref().and_then(|a| {
-            let id = crate::plugins::youtube::video_id(a.url.as_deref()?)?;
-            let p = a.progress?;
-            Some((id, p.position, p.paused, Instant::now()))
-        });
         Ok(Snapshot {
             activity,
             volume: media::parse_volume(&audio),
@@ -971,7 +959,6 @@ impl Refresher {
 struct Actor {
     tv: Tv,
     shared: Arc<Shared>,
-    conn: Option<devtools::Conn>,
     menu: Vec<MenuItem>,
     /// Wakes the refresh.
     wake: Sender<()>,
@@ -1009,16 +996,11 @@ impl Actor {
         drop(tx);
     }
 
+    /// Seek exactly through the app's own player (YouTube, Kodi); None: it
+    /// has none, or it can't now (then keys do it).
     fn exact_seek(&mut self, to: SeekTo) -> Option<f64> {
         let pkg = lock(&self.shared.pkg).clone()?;
-        // an app with its own player API (Kodi)
-        if let Some(player) = crate::provider::for_package(&pkg).and_then(|p| p.player()) {
-            return player.seek(&self.tv, to).ok();
-        }
-        if !nowplaying::has_devtools(&pkg) {
-            return None;
-        }
-        devtools_for(&mut self.conn, &self.tv, &pkg, self.shared.stopping())?.seek(to).ok()
+        crate::provider::for_package(&pkg)?.player()?.seek(&self.tv, to).handled()
     }
 
     /// Carry out one action; returns status-line feedback.
@@ -1046,7 +1028,7 @@ impl Actor {
                 let pkg = lock(&self.shared.pkg).clone();
                 let player = pkg.as_deref().and_then(crate::provider::for_package).and_then(|p| p.player());
                 // through the app's own player API when it has one, else the key
-                if !player.is_some_and(|p| p.play_pause(&self.tv).is_ok()) {
+                if player.and_then(|p| p.play_pause(&self.tv).handled()).is_none() {
                     self.tv.keyevent(85)?;
                 }
                 "play/pause".into()
@@ -1210,18 +1192,10 @@ pub fn picture_terminal(env: impl Fn(&str) -> Option<String>) -> bool {
 /// step. Anything else: scrcpy's pictures (the default for apps without
 /// their own way), or a screenshot every few seconds without it.
 fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
-    use crate::preview::{local_copy, frame_of, screencap, storyboard_frame, Scrcpy};
-    use std::collections::HashMap;
+    use crate::preview::{screencap, Scrcpy};
     let tv = shared.tv();
     let open = || shared.preview.load(Ordering::Relaxed) && !shared.stopping();
     let send = |m: Msg| tx.send(m).is_ok();
-    // copies of YouTube videos: downloading, ready, or failed (for the run)
-    enum Copy {
-        Fetching(mpsc::Receiver<Result<std::path::PathBuf>>),
-        Ready(std::path::PathBuf),
-        Failed,
-    }
-    let mut copies: HashMap<String, Copy> = HashMap::new();
     loop {
         while !open() {
             if shared.stopping() {
@@ -1233,89 +1207,46 @@ fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
         // when scrcpy last failed (not again for a while)
         let mut scrcpy_failed: Option<Instant> = None;
         let mut still_at: Option<Instant> = None;
-        // the last YouTube frame sent (video, tenths of a second): not again
-        let mut shown: Option<(String, i64)> = None;
-        // the last artwork sent
-        let mut shown_art: Option<String> = None;
+        // the last picture sent (what, and where in it for moving ones)
+        let mut shown_art: Option<(String, i64)> = None;
         while open() {
-            let playing = lock(&shared.playing).clone();
-            if let Some((id, pos, paused, at)) = playing {
-                // YouTube: no need for scrcpy
-                live = None;
-                let secs = if paused { pos } else { pos + at.elapsed().as_secs_f64() };
-                if !copies.contains_key(&id) {
-                    let (done, rx) = mpsc::channel();
-                    let want = id.clone();
-                    std::thread::spawn(move || {
-                        let _ = done.send(local_copy(&want));
-                    });
-                    copies.insert(id.clone(), Copy::Fetching(rx));
-                    let _ = send(Msg::PreviewNote("getting a small copy of the video (144p)...".into()));
-                }
-                if let Some(Copy::Fetching(rx)) = copies.get(&id) {
-                    match rx.try_recv() {
-                        Ok(Ok(path)) => {
-                            copies.insert(id.clone(), Copy::Ready(path));
-                            let _ = send(Msg::PreviewNote(String::new()));
-                        }
-                        Ok(Err(e)) => {
-                            copies.insert(id.clone(), Copy::Failed);
-                            let _ = send(Msg::PreviewNote(format!("{e}; storyboard frames only")));
-                        }
-                        Err(_) => {}
-                    }
-                }
-                match copies.get(&id) {
-                    Some(Copy::Ready(path)) => {
-                        let at_tenth = (secs * 10.0) as i64;
-                        if shown.as_ref() != Some(&(id.clone(), at_tenth)) {
-                            if let Some(p) = frame_of(path, secs) {
-                                if !send(Msg::Preview(p)) {
-                                    return;
-                                }
-                            }
-                            shown = Some((id.clone(), at_tenth));
-                        }
-                        std::thread::sleep(Duration::from_millis(400));
-                    }
-                    // meanwhile (or instead): the storyboard
-                    _ => {
-                        if still_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(3)) {
-                            still_at = Some(Instant::now());
-                            if let Some(p) = storyboard_frame(&id, secs) {
-                                if !send(Msg::Preview(p)) {
-                                    return;
-                                }
-                            }
-                        }
-                        std::thread::sleep(Duration::from_millis(200));
-                    }
-                }
-                continue;
-            }
-            // an app's player says what's on and has a picture of it (Kodi,
-            // whose video scrcpy can't see): that
+            // an app's player has a picture of what's on (YouTube's frames,
+            // Kodi's artwork: its video is on a layer scrcpy can't see)
             let art = lock(&shared.art).clone();
-            if let Some((pkg, art)) = art {
+            if let Some(a) = art {
                 live = None;
-                if shown_art.as_ref() != Some(&art) {
-                    let bytes = crate::provider::for_package(&pkg).and_then(|p| p.player()).and_then(|p| p.picture(&tv, &art).ok());
-                    match bytes.and_then(|b| image::load_from_memory(&b).ok()) {
-                        Some(img) => {
-                            let rgb = img.to_rgb8();
-                            let p = crate::preview::Picture { width: rgb.width(), height: rgb.height(), rgb: rgb.into_raw(), source: "artwork" };
-                            if !send(Msg::Preview(p)) {
-                                return;
+                let at = a.now();
+                // a still picture once; a moving one as the position moves
+                let key = (a.art.clone(), if a.moves { at.map_or(0, |t| (t * 4.0) as i64) } else { 0 });
+                if shown_art.as_ref() != Some(&key) {
+                    let provider = crate::provider::for_package(&a.pkg);
+                    let got = provider.and_then(|p| p.player()).map(|p| p.picture(&tv, &a.art, at));
+                    match got.map(|g| g.or_fallback()) {
+                        Some(Ok(Some(bytes))) => match image::load_from_memory(&bytes) {
+                            Ok(img) => {
+                                let rgb = img.to_rgb8();
+                                let source = provider.map_or("the app", |p| p.name());
+                                let p = crate::preview::Picture { width: rgb.width(), height: rgb.height(), rgb: rgb.into_raw(), source };
+                                if !send(Msg::Preview(p)) {
+                                    return;
+                                }
+                                let _ = send(Msg::PreviewNote(String::new()));
                             }
-                            let _ = send(Msg::PreviewNote(String::new()));
+                            Err(e) => {
+                                let _ = send(Msg::PreviewNote(format!("couldn't read the picture: {e}")));
+                            }
+                        },
+                        Some(Err(e)) => {
+                            let _ = send(Msg::PreviewNote(e.to_string()));
                         }
-                        None => {
-                            let _ = send(Msg::PreviewNote("couldn't get the artwork".into()));
+                        // not ready yet (a video being fetched, say)
+                        _ => {
+                            let _ = send(Msg::PreviewNote("getting a picture of it...".into()));
                         }
                     }
-                    shown_art = Some(art);
+                    shown_art = Some(key);
                 }
-                std::thread::sleep(Duration::from_millis(500));
+                std::thread::sleep(Duration::from_millis(200));
                 continue;
             }
             shown_art = None;
@@ -3988,6 +3919,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let (msg_tx, msg_rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let shared = Arc::new(Shared::new(c.tv.ip.clone(), Arc::clone(&stop)));
+    // asked every second: keep the apps' devtools connections open
+    devtools::keep_open(true);
     // the lanes (see `route`): keys, actions, reads, background, and the refresh
     let (key_tx, key_rx) = mpsc::channel();
     let (do_tx, do_rx) = mpsc::channel();
@@ -3999,7 +3932,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     std::thread::spawn(move || route(&act_rx, &sh, &lanes));
     let (key_msgs, key_tv) = (msg_tx.clone(), shared.tv());
     std::thread::spawn(move || send_keys(key_tv, &key_rx, &key_msgs));
-    let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), conn: None, menu: c.menu.clone(), wake: wake_tx, reads: read_tx, pairing: None };
+    let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), menu: c.menu.clone(), wake: wake_tx, reads: read_tx, pairing: None };
     let actor_msgs = msg_tx.clone();
     std::thread::spawn(move || actor.run(&do_rx, actor_msgs));
     let (read_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
@@ -4008,7 +3941,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     std::thread::spawn(move || background(&sh, &idle_rx, idle_msgs));
     let (preview_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
     std::thread::spawn(move || preview_lane(&sh, &preview_msgs));
-    let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), conn: None, channel: None };
+    let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None };
     std::thread::spawn(move || refresher.run(&wake_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);
     let mut app = App {
@@ -4077,6 +4010,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
             break;
         }
     }
+    // and close the kept connection (its port forward)
+    devtools::keep_open(false);
     Ok(result?)
 }
 
