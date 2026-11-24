@@ -213,7 +213,8 @@ enum Msg {
     /// The apps with a proper search (fetched once).
     Searchable(Vec<search::Searchable>),
     /// The packages with a running process.
-    Running(std::collections::BTreeSet<String>),
+    /// Apps with a process, and those of them Android keeps running (persistent).
+    Running(std::collections::BTreeSet<String>, std::collections::BTreeSet<String>),
     /// The guide pop-up's rows, or why there aren't any.
     Guide(std::result::Result<Guide, String>),
     /// A programme's description (channel, start).
@@ -548,8 +549,10 @@ impl Worker {
 
     /// Tell the ui which apps are running.
     fn send_running(&self, tx: &Sender<Msg>) {
-        if let Ok(ps) = self.tv.shell(&["ps", "-A", "-o", "NAME"]) {
-            let _ = tx.send(Msg::Running(apps::running(&ps)));
+        let cmd = format!("ps -A -o NAME; echo @@; {}", apps::PERSISTENT_CMD);
+        if let Ok(out) = self.tv.shell(&[&cmd]) {
+            let (ps, pers) = out.split_once("@@").unwrap_or((&out, ""));
+            let _ = tx.send(Msg::Running(apps::running(ps), apps::persistent(pers)));
         }
     }
 
@@ -874,6 +877,8 @@ struct App {
     prompt: String,
     /// Packages with a running process (for the launcher).
     running: std::collections::BTreeSet<String>,
+    /// Running apps that can't be closed (Android keeps them running).
+    fixed: std::collections::BTreeSet<String>,
     /// Apps with a proper search; None until the worker has looked.
     searchable: Option<Vec<search::Searchable>>,
     /// The search box's app choices, made when it opens.
@@ -1053,10 +1058,11 @@ impl AppChoice {
 
 /// The choices for an app: running ones can be brought forward, closed or
 /// restarted; "home" can't be closed.
-pub fn app_choices(e: &Entry, running: bool) -> Vec<AppChoice> {
+pub fn app_choices(e: &Entry, running: bool, fixed: bool) -> Vec<AppChoice> {
     let home = e.target == "home";
     let mut v = vec![if running { AppChoice::Front } else { AppChoice::Open }];
-    if running && !home {
+    // Android restarts a persistent app as soon as it's stopped
+    if running && !home && !fixed {
         v.extend([AppChoice::Restart, AppChoice::Close]);
     }
     if !home {
@@ -1487,7 +1493,7 @@ impl App {
             }
             Msg::Apps(list) => self.apps = Some(list),
             Msg::Searchable(list) => self.searchable = Some(list),
-            Msg::Running(set) => self.running = set,
+            Msg::Running(set, fixed) => (self.running, self.fixed) = (set, fixed),
             Msg::Info(key, info) => {
                 self.infos_asked.remove(&key);
                 let info = info.unwrap_or_else(|e| Some(format!("(couldn't read the description: {e})")));
@@ -1521,7 +1527,7 @@ impl App {
             return;
         };
         let running = self.running.contains(&e.package);
-        let Some(choice) = app_choices(e, running).get(at).copied() else { return };
+        let Some(choice) = app_choices(e, running, self.fixed.contains(&e.package)).get(at).copied() else { return };
         match choice_action(choice, e) {
             // done: back to the list, with what's running brought up to date
             (Some(a), _) => {
@@ -1537,7 +1543,7 @@ impl App {
     /// Keys in the actions pop-up.
     fn choice_key(&mut self, tab: AppTab, sel: usize, at: usize, code: KeyCode, actions: &Sender<Action>) {
         let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
-        let n = rows.get(sel).map_or(1, |e| app_choices(e, self.running.contains(&e.package)).len());
+        let n = rows.get(sel).map_or(1, |e| app_choices(e, self.running.contains(&e.package), self.fixed.contains(&e.package)).len());
         match code {
             KeyCode::Up => self.overlay = Overlay::AppActions { tab, sel, at: (at + n - 1) % n },
             KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::AppActions { tab, sel, at: (at + 1) % n },
@@ -2272,14 +2278,18 @@ impl App {
             }
             let on = if Some(e.package.as_str()) == pkg.as_deref() { "  (on now)" } else { "" };
             let extra = e.alias.or(e.tag).unwrap_or("");
-            let dot = if self.running.contains(&e.package) && e.target != "home" { "●" } else { " " };
+            let dot = match (self.running.contains(&e.package) && e.target != "home", self.fixed.contains(&e.package)) {
+                (true, true) => "⊘",
+                (true, false) => "●",
+                _ => " ",
+            };
             // fixed columns, so both tabs draw the same width; a space after
             // the dot, which some terminals draw wider than one cell
             let line = Line::from(format!(" {dot} {:<wide$}  {extra:<12}{on:<10}", e.name));
             rows.push((if i == sel { line.reversed() } else { line }, Some(i)));
         }
         // scroll so the highlighted row stays in view
-        let room = usize::from(f.area().height.saturating_sub(10)).max(3);
+        let room = usize::from(f.area().height.saturating_sub(11)).max(3);
         let at = rows.iter().position(|(_, i)| *i == Some(sel)).unwrap_or(0);
         let start = at.saturating_sub(room.saturating_sub(1)).min(rows.len().saturating_sub(room));
         let scrolls = rows.len() > room;
@@ -2295,7 +2305,8 @@ impl App {
         text.extend(shown);
         text.push(Line::default());
         let more = if scrolls { "  (scrolls)" } else { "" };
-        text.push(Line::from(format!("↑/↓ choose  ⏎ open (● running: to front)  space actions  / search{more}")).fg(Color::DarkGray));
+        text.push(Line::from(format!("↑/↓ choose  ⏎ open (or to front)  space actions  / search{more}")).fg(Color::DarkGray));
+        text.push(Line::from("● running  ⊘ always running: Android won't let it close").fg(Color::DarkGray));
         text.push(Line::from("letter = jump  tab/←/→ switch  click / right-click  esc closes").fg(Color::DarkGray));
         let r = popup(f, " launch an app ", text, Color::Green);
         if behind {
@@ -2600,9 +2611,18 @@ impl App {
                 let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
                 let Some(e) = rows.get(sel) else { return };
                 let running = self.running.contains(&e.package);
-                let choices = app_choices(e, running);
+                let fixed = self.fixed.contains(&e.package);
+                let choices = app_choices(e, running, fixed);
                 let mut text: Vec<Line> = vec![
-                    Line::from(format!("{}  {}", e.package, if running { "(running)" } else { "(not running)" })).fg(Color::DarkGray),
+                    Line::from(format!(
+                        "{}  {}",
+                        e.package,
+                        match (running, fixed) {
+                            (true, true) => "(always running: Android won't let it close)",
+                            (true, false) => "(running)",
+                            _ => "(not running)",
+                        }
+                    )).fg(Color::DarkGray),
                     Line::default(),
                 ];
                 for (i, c) in choices.iter().enumerate() {
@@ -2932,6 +2952,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         apps_tab: AppTab::Known,
         prompt: String::new(),
         running: std::collections::BTreeSet::new(),
+        fixed: std::collections::BTreeSet::new(),
         searchable: None,
         search_targets: Vec::new(),
         settling: None,
@@ -2979,8 +3000,9 @@ pub fn commands() -> Vec<Command> {
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
          \x20 a  launcher: the installed apps tvbee has aliases for (see 'tvbee apps'); ● marks\n\
-         \x20    running ones (Enter brings them to the front); Space or right-click opens\n\
-         \x20    actions: restart, close, search\n\
+         \x20    running ones (Enter brings them to the front), ⊘ ones Android keeps running\n\
+         \x20    (live TV: they can't be closed); Space or right-click opens actions:\n\
+         \x20    restart, close, search\n\
          \x20 /  search the app in front, or (in the launcher) the highlighted app\n\
          \x20 ?  all keys   q / Esc / Ctrl-C  quit\n\
          \n\
@@ -3372,12 +3394,14 @@ mod tests {
         let all = launcher_entries(&apps::installed_aliases("package:org.videolan.vlc\n"), &[], None);
         let home = &all[0];
         let vlc = all.iter().find(|e| e.target == "vlc").unwrap();
-        assert_eq!(app_choices(home, true), vec![AppChoice::Front, AppChoice::Cancel]);
-        assert_eq!(app_choices(vlc, false), vec![AppChoice::Open, AppChoice::Search, AppChoice::Cancel]);
+        assert_eq!(app_choices(home, true, false), vec![AppChoice::Front, AppChoice::Cancel]);
+        assert_eq!(app_choices(vlc, false, false), vec![AppChoice::Open, AppChoice::Search, AppChoice::Cancel]);
         assert_eq!(
-            app_choices(vlc, true),
+            app_choices(vlc, true, false),
             vec![AppChoice::Front, AppChoice::Restart, AppChoice::Close, AppChoice::Search, AppChoice::Cancel]
         );
+        // persistent (live TV): no closing or restarting
+        assert_eq!(app_choices(vlc, true, true), vec![AppChoice::Front, AppChoice::Search, AppChoice::Cancel]);
         assert_eq!(choice_action(AppChoice::Close, vlc), (Some(Action::Close("org.videolan.vlc".into())), false));
         assert_eq!(
             choice_action(AppChoice::Restart, vlc),

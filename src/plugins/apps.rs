@@ -548,6 +548,27 @@ pub fn running(ps: &str) -> std::collections::BTreeSet<String> {
         .collect()
 }
 
+/// The command whose output [`persistent`] reads.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub const PERSISTENT_CMD: &str = "dumpsys activity processes | grep '[*]PERS[*]'";
+
+/// Packages Android keeps running whatever happens ("persistent": live TV,
+/// system UI, ...): a force-stop is undone straight away, so they can't be
+/// closed. From [`PERSISTENT_CMD`]'s lines, e.g.
+/// `*PERS* UID 1000 ProcessRecord{fc3af50 2241:org.droidtv.zapster/1000}`.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+pub fn persistent(dump: &str) -> std::collections::BTreeSet<String> {
+    dump.lines()
+        .filter(|l| l.trim_start().starts_with("*PERS*"))
+        .filter_map(|l| {
+            let rec = l.split("ProcessRecord{").nth(1)?;
+            let name = rec.split_whitespace().nth(1)?.split_once(':')?.1;
+            let name = name.split('/').next()?;
+            Some(name.split(':').next().unwrap_or(name).to_string())
+        })
+        .collect()
+}
+
 /// Aliases (other than `home`) that point at `pkg`.
 pub fn aliases_for_package(pkg: &str) -> Vec<&'static str> {
     all().iter()
@@ -799,6 +820,17 @@ mod tests {
         // home is always there; the rest only if installed
         // plugin apps (livetv from philips, youtube) come right after home
         assert_eq!(names, vec!["home", "livetv", "youtube", "vlc"]);
+    }
+
+    #[test]
+    fn reads_persistent_processes() {
+        let dump = "  *PERS* UID 1000 ProcessRecord{fc3af50 2241:org.droidtv.zapster/1000}\n\
+                    \x20 *PERS* UID 1000 ProcessRecord{572f70d 1722:system/1000}\n\
+                    \x20 *PERS* UID 10030 ProcessRecord{437f33e 1989:com.android.systemui/u0a30}\n\
+                    \x20 *PERS* UID 10083 ProcessRecord{26080f5 3223:org.droidtv.nettvapps:remote/u0a83}\n\
+                    \x20   PERS #45: pers  T/ /PERU trm: 0 2241:org.droidtv.zapster/1000 (pers-top-activity)\n";
+        let got: Vec<String> = persistent(dump).into_iter().collect();
+        assert_eq!(got, ["com.android.systemui", "org.droidtv.nettvapps", "org.droidtv.zapster", "system"]);
     }
 
     #[test]
