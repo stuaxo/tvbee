@@ -60,6 +60,8 @@ pub enum Action {
     Mute,
     /// The Ambilight panel opened (true) or closed: the refresh reads it while open.
     AmbilightPanel(bool),
+    /// The preview panel opened or closed: pictures are made while it's open.
+    PreviewPanel(bool),
     /// Ask the TV to pair (it shows a PIN), then finish with the PIN typed.
     PairStart,
     PairFinish(String),
@@ -132,6 +134,8 @@ pub enum Input {
     Pair,
     /// The dialog for changing the Ambilight.
     AmbilightDialog,
+    /// The preview panel: a picture of what's on.
+    TogglePreview,
     OpenMenu,
     OpenApps,
     OpenSearch,
@@ -170,6 +174,7 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
         (KeyCode::Char('P'), _) => Input::Pair,
         (KeyCode::Char('L'), _) => Input::AmbilightDialog,
+        (KeyCode::Char('v'), _) => Input::TogglePreview,
         (KeyCode::Char('a'), _) => Input::OpenApps,
         (KeyCode::Char('g'), _) => Input::OpenGuide,
         (KeyCode::Char(','), _) => Input::OpenOptions,
@@ -229,7 +234,7 @@ pub enum Lane {
 pub fn lane(a: &Action) -> Lane {
     match a {
         Action::Key(_) | Action::Text(_) => Lane::Keys,
-        Action::LoadGuide | Action::CheckRunning | Action::AmbilightPanel(_) => Lane::Read,
+        Action::LoadGuide | Action::CheckRunning | Action::AmbilightPanel(_) | Action::PreviewPanel(_) => Lane::Read,
         Action::PrefetchInfo => Lane::Idle,
         _ => Lane::Act,
     }
@@ -242,6 +247,10 @@ fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender<Act
         // not work for anyone: what the refresh should read
         if let Action::AmbilightPanel(on) = a {
             shared.ambilight.store(on, Ordering::Relaxed);
+            continue;
+        }
+        if let Action::PreviewPanel(on) = a {
+            shared.preview.store(on, Ordering::Relaxed);
             continue;
         }
         let l = lane(&a);
@@ -364,6 +373,10 @@ enum Msg {
     Ambilight(bool),
     /// Pairing: the TV is showing a PIN; ask for it.
     AskPin,
+    /// A picture for the preview panel.
+    Preview(crate::preview::Picture),
+    /// What the preview is doing, or why there's no picture.
+    PreviewNote(String),
 }
 
 /// A channel in the guide pop-up, with its programmes for the next day.
@@ -688,6 +701,11 @@ struct Shared {
     shown: AtomicBool,
     /// The Ambilight panel is open: the refresh reads the lights too.
     ambilight: AtomicBool,
+    /// The preview panel is open: its lane makes pictures.
+    preview: AtomicBool,
+    /// The YouTube video playing (id, position in seconds, paused, when read),
+    /// for the preview's storyboard frames.
+    playing: std::sync::Mutex<Option<(String, f64, bool, Instant)>>,
     /// The launcher's apps have been sent (held while they're being read, so
     /// they're read once, by whichever lane gets there first).
     apps_sent: std::sync::Mutex<bool>,
@@ -717,6 +735,8 @@ impl Shared {
             channel_stale: AtomicBool::new(true),
             shown: AtomicBool::new(false),
             ambilight: AtomicBool::new(false),
+            preview: AtomicBool::new(false),
+            playing: Default::default(),
             apps_sent: std::sync::Mutex::new(false),
         }
     }
@@ -902,6 +922,12 @@ impl Refresher {
             }
             (None, true) => None,
         };
+        // a YouTube video and how far in, for the preview's storyboard frames
+        *lock(&self.shared.playing) = activity.as_ref().and_then(|a| {
+            let id = crate::plugins::youtube::video_id(a.url.as_deref()?)?;
+            let p = a.progress?;
+            Some((id, p.position, p.paused, Instant::now()))
+        });
         Ok(Snapshot {
             activity,
             volume: media::parse_volume(&audio),
@@ -1095,7 +1121,7 @@ impl Actor {
                 crate::pairing::save("jointspace", &self.tv.ip, &saved)?;
                 "paired with the TV".into()
             }
-            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo | Action::AmbilightPanel(_) => String::new(),
+            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo | Action::AmbilightPanel(_) | Action::PreviewPanel(_) => String::new(),
         })
     }
 }
@@ -1125,6 +1151,173 @@ fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg>) {
                 _ => {}
             }
         }
+    }
+}
+
+/// Said when the preview comes out black.
+const HIDDEN_VIDEO: &str = "black: the TV plays this video on a layer pictures can't see";
+
+/// Whether to ask the terminal how it draws pictures: `TVEEE_PICTURES=detect`
+/// (or `halfblocks` never), else when it's one known to draw them.
+pub fn picture_terminal(env: impl Fn(&str) -> Option<String>) -> bool {
+    match env("TVEEE_PICTURES").as_deref() {
+        Some("detect") => return true,
+        Some("halfblocks") => return false,
+        _ => {}
+    }
+    let term = env("TERM").unwrap_or_default();
+    let program = env("TERM_PROGRAM").unwrap_or_default();
+    env("KITTY_WINDOW_ID").is_some()
+        || env("WEZTERM_EXECUTABLE").is_some()
+        || env("KONSOLE_VERSION").is_some()
+        || ["kitty", "foot", "mlterm", "wezterm"].iter().any(|t| term.contains(t))
+        || ["iTerm.app", "WezTerm", "ghostty", "rio"].contains(&program.as_str())
+}
+
+/// The preview lane: pictures of what's on while the panel is open.
+///
+/// YouTube: its storyboard frame at once, then frames from a small copy of
+/// the video (downloaded meanwhile) at the TV's position, which keeps them in
+/// step. Anything else: scrcpy's pictures (the default for apps without
+/// their own way), or a screenshot every few seconds without it.
+fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
+    use crate::preview::{local_copy, frame_of, screencap, storyboard_frame, Scrcpy};
+    use std::collections::HashMap;
+    let tv = shared.tv();
+    let open = || shared.preview.load(Ordering::Relaxed) && !shared.stopping();
+    let send = |m: Msg| tx.send(m).is_ok();
+    // copies of YouTube videos: downloading, ready, or failed (for the run)
+    enum Copy {
+        Fetching(mpsc::Receiver<Result<std::path::PathBuf>>),
+        Ready(std::path::PathBuf),
+        Failed,
+    }
+    let mut copies: HashMap<String, Copy> = HashMap::new();
+    loop {
+        while !open() {
+            if shared.stopping() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let mut live: Option<Scrcpy> = None;
+        // when scrcpy last failed (not again for a while)
+        let mut scrcpy_failed: Option<Instant> = None;
+        let mut still_at: Option<Instant> = None;
+        // the last YouTube frame sent (video, tenths of a second): not again
+        let mut shown: Option<(String, i64)> = None;
+        while open() {
+            let playing = lock(&shared.playing).clone();
+            if let Some((id, pos, paused, at)) = playing {
+                // YouTube: no need for scrcpy
+                live = None;
+                let secs = if paused { pos } else { pos + at.elapsed().as_secs_f64() };
+                if !copies.contains_key(&id) {
+                    let (done, rx) = mpsc::channel();
+                    let want = id.clone();
+                    std::thread::spawn(move || {
+                        let _ = done.send(local_copy(&want));
+                    });
+                    copies.insert(id.clone(), Copy::Fetching(rx));
+                    let _ = send(Msg::PreviewNote("getting a small copy of the video (144p)...".into()));
+                }
+                if let Some(Copy::Fetching(rx)) = copies.get(&id) {
+                    match rx.try_recv() {
+                        Ok(Ok(path)) => {
+                            copies.insert(id.clone(), Copy::Ready(path));
+                            let _ = send(Msg::PreviewNote(String::new()));
+                        }
+                        Ok(Err(e)) => {
+                            copies.insert(id.clone(), Copy::Failed);
+                            let _ = send(Msg::PreviewNote(format!("{e}; storyboard frames only")));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                match copies.get(&id) {
+                    Some(Copy::Ready(path)) => {
+                        let at_tenth = (secs * 10.0) as i64;
+                        if shown.as_ref() != Some(&(id.clone(), at_tenth)) {
+                            if let Some(p) = frame_of(path, secs) {
+                                if !send(Msg::Preview(p)) {
+                                    return;
+                                }
+                            }
+                            shown = Some((id.clone(), at_tenth));
+                        }
+                        std::thread::sleep(Duration::from_millis(400));
+                    }
+                    // meanwhile (or instead): the storyboard
+                    _ => {
+                        if still_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(3)) {
+                            still_at = Some(Instant::now());
+                            if let Some(p) = storyboard_frame(&id, secs) {
+                                if !send(Msg::Preview(p)) {
+                                    return;
+                                }
+                            }
+                        }
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                }
+                continue;
+            }
+            // anything else: scrcpy, the default
+            let ready = crate::preview::scrcpy_ready();
+            if live.is_none() && ready && scrcpy_failed.is_none_or(|t| t.elapsed() >= Duration::from_secs(15)) {
+                let _ = send(Msg::PreviewNote("starting scrcpy on the TV...".into()));
+                match Scrcpy::start(&tv) {
+                    Ok(s) => {
+                        live = Some(s);
+                        let _ = send(Msg::PreviewNote(String::new()));
+                    }
+                    Err(e) => {
+                        scrcpy_failed = Some(Instant::now());
+                        let _ = send(Msg::PreviewNote(format!("{e}; screenshots instead")));
+                    }
+                }
+            }
+            if let Some(s) = live.as_mut() {
+                match s.pictures.recv_timeout(Duration::from_millis(300)) {
+                    Ok(mut p) => {
+                        // the newest of what's arrived
+                        while let Ok(q) = s.pictures.try_recv() {
+                            p = q;
+                        }
+                        let _ = send(Msg::PreviewNote(if p.black() { HIDDEN_VIDEO.into() } else { String::new() }));
+                        if !send(Msg::Preview(p)) {
+                            return;
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => live = None,
+                }
+                if live.as_mut().is_some_and(|s| !s.running()) {
+                    live = None;
+                    scrcpy_failed = Some(Instant::now());
+                    let _ = send(Msg::PreviewNote("scrcpy stopped; trying again shortly".into()));
+                }
+                continue;
+            }
+            // no scrcpy: a screenshot now and then (video comes out black)
+            if still_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(4)) {
+                still_at = Some(Instant::now());
+                if !ready {
+                    let _ = send(Msg::PreviewNote("screenshots (install scrcpy and ffmpeg for video too)".into()));
+                }
+                if let Ok(p) = screencap(&tv) {
+                    if p.black() {
+                        let _ = send(Msg::PreviewNote(HIDDEN_VIDEO.into()));
+                    }
+                    if !send(Msg::Preview(p)) {
+                        return;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        // closed: the server stops with it
+        drop(live);
     }
 }
 
@@ -1241,6 +1434,14 @@ struct App {
     /// The last volume the TV reported (level, max), and when: shown while a
     /// refresh can't read it, greyed once it's [`VOLUME_STALE`] old.
     last_volume: Option<((u32, u32), Instant)>,
+    /// The preview panel: open or not, its picture (ready to draw), where it
+    /// came from, and what it's doing.
+    preview_open: bool,
+    preview: Option<ratatui_image::protocol::StatefulProtocol>,
+    preview_source: &'static str,
+    preview_note: String,
+    /// How this terminal shows pictures (asked once at the start).
+    picker: Option<ratatui_image::picker::Picker>,
     /// The TV has Ambilight tveee can control; and whether its panel is open.
     ambi_supported: bool,
     ambi_open: bool,
@@ -1806,6 +2007,7 @@ fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
                 button("", "vol-", Do(Volume(-1))),
                 button("", "info", Input::ToggleInfo),
                 button("", "ambilight", Input::ToggleAmbilight),
+                button("", "preview", Input::TogglePreview),
                 button("", "apps", Input::OpenApps),
                 button("", "search", Input::OpenSearch),
                 button("", "guide", Input::OpenGuide),
@@ -1821,6 +2023,7 @@ fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
         button("tab", if mode == Mode::Player { "remote" } else { "player" }, ToggleMode),
         button("i", "info", Input::ToggleInfo),
         button("l", "ambilight", Input::ToggleAmbilight),
+        button("v", "preview", Input::TogglePreview),
         button("a", "apps", Input::OpenApps),
         button("/", "search", Input::OpenSearch),
         button("g", "guide", Input::OpenGuide),
@@ -1889,6 +2092,15 @@ impl App {
             Msg::Searchable(list) => self.searchable = Some(list),
             Msg::Running(set, fixed) => (self.running, self.fixed) = (set, fixed),
             Msg::Ambilight(has) => self.ambi_supported = has,
+            Msg::Preview(p) => {
+                let picker = self.picker.get_or_insert_with(ratatui_image::picker::Picker::halfblocks);
+                if let Some(img) = image::RgbImage::from_raw(p.width, p.height, p.rgb) {
+                    self.preview = Some(picker.new_resize_protocol(image::DynamicImage::ImageRgb8(img)));
+                    self.preview_source = p.source;
+
+                }
+            }
+            Msg::PreviewNote(n) => self.preview_note = n,
             Msg::AskPin => {
                 self.prompt.clear();
                 self.overlay = Overlay::Pin;
@@ -2179,6 +2391,14 @@ impl App {
                 self.ambi_open = !self.ambi_open;
                 let _ = actions.send(Action::AmbilightPanel(self.ambi_open));
             }
+            Input::TogglePreview => {
+                self.preview_open = !self.preview_open;
+                if !self.preview_open {
+                    (self.preview, self.preview_source) = (None, "");
+                    self.preview_note.clear();
+                }
+                let _ = actions.send(Action::PreviewPanel(self.preview_open));
+            }
             Input::AmbilightDialog if !self.ambi_supported => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
@@ -2431,6 +2651,22 @@ impl App {
         ])
         .areas(area);
 
+        // the preview: beside the rest when there's room, else below it
+        let body = if self.preview_open {
+            if body.width >= 90 {
+                let w = (body.width / 2).min(64);
+                let [left, right] = Layout::horizontal([Constraint::Min(40), Constraint::Length(w)]).areas(body);
+                self.draw_preview(f, right);
+                left
+            } else {
+                let h = (body.height / 2).clamp(6, 14);
+                let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
+                self.draw_preview(f, panel);
+                top
+            }
+        } else {
+            body
+        };
         let body = if self.ambi_open && self.ambi_supported {
             let want = self.ambilight_height();
             let h = want.min(body.height.saturating_sub(4));
@@ -2593,6 +2829,23 @@ impl App {
     }
 
     /// Rows the system panel wants, borders included.
+    /// The preview panel: the picture, or what it's waiting for.
+    fn draw_preview(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let source = if self.preview_source.is_empty() { String::new() } else { format!(" ({})", self.preview_source) };
+        let block = Block::bordered().title(format!(" preview{source} - v hides ")).border_style(Style::new().fg(Color::DarkGray));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let note_h = u16::from(!self.preview_note.is_empty());
+        let [pic, note] = Layout::vertical([Constraint::Min(1), Constraint::Length(note_h)]).areas(inner);
+        match self.preview.as_mut() {
+            Some(proto) => f.render_stateful_widget(ratatui_image::StatefulImage::new(), pic, proto),
+            None => f.render_widget(Paragraph::new("getting a picture...").italic(), pic),
+        }
+        if note_h > 0 {
+            f.render_widget(Paragraph::new(self.preview_note.clone()).fg(Color::DarkGray), note);
+        }
+    }
+
     /// The Ambilight dialog's rows, from the last reading (none until there is one).
     fn ambi_rows(&self) -> Vec<crate::plugins::ambilight::Row> {
         match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
@@ -3457,6 +3710,8 @@ const HELP: &str = " everywhere
    i        system info      a      launch an app (space there: front / restart / close)
    l        Ambilight panel (TVs with one; P there pairs if needed)
    L        change the Ambilight: power, style and setting, Hue, any light's colour
+   v        preview: a picture of what's on (scrcpy if installed, 1 a second;
+            YouTube's storyboards; else a screenshot every few seconds)
    /        search the app in front (tab picks another app)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
@@ -3694,6 +3949,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     std::thread::spawn(move || reads(&sh, &read_rx, &read_msgs));
     let (idle_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
     std::thread::spawn(move || background(&sh, &idle_rx, idle_msgs));
+    let (preview_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
+    std::thread::spawn(move || preview_lane(&sh, &preview_msgs));
     let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), conn: None, channel: None };
     std::thread::spawn(move || refresher.run(&wake_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);
@@ -3721,6 +3978,11 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         ambi_supported: false,
         ambi_open: false,
         last_volume: None,
+        preview_open: false,
+        preview: None,
+        preview_source: "",
+        preview_note: String::new(),
+        picker: None,
         guide: None,
         guide_later: 0,
         guide_view: 0,
@@ -3733,6 +3995,16 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         want_info: None,
     };
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
+    // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
+    // asked before ratatui takes the terminal (the query turns raw mode on and
+    // off). Only asked of terminals known to draw pictures: one that doesn't
+    // answer everything leaves the query reading the keyboard, eating keys.
+    let ask = picture_terminal(|k| std::env::var(k).ok());
+    app.picker = Some(if ask {
+        ratatui_image::picker::Picker::from_query_stdio().unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks())
+    } else {
+        ratatui_image::picker::Picker::halfblocks()
+    });
     let result = ratatui::run(|term| {
         let _mouse = mouse.then(MouseCapture::on);
         let _paste = BracketedPaste::on();
@@ -3767,6 +4039,10 @@ pub fn commands() -> Vec<Command> {
          \x20 l  Ambilight panel (Philips TVs that have it): state and each light's\n\
          \x20    colour; L (or clicking it) changes power, style, Hue and any light's\n\
          \x20    colour; P pairs with the TV if needed\n\
+         \x20 v  preview: a picture of what's on, refreshed every second or so (with\n\
+         \x20    scrcpy and ffmpeg installed: scrcpy at 320 pixels, which sees video too;\n\
+         \x20    YouTube's storyboard frames while it starts or without it; otherwise a\n\
+         \x20    screenshot every few seconds, where video comes out black)\n\
          \x20 a  launcher: the installed apps tveee has aliases for (see 'tveee apps'); ● marks\n\
          \x20    running ones (Enter brings them to the front), ⊘ ones Android keeps running\n\
          \x20    (live TV: they can't be closed); Space or right-click opens actions:\n\
@@ -4273,6 +4549,16 @@ mod tests {
         assert_eq!(volume_shown(None, Some(((3, 60), s(11)))), (None, Some((3, 60))));
         // never read: a grey empty bar
         assert_eq!(volume_shown(None, None), (None, None));
+    }
+
+    #[test]
+    fn asks_only_picture_terminals() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert!(!picture_terminal(env(&[("TERM", "xterm-256color")])));
+        assert!(picture_terminal(env(&[("TERM", "xterm-kitty")])));
+        assert!(picture_terminal(env(&[("TERM_PROGRAM", "iTerm.app")])));
+        assert!(picture_terminal(env(&[("TERM", "xterm-256color"), ("TVEEE_PICTURES", "detect")])));
+        assert!(!picture_terminal(env(&[("TERM", "xterm-kitty"), ("TVEEE_PICTURES", "halfblocks")])));
     }
 
     #[test]

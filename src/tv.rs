@@ -172,6 +172,22 @@ impl Tv {
         crate::keys::press(self, &presses)
     }
 
+    /// Start `cmd` on the TV and leave it running (output discarded); kill
+    /// the child to stop it.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub fn spawn_shell(&self, cmd: &str) -> Result<std::process::Child> {
+        Proc::new(adb_program())
+            .arg("-s")
+            .arg(self.serial())
+            .arg("shell")
+            .arg(cmd)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(adb_err)
+    }
+
     /// `adb shell` reading commands from its stdin, left open (output
     /// discarded): for sending one command after another with no start-up.
     pub fn shell_session(&self) -> Result<std::process::Child> {

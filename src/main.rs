@@ -14,6 +14,8 @@ mod more;
 mod nowplaying;
 mod options;
 mod plugin;
+#[cfg(feature = "ui")]
+mod preview;
 mod pairing;
 mod plugins;
 mod provider;

@@ -18,11 +18,15 @@ categories = ["command-line-utilities"]
 diesel = { version = "2.2", default-features = false, features = ["sqlite"] }
 libsqlite3-sys = { version = ">=0.17.2, <0.31.0", features = ["bundled"] }
 ratatui = { version = "0.30.2", optional = true, features = ["unstable-rendered-line-info"] }
+# the ui's preview panel: pictures in the terminal (sixel, kitty, iTerm2, or
+# unicode half-blocks), and JPEG decoding for YouTube's storyboard frames
+ratatui-image = { version = "11.1", optional = true, default-features = false, features = ["crossterm"] }
+image = { version = "0.25.6", optional = true, default-features = false, features = ["jpeg"] }
 
 [features]
 default = []
 # `tveee ui`: interactive terminal remote (pulls in ratatui + crossterm)
-ui = ["dep:ratatui"]
+ui = ["dep:ratatui", "dep:ratatui-image", "dep:image"]
 
 [profile.release]
 strip = true
