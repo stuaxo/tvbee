@@ -1,6 +1,6 @@
 [package]
 name = "tveee"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # Debian 13's packaged Rust; the optional `ui` feature needs 1.88 (ratatui)
 rust-version = "1.85"
