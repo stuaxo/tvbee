@@ -2,10 +2,9 @@
 
 🔴🟠🟡 Warning slopcoded - made to operate my own TV YMMV  🟡🟠🔴
 
-This is a rust port of [tv.sh](https://github.com/stuaxo/tv.sh) with more functinaltiy.
+This is a rust port of [tv.sh](https://github.com/stuaxo/tv.sh) with more functionality.
 
-Formerly called tvbee. Settings and caches from tvbee (`~/.config/tvbee`,
-`~/.cache/tvbee`, `TVBEE_*` variables) are picked up automatically.
+Formerly called tvbee.
 
 
 Command-line remote for Android TV over ADB. So far it has only been tested

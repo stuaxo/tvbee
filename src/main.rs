@@ -37,9 +37,7 @@ pub struct Ctx {
 }
 
 fn main() {
-    // before anything reads TV_IP etc. (and before any threads); the folders
-    // first, as the env file is in one
-    dotenv::move_old_folders();
+    // before anything reads TV_IP etc. (and before any threads)
     dotenv::load();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let tv = Tv::from_env();

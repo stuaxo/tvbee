@@ -39,42 +39,9 @@ fn unquote(v: &str) -> String {
     v.split(" #").next().unwrap_or(v).trim().to_string()
 }
 
-/// Keys tveee reads; everything else in a `.env` is left alone. (`TVBEE_*`
-/// are the same settings under tveee's old name, see [`old_name`].)
+/// Keys tveee reads; everything else in a `.env` is left alone.
 pub fn ours(key: &str) -> bool {
-    key.starts_with("TV_") || key.starts_with("TVEEE_") || key.starts_with(OLD_PREFIX)
-}
-
-/// tveee was called tvbee: its settings were `TVBEE_*`.
-const OLD_PREFIX: &str = "TVBEE_";
-
-/// The current name of a setting under the old name (`TVBEE_PLUGINS` ->
-/// `TVEEE_PLUGINS`), if it is one.
-pub fn old_name(key: &str) -> Option<String> {
-    key.strip_prefix(OLD_PREFIX).map(|rest| format!("TVEEE_{rest}"))
-}
-
-/// The folders tveee keeps things in (config, cache), each with its parent.
-fn base_dirs() -> Vec<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from));
-    let cache = crate::plugin::cache_path("x").and_then(|p| p.parent()?.parent().map(PathBuf::from));
-    config.into_iter().chain(cache).collect()
-}
-
-/// tveee was called tvbee: move its folders (`~/.config/tvbee`,
-/// `~/.cache/tvbee`) to the new name, once, if there's nothing there yet.
-pub fn move_old_folders() {
-    for base in base_dirs() {
-        let (old, new) = (base.join("tvbee"), base.join("tveee"));
-        if old.is_dir() && !new.exists() {
-            let _ = std::fs::rename(&old, &new);
-            // the cache database, under its new name too
-            let _ = std::fs::rename(new.join("tvbee.sqlite"), new.join("tveee.sqlite"));
-        }
-    }
+    key.starts_with("TV_") || key.starts_with("TVEEE_")
 }
 
 /// The files to read, in order of preference.
@@ -124,15 +91,6 @@ pub fn load() {
         unsafe { std::env::set_var(&k, v) };
         loaded.push((k, file));
     }
-    // settings under the old name count as the new ones (unless those are set)
-    let old: Vec<(String, std::ffi::OsString)> =
-        std::env::vars_os().filter_map(|(k, v)| Some((old_name(k.to_str()?)?, v))).collect();
-    for (k, v) in old {
-        if std::env::var_os(&k).is_none() {
-            // SAFETY: as above, still single-threaded
-            unsafe { std::env::set_var(&k, v) };
-        }
-    }
     let _ = LOADED.set(loaded);
 }
 
@@ -144,14 +102,6 @@ pub fn source_of(key: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn old_names() {
-        assert_eq!(old_name("TVBEE_PLUGINS").as_deref(), Some("TVEEE_PLUGINS"));
-        assert_eq!(old_name("TVEEE_PLUGINS"), None);
-        assert_eq!(old_name("TV_IP"), None);
-        assert!(ours("TVBEE_PLUGINS") && ours("TVEEE_PLUGINS") && ours("TV_IP") && !ours("SECRET"));
-    }
 
     #[test]
     fn parses_env_files() {
