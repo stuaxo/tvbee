@@ -160,9 +160,24 @@ impl Tv {
         }
     }
 
+    /// Press a key: written straight to an input device when tvbee can,
+    /// which is much quicker than `input keyevent` (see `keys`).
     pub fn keyevent(&self, code: u32) -> Result<()> {
-        self.shell(&["input", "keyevent", &code.to_string()])?;
-        Ok(())
+        crate::keys::press(self, &[(code, false)])
+    }
+
+    /// `adb shell` reading commands from its stdin, left open (output
+    /// discarded): for sending one command after another with no start-up.
+    pub fn shell_session(&self) -> Result<std::process::Child> {
+        Proc::new(adb_program())
+            .arg("-s")
+            .arg(self.serial())
+            .arg("shell")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(adb_err)
     }
 
     /// Connect, then send a key.

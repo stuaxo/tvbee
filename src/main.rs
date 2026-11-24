@@ -6,6 +6,7 @@ mod favourites;
 mod http;
 mod lineups;
 mod https;
+mod keys;
 mod mdns;
 mod menu;
 mod more;

@@ -176,6 +176,45 @@ fn remote_input(code: KeyCode, mods: KeyModifiers) -> Input {
     }
 }
 
+/// Hand each action to the thread that does it: remote keys and typing to
+/// [`send_keys`], everything else to the worker. Ends when the UI hangs up.
+fn route(actions: &Receiver<Action>, work: &Sender<Action>, keys: &Sender<Action>) {
+    for a in actions {
+        let to = if matches!(a, Action::Key(_) | Action::Text(_)) { keys } else { work };
+        if to.send(a).is_err() {
+            return;
+        }
+    }
+}
+
+/// Send remote keys and typing as they come, over a shell kept open on the
+/// TV, written raw to an input device where possible (see `crate::keys`).
+fn send_keys(tv: Tv, keys: &Receiver<Action>, tx: &Sender<Msg>) {
+    let mut session = crate::keys::Session::new(tv);
+    session.warm();
+    while let Ok(first) = keys.recv() {
+        let mut queued = vec![first];
+        queued.extend(keys.try_iter());
+        for batch in batches(coalesce(queued)) {
+            let result = match batch {
+                Batch::Keys(codes) => {
+                    let presses: Vec<(u32, bool)> = codes.iter().map(|c| (*c, false)).collect();
+                    session.press(&presses).map(|()| codes.iter().map(|c| key_name(*c)).collect::<Vec<_>>().join(" "))
+                }
+                Batch::One(Action::Text(t)) => session.text(&t).map(|()| format!("typed \"{t}\"")),
+                Batch::One(_) => continue,
+            };
+            let msg = match result {
+                Ok(note) => Msg::Note(note),
+                Err(e) => Msg::Failed(e.to_string()),
+            };
+            if tx.send(msg).is_err() {
+                return;
+            }
+        }
+    }
+}
+
 /// Fold queued actions: consecutive seeks/volume steps add up, so holding a
 /// key doesn't leave a backlog of round trips.
 pub fn coalesce(actions: Vec<Action>) -> Vec<Action> {
@@ -3003,7 +3042,14 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         guesses: Vec::new(),
         searchable: Vec::new(),
     };
-    std::thread::spawn(move || worker.run(act_rx, msg_tx));
+    // keys go their own way, so they never wait behind a refresh
+    let (work_tx, work_rx) = mpsc::channel();
+    let (key_tx, key_rx) = mpsc::channel();
+    std::thread::spawn(move || route(&act_rx, &work_tx, &key_tx));
+    let key_msgs = msg_tx.clone();
+    let key_tv = Tv { ip: c.tv.ip.clone() };
+    std::thread::spawn(move || send_keys(key_tv, &key_rx, &key_msgs));
+    std::thread::spawn(move || worker.run(work_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);
     let mut app = App {
         ip: c.tv.ip.clone(),

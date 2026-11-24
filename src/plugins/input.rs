@@ -48,7 +48,7 @@ fn text(c: &Ctx, args: &[String]) -> Result<()> {
         return usage("text: missing text");
     }
     c.tv.connect()?;
-    c.tv.shell(&["input", "text", &escape_text(&args.join(" "))]).map(drop)
+    crate::keys::type_text(&c.tv, &args.join(" "))
 }
 
 fn input(c: &Ctx, args: &[String]) -> Result<()> {
