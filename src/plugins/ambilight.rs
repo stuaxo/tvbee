@@ -56,11 +56,13 @@ pub const COLOURS: &[(&str, &str, &str)] = &[
     ("deep-water", "DEEP_WATER", "Deep Water"),
 ];
 
-/// Who drives the lights: the TV, or something outside it.
+/// The modes `mode` can set. The TV reports others too, for its own styles
+/// (lounge for its colours, expert for following the sound); only manual
+/// means something outside the TV is setting the colours.
 pub const MODES: &[(&str, &str)] = &[
-    ("internal", "the TV, in its current style"),
+    ("internal", "the TV drives the lights, in its current style"),
     ("manual", "something outside the TV (tveee's 'set', or another program) sets the colours"),
-    ("expert", "something outside the TV, with per-light control"),
+    ("expert", "outside control with the TV's expert settings (the TV also uses it for following the sound)"),
 ];
 
 fn lookup<'a>(table: &'a [(&'a str, &'a str)], name: &str) -> Option<&'a str> {
@@ -247,8 +249,8 @@ pub fn status(tv: &Tv) -> Result<Vec<String>> {
     let field = |json: &Result<String>, k: &str| json.as_ref().ok().and_then(|j| crate::http::string_field(j, k));
     let mut out = vec![format!("power:   {}", crate::http::string_field(&power, "power").unwrap_or_default().to_lowercase())];
     if let Some(m) = field(&mode, "current") {
-        let says = MODES.iter().find(|(n, _)| *n == m).map_or("", |(_, s)| *s);
-        out.push(format!("mode:    {m} ({says})"));
+        let who = if m == "manual" { "outside the TV (tveee's 'set', or another program)" } else { "the TV" };
+        out.push(format!("control: {who}"));
     }
     if let Some(style) = field(&config, "styleName") {
         let setting = field(&config, "menuSetting").map(|s| format!(", {}", s.to_lowercase().replace('_', " "))).unwrap_or_default();
@@ -328,10 +330,6 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
             set_style(tv, "FOLLOW_COLOR", Some(s), Some(label))?;
             format!("ambilight: {label}")
         }
-        ["lounge"] => {
-            set_style(tv, "LOUNGE", None, None)?;
-            "ambilight: lounge".into()
-        }
         ["mode"] => crate::http::string_field(&get(tv, "/6/ambilight/mode")?, "current").unwrap_or_default(),
         ["mode", m] => {
             if !MODES.iter().any(|(n, _)| n == m) {
@@ -358,7 +356,7 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
             post(tv, "/6/HueLamp/power", &format!(r#"{{"power":"{}"}}"#, if *on == "on" { "On" } else { "Off" }))?;
             format!("Ambilight+Hue {on}")
         }
-        _ => return usage("usage: tveee ambilight [on|off | lights | video [setting] | audio [effect] | colour <name> | lounge | set [<side> <n>] <colour> | mode [internal|manual|expert] | hue on|off]"),
+        _ => return usage("usage: tveee ambilight [on|off | lights | video [setting] | audio [effect] | colour <name> | set [<side> <n>] <colour> | mode [internal|manual|expert] | hue on|off]"),
     };
     println!("{said}");
     Ok(())
@@ -368,13 +366,13 @@ pub fn commands() -> Vec<Command> {
     vec![Command::new(
         CAT,
         "ambilight",
-        "[on|off | lights | video | audio | colour | lounge | set | mode | hue]",
+        "[on|off | lights | video | audio | colour | set | mode | hue]",
         "Ambilight: what it's doing, its styles, and handing it to outside control",
         ambilight,
     )
     .long(
-        "With nothing: what the lights are doing (power, mode, style, Ambilight+Hue,\n\
-         how many lights). Needs pairing ('tveee pair jointspace').\n\
+        "With nothing: what the lights are doing (power, who's in control, style,\n\
+         Ambilight+Hue, how many lights). Needs pairing ('tveee pair jointspace').\n\
          \n\
          \x20 on | off                 the lights on or off\n\
          \x20 lights                   each light and the colour it's showing now\n\
@@ -384,9 +382,9 @@ pub fn commands() -> Vec<Command> {
          \x20                          colours, vu-meter, spectrum, knight-rider,\n\
          \x20                          knight-rider-alternating, flash, strobe, party,\n\
          \x20                          random\n\
-         \x20 colour <name>            one of the TV's colours: hot-lava, warm-white,\n\
-         \x20                          cool-white, fresh-nature, deep-water\n\
-         \x20 lounge                   lounge light\n\
+         \x20 colour <name>            one of the TV's colours (its lounge light):\n\
+         \x20                          hot-lava, warm-white, cool-white, fresh-nature,\n\
+         \x20                          deep-water\n\
          \x20 set <colour>             every light one colour (red, warm, #ff8800,\n\
          \x20                          255,136,0); hands the lights to outside control\n\
          \x20 set <side> <n> <colour>  one light (see 'lights'), e.g. set left 0 red\n\
@@ -419,9 +417,9 @@ pub fn menu() -> Vec<crate::menu::MenuItem> {
             set_style(tv, "FOLLOW_AUDIO", Some("ENERGY_ADAPTIVE_BRIGHTNESS"), None)?;
             Ok("ambilight follows the sound".into())
         })),
-        MenuItem::new(WHAT, 'l', "ambilight: lounge", item(|tv| {
-            set_style(tv, "LOUNGE", None, None)?;
-            Ok("ambilight: lounge".into())
+        MenuItem::new(WHAT, 'l', "ambilight: warm white (lounge light)", item(|tv| {
+            set_style(tv, "FOLLOW_COLOR", Some("ISF"), Some("Warm White"))?;
+            Ok("ambilight: warm white".into())
         })),
         MenuItem::with_text(WHAT, 'c', "ambilight: one colour (outside control)", "Colour:", "red, warm, #ff8800 or 255,136,0", |tv, text| {
             match parse_colour(text) {
