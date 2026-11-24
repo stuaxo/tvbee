@@ -755,10 +755,8 @@ impl Worker {
             }
             Action::Volume(0) => "volume".into(),
             Action::Volume(n) => {
-                let key = if n > 0 { "24" } else { "25" };
-                let mut cmd = vec!["input", "keyevent"];
-                cmd.extend(std::iter::repeat_n(key, n.unsigned_abs() as usize));
-                self.tv.shell(&cmd)?;
+                let key = if n > 0 { 24 } else { 25 };
+                self.tv.keys(&vec![key; n.unsigned_abs() as usize])?;
                 format!("volume {}{}", if n > 0 { "+" } else { "" }, n)
             }
             Action::Mute => {
@@ -774,10 +772,8 @@ impl Worker {
                 None => {
                     // no video we can reach: fast-forward/rewind key presses
                     let n = media::presses(d.abs(), KEY_STEP).max(1);
-                    let key = if d > 0.0 { "90" } else { "89" };
-                    let mut cmd = vec!["input", "keyevent"];
-                    cmd.extend(std::iter::repeat_n(key, n as usize));
-                    self.tv.shell(&cmd)?;
+                    let key = if d > 0.0 { 90 } else { 89 };
+                    self.tv.keys(&vec![key; n as usize])?;
                     format!("skipped ~{:+}s ({n} key presses)", d.signum() * n as f64 * KEY_STEP)
                 }
             },
@@ -843,11 +839,8 @@ impl Worker {
     /// Send several remote keys in one adb round trip.
     fn keys(&mut self, codes: &[u32]) -> Result<String> {
         self.tv.connect()?;
-        let codes: Vec<String> = codes.iter().map(u32::to_string).collect();
-        let mut cmd = vec!["input", "keyevent"];
-        cmd.extend(codes.iter().map(String::as_str));
-        self.tv.shell(&cmd)?;
-        let names: Vec<&str> = codes.iter().filter_map(|c| c.parse().ok()).map(key_name).collect();
+        self.tv.keys(codes)?;
+        let names: Vec<&str> = codes.iter().map(|c| key_name(*c)).collect();
         Ok(names.join(" "))
     }
 
@@ -908,7 +901,7 @@ impl Worker {
             }
             // after the first refresh, so it doesn't delay the main screen
             if !apps_sent && !self.stopping() && self.tv.connect().is_ok()
-                && let Ok(pm) = self.tv.shell(&["pm", "list", "packages"])
+                && let Ok(pm) = self.tv.shell(&["cmd", "package", "list", "packages"])
             {
                 apps_sent = true;
                 self.guesses = apps::guesses(&self.tv);

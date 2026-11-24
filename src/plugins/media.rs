@@ -287,11 +287,8 @@ fn skip_by(c: &Ctx, secs: f64, step: f64) -> Result<()> {
     if n > MAX_PRESSES {
         return usage(format!("that is {n} presses at {step}s each; use a larger --step"));
     }
-    let key = if secs >= 0.0 { FFW_KEY } else { REW_KEY }.to_string();
-    let codes = vec![key; n as usize];
-    let mut cmd = vec!["input", "keyevent"];
-    cmd.extend(codes.iter().map(String::as_str));
-    c.tv.shell(&cmd)?;
+    let key = if secs >= 0.0 { FFW_KEY } else { REW_KEY };
+    c.tv.keys(&vec![key; n as usize])?;
     let dir = if secs >= 0.0 { "forward" } else { "back" };
     println!("skipped {dir} ~{}s ({n} x {step}s)", (n as f64 * step).round());
     Ok(())

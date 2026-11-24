@@ -12,7 +12,7 @@ const JOINTSPACE_PKG: &str = "org.droidtv.xtv";
 
 pub fn detect(tv: &Tv) -> Result<bool> {
     tv.connect()?;
-    let out = tv.shell(&["pm", "list", "packages", JOINTSPACE_PKG])?;
+    let out = tv.shell(&["cmd", "package", "list", "packages", JOINTSPACE_PKG])?;
     Ok(out.lines().any(|l| l.trim() == format!("package:{JOINTSPACE_PKG}")))
 }
 

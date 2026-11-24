@@ -166,6 +166,12 @@ impl Tv {
         crate::keys::press(self, &[(code, false)])
     }
 
+    /// Press several keys in turn (as one write when they can go raw).
+    pub fn keys(&self, codes: &[u32]) -> Result<()> {
+        let presses: Vec<(u32, bool)> = codes.iter().map(|c| (*c, false)).collect();
+        crate::keys::press(self, &presses)
+    }
+
     /// `adb shell` reading commands from its stdin, left open (output
     /// discarded): for sending one command after another with no start-up.
     pub fn shell_session(&self) -> Result<std::process::Child> {

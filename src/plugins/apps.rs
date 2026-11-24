@@ -640,7 +640,7 @@ fn apps(c: &Ctx, args: &[String]) -> Result<()> {
     let mut installed = Vec::new();
     if !all {
         c.tv.try_connect();
-        let out = c.tv.shell(&["pm", "list", "packages"]).unwrap_or_default();
+        let out = c.tv.shell(&["cmd", "package", "list", "packages"]).unwrap_or_default();
         installed = out.lines().filter_map(|l| l.strip_prefix("package:")).map(str::to_string).collect();
         if installed.is_empty() {
             eprintln!("tvbee apps: can't reach the TV, showing every alias");

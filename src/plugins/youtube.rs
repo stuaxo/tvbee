@@ -18,7 +18,7 @@ pub const PACKAGE: &str = "com.google.android.youtube.tv";
 
 pub fn detect(tv: &Tv) -> Result<bool> {
     tv.connect()?;
-    let out = tv.shell(&["pm", "list", "packages", PACKAGE])?;
+    let out = tv.shell(&["cmd", "package", "list", "packages", PACKAGE])?;
     Ok(out.lines().any(|l| l.trim() == format!("package:{PACKAGE}")))
 }
 

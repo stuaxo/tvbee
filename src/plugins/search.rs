@@ -104,7 +104,7 @@ pub fn parse_searchable(out: &str, installed: Option<&str>) -> Vec<Searchable> {
 
 pub fn searchable(tv: &Tv) -> Result<Vec<Searchable>> {
     let out = tv.shell(&[QUERY_CMD])?;
-    let pm = tv.shell(&["pm", "list", "packages"])?;
+    let pm = tv.shell(&["cmd", "package", "list", "packages"])?;
     Ok(parse_searchable(&out, Some(&pm)))
 }
 

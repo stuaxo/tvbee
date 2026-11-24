@@ -324,7 +324,8 @@ pub struct States {
     known: BTreeSet<String>,
 }
 
-const STATE_CMD: &str = "pm list packages --user 0; echo @@; pm list packages -d --user 0; echo @@; pm list packages -u";
+// `cmd package`, not `pm`: the same lists without starting a Java VM each time
+const STATE_CMD: &str = "cmd package list packages --user 0; echo @@; cmd package list packages -d --user 0; echo @@; cmd package list packages -u";
 
 pub fn parse_states(out: &str) -> States {
     let mut parts = out
