@@ -592,12 +592,12 @@ fn currentapp(c: &Ctx, _: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Close `pkg` and start it again: back where it was when its provider can
-/// save its session (see `Provider::save_session`), else fresh (`target`
-/// is what to start). Returns what happened.
-pub fn restart(tv: &Tv, pkg: &str, target: &str) -> Result<String> {
+/// Close `pkg` and start it again: back where it was when `restore` and its
+/// provider can save its session (see `Provider::save_session`), else fresh
+/// (`target` is what to start). Returns what happened.
+pub fn restart(tv: &Tv, pkg: &str, target: &str, restore: bool) -> Result<String> {
     let name = by_package(pkg).map_or_else(|| crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()), |a| list_name(a.name));
-    let saved = crate::provider::for_package(pkg).and_then(|p| p.save_session(tv));
+    let saved = if restore { crate::provider::for_package(pkg).and_then(|p| p.save_session(tv)) } else { None };
     tv.shell(&["am", "force-stop", pkg])?;
     match saved {
         Some(s) => {
@@ -615,18 +615,90 @@ pub fn restart(tv: &Tv, pkg: &str, target: &str) -> Result<String> {
     }
 }
 
-fn restart_cmd(c: &Ctx, args: &[String]) -> Result<()> {
-    c.tv.connect()?;
-    let (pkg, target) = match args.first() {
-        Some(app) if target(app) == "@home" => return usage("restart: 'home' is not an app"),
-        Some(app) => (pkg_of(app).to_string(), app.clone()),
-        None => match super::info::focus_package(&c.tv.window_dump()?) {
-            Some(p) => (p.clone(), p),
-            None => return failed("restart: can't tell which app is in front"),
-        },
+/// What `tveee app <app>` was asked to do.
+#[derive(Debug, PartialEq)]
+pub enum AppAsk {
+    /// Say what tveee can do with it.
+    Info,
+    /// Close it and start it again; `restore`: back where it was.
+    Restart { restore: bool },
+    /// What its page shows (devtools); `json`: raw.
+    Page { json: bool },
+}
+
+pub fn parse_app_args(args: &[String]) -> std::result::Result<AppAsk, String> {
+    let has = |f: &str| args.iter().any(|a| a == f);
+    if let Some(bad) = args.iter().find(|a| !["--restart", "--disable-restore", "--page", "--json"].contains(&a.as_str())) {
+        return Err(format!("unknown option '{bad}'"));
+    }
+    match (has("--restart"), has("--page")) {
+        (true, true) => Err("--restart or --page, not both".into()),
+        (true, false) if has("--json") => Err("--json goes with --page".into()),
+        (true, false) => Ok(AppAsk::Restart { restore: !has("--disable-restore") }),
+        (false, true) if has("--disable-restore") => Err("--disable-restore goes with --restart".into()),
+        (false, true) => Ok(AppAsk::Page { json: has("--json") }),
+        (false, false) if !args.is_empty() => Err(format!("'{}' goes with --restart or --page", args[0])),
+        (false, false) => Ok(AppAsk::Info),
+    }
+}
+
+/// `app [<app> [--restart [--disable-restore] | --page [--json]]]`
+fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
+    let Some(app) = args.first() else {
+        // the apps tveee has more to offer for
+        for p in crate::provider::all() {
+            for pkg in p.hosts() {
+                let name = by_package(pkg).map_or_else(|| pkg.to_string(), |a| match a.alias {
+                    Some(alias) => format!("{} ({alias})", list_name(a.name)),
+                    None => list_name(a.name),
+                });
+                println!("{name:<28} {}", crate::provider::capabilities(*p).join(", "));
+            }
+        }
+        return Ok(());
     };
-    println!("{}", restart(&c.tv, &pkg, &target)?);
-    Ok(())
+    if target(app) == "@home" {
+        return usage("app: 'home' is a place, not an app");
+    }
+    let ask = parse_app_args(&args[1..]).or_else(|e| usage(format!("app: {e}")))?;
+    let pkg = pkg_of(app).to_string();
+    let name = by_package(&pkg).map_or_else(|| crate::labels::name(&pkg).unwrap_or_else(|| pkg.clone()), |a| list_name(a.name));
+    match ask {
+        AppAsk::Info => {
+            println!("{name}  {pkg}");
+            let provider = crate::provider::for_package(&pkg);
+            match provider {
+                Some(p) => println!("  tveee knows: {}", crate::provider::capabilities(p).join(", ")),
+                None => println!("  nothing special: tveee launches, closes and searches it like any app"),
+            }
+            let sessions = provider.is_some_and(|p| p.has_sessions());
+            println!(
+                "  --restart{}   close it and start it again{}",
+                if sessions { " [--disable-restore]" } else { "" },
+                if sessions { ", back where it was (--disable-restore: fresh)" } else { "" }
+            );
+            println!("  --page [--json]   what its page shows, for apps tveee can look inside (web apps)");
+            Ok(())
+        }
+        AppAsk::Restart { restore } => {
+            c.tv.connect()?;
+            println!("{}", restart(&c.tv, &pkg, app, restore)?);
+            Ok(())
+        }
+        AppAsk::Page { json } => {
+            c.tv.connect()?;
+            let Some(conn) = crate::devtools::Conn::open(&c.tv, &pkg) else {
+                return failed(format!("app: can't look inside {name} (it isn't running, or isn't a web app tveee can read)"));
+            };
+            let raw = conn.eval(crate::devtools::PAGE_EXPR)?;
+            if json {
+                println!("{raw}");
+            } else {
+                crate::devtools::page_lines(&raw).iter().for_each(|l| println!("{l}"));
+            }
+            Ok(())
+        }
+    }
 }
 
 fn kill(c: &Ctx, args: &[String]) -> Result<()> {
@@ -734,11 +806,18 @@ pub fn commands() -> Vec<Command> {
             "Prints the foreground window, with the app alias first if it has one,\ne.g. 'kodi (org.xbmc.kodi/.Splash)'. The NetTV webapps (iPlayer, Arte, ...) all run\ninside org.droidtv.nettvbrowser, so they show as that package.",
         ),
         Command::new(CAT, "kill", "<app>", "force-stop one app", kill),
-        Command::new(CAT, "restart", "[app]", "close an app and start it again, back where it was if tveee knows how", restart_cmd).long(
-            "Closes the app (the one in front, if none is named) and starts it again.\n\
-             For apps whose session tveee can save, it comes back where it was:\n\
-             YouTube reopens the same video at the same point. Restarting fixes a\n\
-             frozen picture in YouTube (sound but an old screen).",
+        Command::new(CAT, "app", "[<app> [--restart [--disable-restore] | --page [--json]]]", "what tveee can do with an app, and app-specific actions", app_cmd).long(
+            "With no app: the apps tveee has extra support for, and what it is.\n\
+             With an app (alias or package): what tveee knows about it, and:\n\
+             \n\
+             \x20 --restart            close it and start it again; apps whose session\n\
+             \x20                      tveee can save come back where they were (YouTube:\n\
+             \x20                      the same video at the same point), which fixes a\n\
+             \x20                      frozen YouTube picture (sound but an old screen)\n\
+             \x20 --disable-restore    with --restart: start it fresh instead\n\
+             \x20 --page [--json]      what its page shows (route, title, focusable items,\n\
+             \x20                      > the focused one), for web apps tveee can look\n\
+             \x20                      inside through their devtools socket (YouTube)",
         ),
         Command::new(CAT, "free", "", "force-stop idle RAM-hungry apps", free),
         Command::new(CAT, "apps", "[--all | --others]", "list app aliases installed on the TV", apps).long(
@@ -875,6 +954,19 @@ mod tests {
                     \x20   PERS #45: pers  T/ /PERU trm: 0 2241:org.droidtv.zapster/1000 (pers-top-activity)\n";
         let got: Vec<String> = persistent(dump).into_iter().collect();
         assert_eq!(got, ["com.android.systemui", "org.droidtv.nettvapps", "org.droidtv.zapster", "system"]);
+    }
+
+    #[test]
+    fn app_options() {
+        let a = |v: &[&str]| parse_app_args(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(a(&[]), Ok(AppAsk::Info));
+        assert_eq!(a(&["--restart"]), Ok(AppAsk::Restart { restore: true }));
+        assert_eq!(a(&["--disable-restore", "--restart"]), Ok(AppAsk::Restart { restore: false }));
+        assert_eq!(a(&["--page", "--json"]), Ok(AppAsk::Page { json: true }));
+        assert!(a(&["--restart", "--page"]).is_err());
+        assert!(a(&["--json"]).is_err());
+        assert!(a(&["--page", "--disable-restore"]).is_err());
+        assert!(a(&["--frobnicate"]).is_err());
     }
 
     #[test]

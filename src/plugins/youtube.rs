@@ -8,12 +8,10 @@
 
 use crate::devtools;
 use crate::more::{Chapter, Details, Go, Link, Place};
-use crate::error::{failed, usage, Result};
+use crate::error::{failed, Result};
 use crate::registry::Command;
 use crate::tv::Tv;
-use crate::Ctx;
 
-const CAT: &str = "youtube";
 pub const PACKAGE: &str = "com.google.android.youtube.tv";
 
 pub fn detect(tv: &Tv) -> Result<bool> {
@@ -90,6 +88,9 @@ impl crate::provider::Provider for YouTube {
     // the video and how far in: restarting comes back to it
     fn save_session(&self, tv: &Tv) -> Option<crate::provider::Session> {
         session(tv)
+    }
+    fn has_sessions(&self) -> bool {
+        true
     }
     fn details(&self) -> Option<&dyn crate::provider::Details> {
         Some(self)
@@ -218,55 +219,6 @@ pub fn details(link: &str) -> Result<Details> {
     Ok(parse_details(&text))
 }
 
-/// JSON with the page's route, title, focused element and the visible,
-/// focusable things on it (tag and text), for working out what a screen is.
-const PAGE_EXPR: &str = "(()=>{const f=document.activeElement;\
-const txt=e=>(e.innerText||e.getAttribute('aria-label')||'').trim().replace(/\\s+/g,' ').slice(0,90);\
-const seen=new Set();const items=[];\
-for(const e of document.querySelectorAll('[tabindex],[role=button],[role=option],[aria-label]')){\
-if(!e.offsetWidth)continue;const t=txt(e);if(!t||seen.has(t))continue;seen.add(t);\
-items.push({tag:e.tagName.toLowerCase(),text:t,focused:e===f||e.contains(f)});if(items.length>=40)break}\
-return JSON.stringify({route:location.hash,title:document.title,\
-focused:f?{tag:f.tagName.toLowerCase(),text:txt(f)}:null,items})})()";
-
-fn conn(tv: &Tv) -> Result<devtools::Conn> {
-    tv.connect()?;
-    devtools::Conn::open(tv, PACKAGE).map_or_else(
-        || failed("youtube: can't reach the YouTube app's devtools socket (is it running?)"),
-        Ok,
-    )
-}
-
-/// `youtube page [--json]`: what the app is showing.
-fn page(c: &Ctx, args: &[String]) -> Result<()> {
-    let json = match args.first().map(String::as_str) {
-        None => false,
-        Some("--json") => true,
-        Some(x) => return usage(format!("youtube page: unknown option '{x}'")),
-    };
-    let raw = conn(&c.tv)?.eval(PAGE_EXPR)?;
-    if json {
-        println!("{raw}");
-        return Ok(());
-    }
-    let field = |k: &str| crate::http::string_field(&raw, k).unwrap_or_default();
-    println!("route:   {}", field("route"));
-    println!("title:   {}", field("title"));
-    // the items are objects inside the "items" array
-    let items = raw.find("\"items\":[").map_or("", |i| &raw[i + 9..]);
-    let objs = crate::http::objects(items);
-    if objs.is_empty() {
-        println!("  (nothing focusable is visible: is YouTube in front?)");
-    }
-    for o in &objs {
-        let tag = crate::http::string_field(o, "tag").unwrap_or_default();
-        let text = crate::http::string_field(o, "text").unwrap_or_default();
-        let focused = o.contains("\"focused\":true");
-        println!("  {} {tag:<32} {text}", if focused { ">" } else { " " });
-    }
-    Ok(())
-}
-
 /// Where YouTube is: the video and how far in (or home), from its page.
 fn session(tv: &Tv) -> Option<crate::provider::Session> {
     let c = devtools::Conn::open(tv, PACKAGE)?;
@@ -284,42 +236,9 @@ fn session(tv: &Tv) -> Option<crate::provider::Session> {
     })
 }
 
-/// Restart YouTube where it was (see `apps::restart`).
-pub fn restart(tv: &Tv) -> Result<String> {
-    tv.connect()?;
-    crate::plugins::apps::restart(tv, PACKAGE, PACKAGE)
-}
-
-fn youtube(c: &Ctx, args: &[String]) -> Result<()> {
-    match args.first().map(String::as_str) {
-        Some("page") => page(c, &args[1..]),
-        Some("restart") => {
-            println!("{}", restart(&c.tv)?);
-            Ok(())
-        }
-        None => usage("usage: tveee youtube page [--json] | restart"),
-        Some(x) => usage(format!("youtube: unknown action '{x}' (try: page, restart)")),
-    }
-}
-
+/// No commands of its own: `tveee app youtube` covers it (see `apps`).
 pub fn commands() -> Vec<Command> {
-    vec![Command::new(CAT, "youtube", "page [--json] | restart", "look inside the YouTube app; fix a stuck picture", youtube).long(
-        "Reads the YouTube app's page through its devtools socket (the app must be\n\
-         running).\n\
-         \n\
-         \x20 page          the current route (e.g. #/watch?v=..., #/ for home), the page\n\
-         \x20               title, and the visible focusable items; > marks the focused one\n\
-         \x20 page --json   the same, raw\n\
-         \n\
-         Useful for working out what a screen is, e.g. the 'Who's watching?' picker.\n\
-         \n\
-         \x20 restart       close YouTube and reopen it at the same point of the same\n\
-         \x20               video (or at home). Fixes a frozen picture: you hear the\n\
-         \x20               video but see an old screen. tveee also closes YouTube before\n\
-         \x20               sending it links (open, search, goto), which avoids that,\n\
-         \x20               unless it's in front: then the link is handed to the page\n\
-         \x20               it's showing, as Android would, without closing it.",
-    )]
+    Vec::new()
 }
 
 #[cfg(test)]
@@ -333,16 +252,6 @@ mod tests {
         // nothing in a link can end the JavaScript string
         let e = deep_link_expr("a'b\\c\nd");
         assert!(e.contains(r"{value:'a\'b\\c\u000ad'}"), "{e}");
-    }
-
-    #[test]
-    fn reads_page_items() {
-        let raw = r##"{"route":"#/","title":"YouTube on TV","focused":{"tag":"ytlr-tile-renderer","text":"A"},"items":[{"tag":"ytlr-tile-renderer","text":"A","focused":true},{"tag":"ytlr-button","text":"B","focused":false}]}"##;
-        let items = raw.find("\"items\":[").map_or("", |i| &raw[i + 9..]);
-        let objs = crate::http::objects(items);
-        assert_eq!(objs.len(), 2);
-        assert_eq!(crate::http::string_field(objs[1], "text").as_deref(), Some("B"));
-        assert!(objs[0].contains("\"focused\":true"));
     }
 
     #[test]

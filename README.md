@@ -112,6 +112,7 @@ Usage: tveee <command> [args]
 Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
 
 [apps]
+    app          what tveee can do with an app, and app-specific actions
     apps         list app aliases installed on the TV
     currentapp   show the app currently in the foreground
     foreground   bring an app's existing task to the front (alias: fg)
@@ -120,7 +121,6 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
     launch       launch an app
     open         open a link in the app that handles it
     quit         quit the current app
-    restart      close an app and start it again, back where it was if tveee knows how
     search       search inside an app (YouTube, Kodi, live TV, ...)
 
 [debloat]
@@ -198,8 +198,7 @@ Env: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tveee/env
 <!-- commands:end -->
 
 Not listed above: `ui` (built with `--features ui`), and commands from plugins
-that are enabled when the TV has what they're for: `jointspace` (`philips`) and
-`youtube page` (`youtube`, when the YouTube app is installed). Those plugins
+that are enabled when the TV has what they're for: `jointspace` (`philips`). Those plugins
 also add their apps: iPlayer, Arte, Dailymotion and live TV (`philips`),
 YouTube (`youtube`).
 

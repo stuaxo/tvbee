@@ -249,6 +249,10 @@ pub trait Provider: Sync {
     fn save_session(&self, _tv: &crate::tv::Tv) -> Option<Session> {
         None
     }
+    /// Whether [`Provider::save_session`] does anything (for listing).
+    fn has_sessions(&self) -> bool {
+        false
+    }
     /// Hand `link` to the app where it is, when it's already in front,
     /// without starting an activity (which, with `fresh_for_links`, means
     /// closing it first). Ok(false): it couldn't, so send the link as usual.
@@ -304,6 +308,9 @@ pub fn capabilities(p: &dyn Provider) -> Vec<&'static str> {
     if p.uses_devtools() {
         v.push("now-playing");
     }
+    if p.has_sessions() {
+        v.push("sessions");
+    }
     v
 }
 
@@ -338,7 +345,7 @@ mod tests {
         let ids: Vec<_> = all().iter().map(|p| p.id()).collect();
         assert!(ids.contains(&"youtube") && ids.contains(&"freeview"), "{ids:?}");
         let yt = for_package("com.google.android.youtube.tv").unwrap();
-        assert_eq!(capabilities(yt), vec!["details", "places", "search", "now-playing"]);
+        assert_eq!(capabilities(yt), vec!["details", "places", "search", "now-playing", "sessions"]);
         let tv = with_guide(None).unwrap();
         assert_eq!(tv.id(), "freeview");
         assert_eq!(capabilities(tv), vec!["guide", "channels"]);

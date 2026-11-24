@@ -256,9 +256,54 @@ pub fn evaluate(port: u16, path: &str, expr: &str) -> Result<String> {
     failed("devtools: no reply")
 }
 
+/// JSON with the page's route, title, focused element and the visible,
+/// focusable things on it (tag and text), for working out what a screen is.
+pub const PAGE_EXPR: &str = "(()=>{const f=document.activeElement;\
+const txt=e=>(e.innerText||e.getAttribute('aria-label')||'').trim().replace(/\\s+/g,' ').slice(0,90);\
+const seen=new Set();const items=[];\
+for(const e of document.querySelectorAll('[tabindex],[role=button],[role=option],[aria-label]')){\
+if(!e.offsetWidth)continue;const t=txt(e);if(!t||seen.has(t))continue;seen.add(t);\
+items.push({tag:e.tagName.toLowerCase(),text:t,focused:e===f||e.contains(f)});if(items.length>=40)break}\
+return JSON.stringify({route:location.hash,title:document.title,\
+focused:f?{tag:f.tagName.toLowerCase(),text:txt(f)}:null,items})})()";
+
+/// [`PAGE_EXPR`]'s answer as lines: the route, the title, then the items
+/// (> marks the focused one).
+pub fn page_lines(raw: &str) -> Vec<String> {
+    let field = |k: &str| http::string_field(raw, k).unwrap_or_default();
+    let mut out = vec![format!("route:   {}", field("route")), format!("title:   {}", field("title"))];
+    // the items are objects inside the "items" array
+    let items = raw.find("\"items\":[").map_or("", |i| &raw[i + 9..]);
+    let objs = http::objects(items);
+    if objs.is_empty() {
+        out.push("  (nothing focusable is visible: is the app in front?)".into());
+    }
+    for o in &objs {
+        let tag = http::string_field(o, "tag").unwrap_or_default();
+        let text = http::string_field(o, "text").unwrap_or_default();
+        let focused = o.contains("\"focused\":true");
+        out.push(format!("  {} {tag:<32} {text}", if focused { ">" } else { " " }));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_page_items() {
+        let lines = page_lines(r##"{"route":"#/","title":"YouTube on TV","items":[{"tag":"a","text":"A","focused":true},{"tag":"b","text":"B","focused":false}]}"##);
+        assert_eq!(lines[0], "route:   #/");
+        assert!(lines[2].starts_with("  > a") && lines[3].starts_with("    b"), "{lines:?}");
+        let raw = r##"{"route":"#/","title":"YouTube on TV","focused":{"tag":"ytlr-tile-renderer","text":"A"},"items":[{"tag":"ytlr-tile-renderer","text":"A","focused":true},{"tag":"ytlr-button","text":"B","focused":false}]}"##;
+        let items = raw.find("\"items\":[").map_or("", |i| &raw[i + 9..]);
+        let objs = crate::http::objects(items);
+        assert_eq!(objs.len(), 2);
+        assert_eq!(crate::http::string_field(objs[1], "text").as_deref(), Some("B"));
+        assert!(objs[0].contains("\"focused\":true"));
+    }
+
 
     #[test]
     fn finds_sockets() {

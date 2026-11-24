@@ -1003,7 +1003,7 @@ impl Actor {
             }
             Action::Restart { pkg, target } => {
                 // back where it was, for apps whose session tveee can save
-                let said = apps::restart(&self.tv, &pkg, &target)?;
+                let said = apps::restart(&self.tv, &pkg, &target, true)?;
                 let _ = self.reads.send(Action::CheckRunning);
                 said
             }
