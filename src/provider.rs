@@ -295,6 +295,10 @@ pub trait Player: Sync {
     fn picture(&self, _tv: &crate::tv::Tv, _art: &str, _at: Option<f64>) -> Outcome<Vec<u8>> {
         Outcome::Fallback
     }
+    /// Stop anything started in the background for pictures (a download):
+    /// the preview has moved on.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    fn stop(&self) {}
 }
 
 /// A source of content. Everything but the identity is optional.

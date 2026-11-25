@@ -1190,6 +1190,13 @@ pub fn picture_terminal(env: impl Fn(&str) -> Option<String>) -> bool {
         || ["iTerm.app", "WezTerm", "ghostty", "rio"].contains(&program.as_str())
 }
 
+/// Tell app `pkg`'s player the preview has moved on (stop its downloads).
+fn stop_pictures(pkg: Option<String>) {
+    if let Some(player) = pkg.as_deref().and_then(crate::provider::for_package).and_then(|p| p.player()) {
+        player.stop();
+    }
+}
+
 /// The preview lane: pictures of what's on while the panel is open.
 ///
 /// YouTube: its storyboard frame at once, then frames from a small copy of
@@ -1214,10 +1221,18 @@ fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
         let mut still_at: Option<Instant> = None;
         // the last picture sent (what, and where in it for moving ones)
         let mut shown_art: Option<(String, i64)> = None;
+        // the app the pictures last came from
+        let mut pictures_from: Option<String> = None;
         while open() {
             // an app's player has a picture of what's on (YouTube's frames,
             // Kodi's artwork: its video is on a layer scrcpy can't see)
             let art = lock(&shared.art).clone();
+            // moved on from an app whose player had work going for pictures
+            let now_pkg = art.as_ref().map(|a| a.pkg.clone());
+            if pictures_from != now_pkg {
+                stop_pictures(pictures_from.take());
+                pictures_from = now_pkg;
+            }
             if let Some(a) = art {
                 live = None;
                 let at = a.now();
@@ -1309,7 +1324,8 @@ fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
-        // closed: the server stops with it
+        // closed: the server stops with it, and any download
+        stop_pictures(pictures_from.take());
         drop(live);
     }
 }

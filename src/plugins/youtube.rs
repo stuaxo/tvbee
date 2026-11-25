@@ -147,6 +147,9 @@ impl crate::provider::Player for YouTube {
     fn seek(&self, tv: &Tv, to: devtools::SeekTo) -> Outcome<f64> {
         devtools::with_conn(tv, PACKAGE, |c| c.seek(to)).into()
     }
+    fn stop(&self) {
+        stop_fetching();
+    }
     // a frame of the video at `at`: from a small copy of it, or its
     // storyboard until that's here
     fn picture(&self, _tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {
@@ -183,9 +186,31 @@ fn copies() -> &'static Mutex<HashMap<String, Option<PathBuf>>> {
     COPIES.get_or_init(Default::default)
 }
 
+/// The download running now: (video, yt-dlp), so it can be stopped.
+static FETCHING: Mutex<Option<(String, std::process::Child)>> = Mutex::new(None);
+
+/// Stop the download running now (if any), and forget it was asked for, so
+/// it starts again if that video is wanted later.
+pub fn stop_fetching() {
+    let stopped = FETCHING.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    if let Some((id, mut child)) = stopped {
+        let _ = child.kill();
+        let _ = child.wait();
+        crate::tlog!("youtube: stopped fetching {id}");
+        let mut all = copies().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if all.get(&id).is_some_and(Option::is_none) {
+            all.remove(&id);
+        }
+    }
+}
+
 /// The small copy of video `id`, if it's here; the first ask starts
-/// fetching it (in the background).
+/// fetching it (in the background), stopping any other video's download.
 fn copy_of(id: &str) -> Option<PathBuf> {
+    let fetching_other = FETCHING.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|(f, _)| f != id);
+    if fetching_other {
+        stop_fetching();
+    }
     let mut all = copies().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     match all.get(id) {
         Some(Some(p)) if p.exists() => return Some(p.clone()),
@@ -226,7 +251,7 @@ pub fn local_copy(id: &str) -> Result<PathBuf> {
         let _ = std::fs::remove_file(p);
     }
     let Some(ytdlp) = program("yt-dlp") else { return failed("preview: yt-dlp isn't installed here") };
-    let out = std::process::Command::new(ytdlp)
+    let child = std::process::Command::new(ytdlp)
         .args(["-q", "--no-playlist", "--no-progress"])
         .args(SMALLEST)
         .arg("-o")
@@ -234,11 +259,33 @@ pub fn local_copy(id: &str) -> Result<PathBuf> {
         .arg(format!("https://www.youtube.com/watch?v={id}"))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .output()?;
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    crate::tlog!("youtube: fetching a small copy of {id}");
+    *FETCHING.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id.to_string(), child));
+    // wait for it, letting go of it between looks so it can be stopped
+    let done = loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let mut f = FETCHING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match f.as_mut() {
+            Some((fid, child)) if fid == id => match child.try_wait() {
+                Ok(Some(status)) => {
+                    *f = None;
+                    break status.success();
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    *f = None;
+                    break false;
+                }
+            },
+            // stopped (or another one started): not this one, then
+            _ => return failed("preview: the download was stopped"),
+        }
+    };
     match copies_here().into_iter().find(mine) {
         Some(p) => Ok(p),
-        None => failed(format!("preview: yt-dlp couldn't fetch the video: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("").trim())),
+        None => failed(format!("preview: yt-dlp couldn't fetch the video{}", if done { "" } else { " (it failed)" })),
     }
 }
 
