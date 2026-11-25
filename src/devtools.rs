@@ -9,8 +9,7 @@
 use crate::error::{failed, Error, Result};
 use crate::http;
 use crate::tv::Tv;
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use crate::ws::{Recv, WsClient};
 use std::time::Duration;
 
 /// Abstract socket names of devtools servers, from `/proc/net/unix`.
@@ -177,6 +176,75 @@ impl Conn {
     }
 }
 
+impl Conn {
+    /// Call `on` with each event the page's videos fire (play, pause,
+    /// seeked, ended, a new video's loadedmetadata) as it happens, until
+    /// `go` says to stop (asked every second) or the page goes. Done with a
+    /// binding (`Runtime.addBinding`) the page's listeners call.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub fn watch(&self, on: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Result<()> {
+        let Some(path) = self.page_list()?.into_iter().find_map(|(_, ws)| ws) else {
+            return Err(Error::Unavailable("devtools: no page".into()));
+        };
+        let mut ws = WsClient::connect("127.0.0.1", self.fwd.port, &path)?;
+        let mut id = 0;
+        let mut ask = |ws: &mut WsClient, method: &str, params: String| -> Result<serde_json::Value> {
+            id += 1;
+            ws.send_text(&format!(r#"{{"id":{id},"method":"{method}","params":{params}}}"#))?;
+            for _ in 0..50 {
+                let Some(text) = ws.recv_text()? else { break };
+                let Some(reply) = http::json(&text) else { continue };
+                if reply.get("id").and_then(serde_json::Value::as_u64) == Some(id) {
+                    if let Some(e) = reply.get("error") {
+                        return Err(Error::Unavailable(format!("devtools: {method}: {e}")));
+                    }
+                    return Ok(reply);
+                }
+            }
+            failed(format!("devtools: no reply to {method}"))
+        };
+        ask(&mut ws, "Runtime.addBinding", format!(r#"{{"name":"{BINDING}"}}"#))?;
+        let install = format!(r#"{{"expression":{},"returnByValue":true}}"#, serde_json::Value::from(LISTEN_EXPR));
+        ask(&mut ws, "Runtime.evaluate", install.clone())?;
+        crate::tlog!("devtools: watching {}'s videos", self.pkg);
+        ws.set_timeout(Duration::from_secs(1))?;
+        // the page may load again (dropping the listeners): put them back now and then
+        let mut installed = std::time::Instant::now();
+        while go() {
+            match ws.recv()? {
+                Recv::Closed => break,
+                Recv::Quiet => {}
+                Recv::Text(t) => {
+                    let Some(v) = http::json(&t) else { continue };
+                    if v.get("method").and_then(serde_json::Value::as_str) == Some("Runtime.bindingCalled")
+                        && v.pointer("/params/name").and_then(serde_json::Value::as_str) == Some(BINDING)
+                    {
+                        on(v.pointer("/params/payload").and_then(serde_json::Value::as_str).unwrap_or(""));
+                    }
+                }
+            }
+            if installed.elapsed() > Duration::from_secs(30) {
+                ws.set_timeout(Duration::from_secs(5))?;
+                ask(&mut ws, "Runtime.evaluate", install.clone())?;
+                ws.set_timeout(Duration::from_secs(1))?;
+                installed = std::time::Instant::now();
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The function the page calls with its videos' events.
+const BINDING: &str = "tveeeEvent";
+
+/// Listen (once: earlier listeners are replaced) for media events from any
+/// video on the page; they don't bubble, so on the way down.
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+const LISTEN_EXPR: &str = "(()=>{const T=['play','pause','seeked','ended','loadedmetadata'];\
+if(window.__tveee)for(const t of T)document.removeEventListener(t,window.__tveee,true);\
+window.__tveee=e=>{if(e.target&&e.target.tagName==='VIDEO'){try{tveeeEvent(e.type)}catch(_){}}};\
+for(const t of T)document.addEventListener(t,window.__tveee,true);return 'ok'})()";
+
 #[cfg_attr(not(feature = "ui"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SeekTo {
@@ -209,82 +277,17 @@ pub fn ws_path(ws_url: &str) -> Option<String> {
     Some(rest[rest.find('/')?..].to_string())
 }
 
-/// A client-to-server WebSocket text frame (clients must mask).
-pub fn text_frame(payload: &[u8], mask: [u8; 4]) -> Vec<u8> {
-    let mut f = vec![0x81];
-    match payload.len() {
-        n if n < 126 => f.push(0x80 | n as u8),
-        n if n <= 0xffff => {
-            f.push(0x80 | 126);
-            f.extend_from_slice(&(n as u16).to_be_bytes());
-        }
-        n => {
-            f.push(0x80 | 127);
-            f.extend_from_slice(&(n as u64).to_be_bytes());
-        }
-    }
-    f.extend_from_slice(&mask);
-    f.extend(payload.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
-    f
-}
-
-fn read_exact(s: &mut TcpStream, n: usize) -> Result<Vec<u8>> {
-    let mut buf = vec![0; n];
-    s.read_exact(&mut buf)?;
-    Ok(buf)
-}
-
-/// Read one server frame's payload (servers don't mask).
-fn read_frame(s: &mut TcpStream) -> Result<(u8, Vec<u8>)> {
-    let h = read_exact(s, 2)?;
-    let len = match h[1] & 0x7f {
-        126 => u16::from_be_bytes(read_exact(s, 2)?.try_into().unwrap()) as usize,
-        127 => u64::from_be_bytes(read_exact(s, 8)?.try_into().unwrap()) as usize,
-        n => n as usize,
-    };
-    if len > 1 << 20 {
-        return failed("devtools: frame too large");
-    }
-    Ok((h[0] & 0x0f, read_exact(s, len)?))
-}
-
-fn mask() -> [u8; 4] {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
-    (t ^ std::process::id().rotate_left(16)).to_be_bytes()
-}
-
 /// Run `Runtime.evaluate` on a page and return the string result.
 pub fn evaluate(port: u16, path: &str, expr: &str) -> Result<String> {
-    let mut s = TcpStream::connect(("127.0.0.1", port))?;
-    s.set_read_timeout(Some(Duration::from_secs(5)))?;
-    // a fixed key is fine: we don't need to check the server's accept hash
-    write!(
-        s,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
-         Sec-WebSocket-Key: dHZiZWUtZGV2dG9vbHMhIQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
-    )?;
-    let mut head = Vec::new();
-    while !head.ends_with(b"\r\n\r\n") {
-        head.extend(read_exact(&mut s, 1)?);
-        if head.len() > 8192 {
-            return failed("devtools: bad handshake");
-        }
-    }
-    if !head.starts_with(b"HTTP/1.1 101") {
-        return failed("devtools: websocket refused");
-    }
+    let mut ws = WsClient::connect("127.0.0.1", port, path)?;
     let quoted = format!("\"{}\"", expr.replace('\\', "\\\\").replace('"', "\\\""));
-    let msg = format!(
+    ws.send_text(&format!(
         r#"{{"id":1,"method":"Runtime.evaluate","params":{{"expression":{quoted},"returnByValue":true}}}}"#
-    );
-    s.write_all(&text_frame(msg.as_bytes(), mask()))?;
+    ))?;
     // skip any events until our reply arrives
     for _ in 0..20 {
-        let (op, data) = read_frame(&mut s)?;
-        if op == 8 {
-            break;
-        }
-        let Some(reply) = http::json(&String::from_utf8_lossy(&data)) else { continue };
+        let Some(text) = ws.recv_text()? else { break };
+        let Some(reply) = http::json(&text) else { continue };
         if reply.get("id").and_then(serde_json::Value::as_u64) == Some(1) {
             // {"id":1,"result":{"result":{"type":"string","value":"..."}}}
             return match reply.pointer("/result/result/value") {
@@ -376,13 +379,5 @@ mod tests {
     fn ws_paths() {
         assert_eq!(ws_path("ws://127.0.0.1:9229/devtools/page/ABC").as_deref(), Some("/devtools/page/ABC"));
         assert_eq!(ws_path("http://x/y"), None);
-    }
-
-    #[test]
-    fn frames_are_masked() {
-        let f = text_frame(b"hi", [1, 2, 3, 4]);
-        assert_eq!(f, vec![0x81, 0x82, 1, 2, 3, 4, b'h' ^ 1, b'i' ^ 2]);
-        let long = text_frame(&[0; 300], [0; 4]);
-        assert_eq!(&long[1..4], &[0x80 | 126, 1, 44]);
     }
 }

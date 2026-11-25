@@ -346,6 +346,47 @@ impl crate::provider::Player for Kodi {
     fn picture(&self, tv: &Tv, art: &str, _at: Option<f64>) -> Outcome<Vec<u8>> {
         self.art_bytes(tv, art).into()
     }
+    // Kodi's TCP API (port 9090) sends notifications as they happen
+    fn watch(&self, tv: &Tv, changed: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Outcome<()> {
+        watch_notifications(tv, changed, go).into()
+    }
+}
+
+/// Kodi's TCP JSON-RPC port: the same API as over HTTP, plus notifications
+/// pushed as they happen (on while remote control from other systems is).
+const TCP_PORT: u16 = 9090;
+
+/// The playback notification in a message from Kodi's TCP API, if it's one
+/// ("Player.OnPause", ...).
+pub fn player_notification(msg: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(msg).ok()?;
+    str_of(&v, "method").filter(|m| m.starts_with("Player.On"))
+}
+
+/// Call `on` with each of Kodi's player notifications until `go` says stop.
+fn watch_notifications(tv: &Tv, on: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Result<()> {
+    use std::io::{ErrorKind, Read};
+    let addr = std::net::SocketAddr::new(tv.ip.parse().map_err(|_| Error::Unavailable(format!("{} isn't an IP address", tv.ip)))?, TCP_PORT);
+    let mut s = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).map_err(|_| off())?;
+    s.set_read_timeout(Some(std::time::Duration::from_secs(1)))?;
+    crate::tlog!("kodi: listening for notifications on port {TCP_PORT}");
+    let mut split = crate::ws::JsonSplitter::default();
+    let mut buf = [0u8; 8192];
+    while go() {
+        match s.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for msg in split.push(&buf[..n]) {
+                    if let Some(m) = player_notification(&msg) {
+                        on(&m);
+                    }
+                }
+            }
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
 }
 
 impl Kodi {
@@ -451,6 +492,14 @@ mod tests {
     // as Kodi 21 answers
     const ITEM: &str = r#"{"item":{"art":{"fanart":"image://smb%3a%2f%2fnas%2ffanart.jpg/","poster":"image://p.jpg/"},"episode":4,"fanart":"","file":"smb://nas/tv/Taskmaster/S03E04.mkv","id":7,"label":"S03E04","season":3,"showtitle":"Taskmaster","streamdetails":{"audio":[{"channels":6,"codec":"ac3","language":"eng"}],"subtitle":[{"language":"eng"}],"video":[{"aspect":1.78,"codec":"h264","duration":2700,"height":1080,"width":1920}]},"thumbnail":"","title":"A Very Nuanced Character","type":"episode","year":2016}}"#;
     const PROPS: &str = r#"{"currentaudiostream":{"bitrate":0,"channels":6,"codec":"ac3","index":0,"language":"eng","name":"English"},"currentsubtitle":{"index":0,"language":"eng","name":"English"},"speed":1,"subtitleenabled":false,"time":{"hours":0,"milliseconds":500,"minutes":3,"seconds":20},"totaltime":{"hours":0,"milliseconds":0,"minutes":45,"seconds":0}}"#;
+
+    #[test]
+    fn notifications() {
+        let pause = r#"{"jsonrpc":"2.0","method":"Player.OnPause","params":{"data":{"item":{"id":7,"type":"episode"},"player":{"playerid":1,"speed":0}},"sender":"xbmc"}}"#;
+        assert_eq!(player_notification(pause).as_deref(), Some("Player.OnPause"));
+        assert_eq!(player_notification(r#"{"jsonrpc":"2.0","method":"GUI.OnScreensaverActivated","params":{}}"#), None);
+        assert_eq!(player_notification(r#"{"jsonrpc":"2.0","id":1,"result":"pong"}"#), None);
+    }
 
     fn json(s: &str) -> Value {
         serde_json::from_str(s).unwrap()

@@ -24,6 +24,7 @@ mod registry;
 mod store;
 mod tv;
 mod watch;
+mod ws;
 
 use error::Error;
 use plugin::{Mode, PluginState};

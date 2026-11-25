@@ -546,6 +546,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let (read_tx, read_rx) = mpsc::channel();
     let (idle_tx, idle_rx) = mpsc::channel();
     let (wake_tx, wake_rx) = mpsc::channel();
+    let push_wake = wake_tx.clone();
     let lanes = vec![(Lane::Keys, key_tx), (Lane::Act, do_tx), (Lane::Read, read_tx.clone()), (Lane::Idle, idle_tx)];
     let sh = Arc::clone(&shared);
     spawn_named("route", move || route(&act_rx, &sh, &lanes));
@@ -560,6 +561,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     spawn_named("background", move || background(&sh, &idle_rx, idle_msgs));
     let (preview_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
     spawn_named("preview", move || preview_lane(&sh, &preview_msgs));
+    let sh = Arc::clone(&shared);
+    spawn_named("push", move || push_lane(&sh, &push_wake));
     let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None };
     spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);

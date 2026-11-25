@@ -679,3 +679,42 @@ pub(super) fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<M
         }
     }
 }
+
+/// After a push connection ends or can't be made, how long before trying
+/// that app again (Kodi not running, say).
+const PUSH_RETRY: Duration = Duration::from_secs(10);
+
+/// The push lane: while the app in front can say when playback changes
+/// (Kodi, YouTube: [`crate::provider::Player::watch`]), the refresh is woken
+/// as soon as it does, rather than up to a second later.
+pub(super) fn push_lane(shared: &Shared, wake: &Sender<()>) {
+    use crate::provider::Outcome;
+    let tv = shared.tv();
+    // the app given up on lately, and when
+    let mut resting: Option<(String, Instant)> = None;
+    while !shared.stopping() {
+        let pkg = lock(&shared.pkg).clone();
+        let player = pkg.as_deref().and_then(crate::provider::for_package).and_then(|p| p.player());
+        let (Some(pkg), Some(player)) = (pkg, player) else {
+            std::thread::sleep(REFRESH);
+            continue;
+        };
+        if resting.as_ref().is_some_and(|(p, at)| *p == pkg && at.elapsed() < PUSH_RETRY) {
+            std::thread::sleep(REFRESH);
+            continue;
+        }
+        let still = || !shared.stopping() && lock(&shared.pkg).as_deref() == Some(pkg.as_str());
+        let changed = |what: &str| {
+            crate::tlog!("push: {pkg}: {what}");
+            let _ = wake.send(());
+        };
+        let outcome = player.watch(&tv, &changed, &still);
+        if let Outcome::Failed(e) = &outcome {
+            crate::tlog!("push: {pkg}: {e}");
+        }
+        // it ended with the app still in front: it can't push now
+        if still() {
+            resting = Some((pkg, Instant::now()));
+        }
+    }
+}

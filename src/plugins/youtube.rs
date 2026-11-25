@@ -149,6 +149,10 @@ impl crate::provider::Player for YouTube {
     fn stop(&self) {
         stop_fetching();
     }
+    fn watch(&self, tv: &Tv, changed: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Outcome<()> {
+        let Some(conn) = devtools::Conn::open(tv, PACKAGE) else { return Outcome::Fallback };
+        conn.watch(changed, go).into()
+    }
     // a frame of the video at `at`: from a small copy of it, or its
     // storyboard until that's here
     fn picture(&self, _tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {

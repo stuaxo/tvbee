@@ -295,6 +295,14 @@ pub trait Player: Sync {
     fn picture(&self, _tv: &crate::tv::Tv, _art: &str, _at: Option<f64>) -> Outcome<Vec<u8>> {
         Outcome::Fallback
     }
+    /// Push: call `changed` (with what happened: "pause", "Player.OnSeek")
+    /// as soon as the app says playback changed, rather than waiting to be
+    /// asked; until `go` says to stop (it's asked at least every second).
+    /// Fall back: the app can't say (it's asked every second instead).
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    fn watch(&self, _tv: &crate::tv::Tv, _changed: &dyn Fn(&str), _go: &dyn Fn() -> bool) -> Outcome<()> {
+        Outcome::Fallback
+    }
     /// Stop anything started in the background for pictures (a download):
     /// the preview has moved on.
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
