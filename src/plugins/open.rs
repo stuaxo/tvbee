@@ -135,7 +135,6 @@ pub fn open_link(tv: &Tv, line: &str) -> Result<String> {
     let (app, url, _) = parse_args(&words)?;
     let url = normalise(url);
     let mime = media_type(&url);
-    tv.connect()?;
     let component = choose(tv, &url, mime, app)?;
     if super::apps::link_here_or_prepare(tv, component.split('/').next().unwrap_or(&component), &url)? {
         return Ok(format!("opened in {}", label(&component)));
@@ -188,7 +187,6 @@ fn open(c: &Ctx, args: &[String]) -> Result<()> {
     }
     let url = normalise(url);
     let mime = media_type(&url);
-    c.tv.connect()?;
     let component = choose(&c.tv, &url, mime, app)?;
     println!("would open in {} ({component})", label(&component));
     Ok(())

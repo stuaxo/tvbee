@@ -688,7 +688,6 @@ fn list(o: &Opts) -> Result<()> {
 
 fn run(c: &Ctx, dir: Option<Direction>, o: &Opts) -> Result<()> {
     let tv = &c.tv;
-    tv.connect()?;
     let spec = parse_spec(&tv.shell(&[SPEC_CMD])?);
     let (p, from) = load_profile(o.profile.as_deref(), Some(&spec.model))?;
     let other_tv = p.model.as_ref().is_some_and(|m| *m != spec.model);
@@ -813,7 +812,6 @@ fn debloat(c: &Ctx, args: &[String]) -> Result<()> {
         "apply" => run(c, Some(Direction::Apply), &o),
         "restore" => run(c, Some(Direction::Restore), &o),
         "trim" => {
-            c.tv.connect()?;
             if o.dry {
                 println!("would run: pm trim-caches (frees app caches on /data)");
                 return Ok(());

@@ -78,8 +78,7 @@ fn wait(c: &Ctx, args: &[String]) -> Result<()> {
     };
     let mut waited = 0;
     while waited < limit {
-        if c.tv.try_connect()
-            && c.tv.shell(&["getprop", "sys.boot_completed"]).is_ok_and(|s| s.trim() == "1")
+        if c.tv.shell(&["getprop", "sys.boot_completed"]).is_ok_and(|s| s.trim() == "1")
         {
             println!("TV is up");
             return Ok(());

@@ -292,7 +292,6 @@ impl Refresher {
     }
 
     pub(super) fn snapshot(&mut self) -> Result<Snapshot> {
-        self.tv.connect()?;
         let tv = &self.tv;
         let watch_lights = self.shared.ambilight.load(Ordering::Relaxed);
         let (power, window, media_dump, audio, system, ambilight) = std::thread::scope(|sc| {
@@ -421,7 +420,6 @@ impl Actor {
 
     /// Carry out one action; returns status-line feedback.
     pub(super) fn act(&mut self, a: Action, tx: &Sender<Msg>) -> Result<String> {
-        self.tv.connect()?;
         Ok(match a {
             Action::Favourite(ch, on) => {
                 let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
@@ -562,9 +560,6 @@ pub(super) fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg
         queued.extend(actions.try_iter());
         queued.dedup();
         for a in queued {
-            if tv.connect().is_err() {
-                continue;
-            }
             match a {
                 Action::LoadGuide => {
                     let _ = tx.send(Msg::Guide(load_guide(tv).map_err(|e| e.to_string())));
@@ -597,7 +592,7 @@ pub(super) fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<M
         if !shared.wait_idle() {
             return;
         }
-        if tv.connect().is_ok() && send_apps(shared, &tv, &tx) {
+        if send_apps(shared, &tv, &tx) {
             break;
         }
         std::thread::sleep(REFRESH);

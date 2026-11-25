@@ -190,7 +190,6 @@ pub fn read_ram(tv: &crate::tv::Tv) -> Result<Option<String>> {
 }
 
 fn now(c: &Ctx, _: &[String]) -> Result<()> {
-    c.tv.connect()?;
     if let Some(l) = focus_line(&c.tv.window_dump()?) {
         println!("{l}");
     }
@@ -230,14 +229,12 @@ macro_rules! watch_long {
 fn run_report(c: &Ctx, name: &'static str, args: &[String], report: fn(&Tv) -> Result<String>) -> Result<()> {
     match parse_watch_args(name, args)? {
         None => {
-            c.tv.connect()?;
             print!("{}", report(&c.tv)?);
             Ok(())
         }
         Some(every) => {
             let tv = Tv { ip: c.tv.ip.clone() };
             crate::watch::run(name, every, move || {
-                tv.connect()?;
                 report(&tv)
             })
         }
@@ -371,7 +368,6 @@ fn nowplaying_text(tv: &Tv) -> Result<String> {
 fn nowplaying_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     // one-shot: say "nothing" on stderr and exit 1, so scripts can tell
     if parse_watch_args("nowplaying", args)?.is_none() {
-        c.tv.connect()?;
         let text = nowplaying_text(&c.tv)?;
         if text == NOTHING {
             return failed(format!("nowplaying: {}", NOTHING.trim_end()));
@@ -447,7 +443,6 @@ fn pc_clock() -> Result<(f64, String, String)> {
 }
 
 fn time(c: &Ctx, _: &[String]) -> Result<()> {
-    c.tv.connect()?;
     let before = pc_clock()?.0;
     let raw = c.tv.shell(&[CLOCK_CMD])?;
     let after = pc_clock()?;
@@ -480,7 +475,6 @@ fn time(c: &Ctx, _: &[String]) -> Result<()> {
 }
 
 fn logs(c: &Ctx, args: &[String]) -> Result<()> {
-    c.tv.connect()?;
     match args.first() {
         None => print!("{}", c.tv.adb(&["logcat", "-d", "-v", "time", "-t", "200"])?),
         Some(pat) => {
@@ -497,7 +491,6 @@ fn logs(c: &Ctx, args: &[String]) -> Result<()> {
 
 /// The app in front, its table entry, and the link to what it's showing.
 fn current(tv: &Tv) -> Result<(String, Option<&'static super::apps::App>, Option<String>)> {
-    tv.connect()?;
     let window = tv.window_dump()?;
     let Some(pkg) = focus_package(&window) else { return failed("can't tell which app is in front") };
     let app = super::apps::by_package(&pkg);
@@ -627,7 +620,6 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
         }
         [w] if places.iter().any(|p| p.id == *w) => {
             let p = places.iter().find(|p| p.id == *w).expect("checked");
-            tv.connect()?;
             println!("{}", go(tv, &pkg, &crate::more::Go::Link(p.link.to_string()))?);
             Ok(())
         }

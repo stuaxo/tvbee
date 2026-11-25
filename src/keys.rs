@@ -464,7 +464,6 @@ impl Session {
     fn send(&mut self, cmd: &str) -> Result<()> {
         for _ in 0..2 {
             if self.child.is_none() {
-                self.tv.connect()?;
                 self.child = Some(self.tv.shell_session()?);
             }
             let ok = self.child.as_mut().and_then(|c| c.stdin.as_mut()).is_some_and(|s| s.write_all(format!("{cmd}\n").as_bytes()).and_then(|()| s.flush()).is_ok());

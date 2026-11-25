@@ -239,7 +239,6 @@ fn run(tv: &Tv, app: &str, query: &str, play: bool, keys: bool, dry: bool) -> Re
     if query.is_empty() {
         return usage(format!("search: what should {app} search for?"));
     }
-    tv.connect()?;
     if keys {
         return keys_search(tv, app, query, dry);
     }
@@ -247,7 +246,6 @@ fn run(tv: &Tv, app: &str, query: &str, play: bool, keys: bool, dry: bool) -> Re
 }
 
 fn list(tv: &Tv) -> Result<()> {
-    tv.connect()?;
     let mut all = searchable(tv)?;
     all.sort_by_key(|s| (apps::by_package(&s.package).and_then(|a| a.alias).is_none(), label(&s.package).to_lowercase()));
     for s in all {

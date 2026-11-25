@@ -90,6 +90,14 @@ fn check(args: &[&str], out: Output) -> Result<Output> {
     }
 }
 
+/// adb's complaint (stderr) when it isn't connected to the device: then
+/// `adb connect` and try again.
+pub fn not_connected(stderr: &str) -> bool {
+    (stderr.contains("device '") && stderr.contains("' not found"))
+        || stderr.contains("device offline")
+        || stderr.contains("no devices/emulators found")
+}
+
 /// `adb connect` reports most failures on stdout with exit status 0.
 pub fn connect_ok(stdout: &str) -> bool {
     stdout.contains("connected to")
@@ -106,14 +114,18 @@ impl Tv {
         format!("{}:5555", self.ip)
     }
 
+    /// Run adb against the TV's serial; when adb says it isn't connected,
+    /// `adb connect` (whose error, e.g. the TV being off, is the one returned)
+    /// and run it again.
     fn run(&self, args: &[&str]) -> Result<Output> {
         let started = std::time::Instant::now();
-        let out = Proc::new(adb_program())
-            .arg("-s")
-            .arg(self.serial())
-            .args(args)
-            .output()
-            .map_err(adb_err)?;
+        let go = || Proc::new(adb_program()).arg("-s").arg(self.serial()).args(args).output().map_err(adb_err);
+        let mut out = go()?;
+        if !out.status.success() && not_connected(&clean(&out.stderr)) {
+            crate::tlog!("adb {}: not connected, connecting", loggable(args));
+            self.reconnect()?;
+            out = go()?;
+        }
         let result = check(args, out);
         crate::tlog!(
             "adb {}: {}ms{}",
@@ -125,6 +137,8 @@ impl Tv {
     }
 
     /// `adb connect`; fails if adb can't run or the TV can't be reached.
+    /// Other calls connect when they need to, so this is only for checking
+    /// the TV can be reached.
     pub fn connect(&self) -> Result<()> {
         let out = Proc::new(adb_program())
             .args(["connect", &self.ip])
@@ -140,8 +154,48 @@ impl Tv {
         }
     }
 
-    pub fn try_connect(&self) -> bool {
-        self.connect().is_ok()
+    /// `adb connect` for a call adb refused, one thread at a time, then wait
+    /// for adb to have the device (it's "offline" for a moment after
+    /// connecting). A failure is given to calls in the next few seconds
+    /// as it is, rather than each of them trying again (a TV that's off can
+    /// take a long time to fail).
+    fn reconnect(&self) -> Result<()> {
+        static LAST_FAILURE: std::sync::Mutex<Option<(String, std::time::Instant, String)>> = std::sync::Mutex::new(None);
+        let mut last = LAST_FAILURE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((serial, at, why)) = last.as_ref() {
+            if *serial == self.serial() && at.elapsed() < std::time::Duration::from_secs(5) {
+                return failed(why.clone());
+            }
+        }
+        match self.connect().and_then(|()| self.wait_online()) {
+            Ok(()) => {
+                *last = None;
+                Ok(())
+            }
+            Err(e) => {
+                *last = Some((self.serial(), std::time::Instant::now(), e.to_string()));
+                Err(e)
+            }
+        }
+    }
+
+    /// Wait (up to 3s) for adb to say the device is ready.
+    fn wait_online(&self) -> Result<()> {
+        for _ in 0..15 {
+            let state = Proc::new(adb_program()).arg("-s").arg(self.serial()).arg("get-state").output().map_err(adb_err)?;
+            if state.status.success() && clean(&state.stdout).trim() == "device" {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        crate::tlog!("adb {}: still not ready after connecting", self.serial());
+        failed(format!("adb: {} is connected but not ready (offline)", self.serial()))
+    }
+
+    /// Make sure adb is connected to the TV (connecting if not), for the
+    /// calls that start adb and leave it running.
+    pub fn ready(&self) -> Result<()> {
+        self.run(&["get-state"]).map(drop)
     }
 
     /// Run `adb -s <serial> <args>` and return stdout (CRs stripped).
@@ -165,6 +219,7 @@ impl Tv {
 
     /// Like `shell`, but the device's output goes straight to the terminal.
     pub fn shell_inherit(&self, args: &[&str]) -> Result<()> {
+        self.ready()?;
         let status = Proc::new(adb_program())
             .arg("-s")
             .arg(self.serial())
@@ -195,6 +250,7 @@ impl Tv {
     /// the child to stop it.
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn spawn_shell(&self, cmd: &str) -> Result<std::process::Child> {
+        self.ready()?;
         Proc::new(adb_program())
             .arg("-s")
             .arg(self.serial())
@@ -210,6 +266,7 @@ impl Tv {
     /// `adb shell` reading commands from its stdin, left open (output
     /// discarded): for sending one command after another with no start-up.
     pub fn shell_session(&self) -> Result<std::process::Child> {
+        self.ready()?;
         Proc::new(adb_program())
             .arg("-s")
             .arg(self.serial())
@@ -221,9 +278,8 @@ impl Tv {
             .map_err(adb_err)
     }
 
-    /// Connect, then send a key.
+    /// Send a key.
     pub fn key(&self, code: u32) -> Result<()> {
-        self.connect()?;
         self.keyevent(code)
     }
 
@@ -282,5 +338,15 @@ mod tests {
         assert!(connect_ok("already connected to 192.168.1.19:5555\n"));
         assert!(!connect_ok("failed to connect to '192.0.2.1:5555': Connection refused\n"));
         assert!(!connect_ok("cannot connect to 192.0.2.1:5555: No route to host\n"));
+    }
+
+    #[test]
+    fn not_connected_replies() {
+        assert!(not_connected("adb: device '192.168.1.19:5555' not found\n"));
+        assert!(not_connected("error: device '192.168.1.19:5555' not found\n"));
+        assert!(not_connected("adb: device offline\n"));
+        assert!(not_connected("adb: no devices/emulators found\n"));
+        assert!(!not_connected("/system/bin/sh: foo: not found\n"));
+        assert!(!not_connected(""));
     }
 }

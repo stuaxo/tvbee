@@ -10,11 +10,9 @@ pub fn commands() -> Vec<Command> {
         Command::new(CAT, "sleep", "", "send the TV to standby", |c, _| c.tv.key(223)),
         Command::new(CAT, "wake", "", "wake from standby", |c, _| c.tv.key(224)),
         Command::new(CAT, "reboot", "", "reboot the TV", |c, _| {
-            c.tv.connect()?;
             c.tv.adb(&["reboot"]).map(drop)
         }),
         Command::new(CAT, "shutdown", "", "power off completely (not standby)", |c, _| {
-            c.tv.connect()?;
             c.tv.shell(&["reboot", "-p"]).map(drop)
         }),
     ]

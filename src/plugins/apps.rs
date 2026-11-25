@@ -327,7 +327,6 @@ fn free_ram(tv: &Tv) -> Result<()> {
 }
 
 fn free(c: &Ctx, _: &[String]) -> Result<()> {
-    c.tv.connect()?;
     free_ram(&c.tv)
 }
 
@@ -344,7 +343,6 @@ fn launch(c: &Ctx, args: &[String]) -> Result<()> {
     }
     let Some(app) = rest.first() else { return usage("launch: missing app") };
     let tv = &c.tv;
-    tv.connect()?;
     if free {
         free_ram(tv)?;
     }
@@ -435,7 +433,6 @@ pub fn home(c: &Ctx, args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("--list") => {
-            tv.connect()?;
             let def = default_home(tv)?;
             for h in home_activities(tv)? {
                 let mark = if def.as_deref() == Some(h.as_str()) { "*" } else { " " };
@@ -449,7 +446,6 @@ no default set: the TV asks which to use when Home is pressed ('tveee home --set
         }
         Some("--set") => {
             let Some(app) = args.get(1) else { return usage("usage: tveee home --set <app>  (see 'tveee home --list')") };
-            tv.connect()?;
             let homes = home_activities(tv)?;
             let Some(component) = pick_home(&homes, app) else {
                 return failed(format!("home: {app} isn't a home app on this TV (see 'tveee home --list')"));
@@ -482,7 +478,6 @@ pub fn installed_aliases(pm_list: &str) -> Vec<&'static App> {
 
 fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(app) = args.first() else { return usage("foreground: missing app") };
-    c.tv.connect()?;
     print!("{}", bring_to_front(&c.tv, app)?);
     Ok(())
 }
@@ -581,7 +576,6 @@ pub fn aliases_for_package(pkg: &str) -> Vec<&'static str> {
 }
 
 fn currentapp(c: &Ctx, _: &[String]) -> Result<()> {
-    c.tv.connect()?;
     let dump = c.tv.window_dump()?;
     let Some(window) = info::focus_window(&dump) else {
         return failed("currentapp: can't tell what is in the foreground");
@@ -686,12 +680,10 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
             Ok(())
         }
         AppAsk::Restart { restore } => {
-            c.tv.connect()?;
             println!("{}", restart(&c.tv, &pkg, app, restore)?);
             Ok(())
         }
         AppAsk::Page { json } => {
-            c.tv.connect()?;
             let Some(conn) = crate::devtools::Conn::open(&c.tv, &pkg) else {
                 return failed(format!("app: can't look inside {name} (it isn't running, or isn't a web app tveee can read)"));
             };
@@ -711,7 +703,6 @@ fn kill(c: &Ctx, args: &[String]) -> Result<()> {
     if target(app) == "@home" {
         return usage("kill: 'home' is not an app");
     }
-    c.tv.connect()?;
     c.tv.shell(&["am", "force-stop", pkg_of(app)]).map(drop)
 }
 
@@ -727,7 +718,6 @@ fn quit(c: &Ctx, args: &[String]) -> Result<()> {
         Some(_) => return usage("usage: tveee quit [--force]"),
     };
     let tv = &c.tv;
-    tv.connect()?;
     let Some(pkg) = info::focus_package(&tv.window_dump()?) else {
         return failed("quit: can't tell what is in the foreground");
     };
@@ -754,7 +744,6 @@ fn apps(c: &Ctx, args: &[String]) -> Result<()> {
     };
     let mut installed = Vec::new();
     if !all {
-        c.tv.try_connect();
         let out = c.tv.shell(&["cmd", "package", "list", "packages"]).unwrap_or_default();
         installed = out.lines().filter_map(|l| l.strip_prefix("package:")).map(str::to_string).collect();
         if installed.is_empty() {
@@ -777,7 +766,6 @@ fn apps(c: &Ctx, args: &[String]) -> Result<()> {
 
 /// `apps --others`: installed apps without an alias, with their guessed kind.
 fn others(c: &Ctx) -> Result<()> {
-    c.tv.connect()?;
     let mut gs: Vec<Guess> = guesses(&c.tv).into_iter().filter(|g| by_package(&g.package).is_none_or(|a| a.alias.is_none())).collect();
     let kind_of = |g: &Guess| by_package(&g.package).map_or(g.kind, |a| a.kind).as_str();
     gs.sort_by(|a, b| (kind_of(a), &a.package).cmp(&(kind_of(b), &b.package)));

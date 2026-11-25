@@ -54,12 +54,10 @@ pub fn set_mute(tv: &Tv, want: bool) -> Result<()> {
 }
 
 fn mute(c: &Ctx, _: &[String]) -> Result<()> {
-    c.tv.connect()?;
     set_mute(&c.tv, true)
 }
 
 fn unmute(c: &Ctx, _: &[String]) -> Result<()> {
-    c.tv.connect()?;
     set_mute(&c.tv, false)
 }
 
@@ -68,7 +66,6 @@ fn vol(c: &Ctx, args: &[String]) -> Result<()> {
         Some("up") => c.tv.key(24),
         Some("down") => c.tv.key(25),
         Some(n) if !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()) => {
-            c.tv.connect()?;
             c.tv.shell(&["media", "volume", "--stream", "3", "--set", n]).map(drop)
         }
         _ => usage("usage: tveee vol up|down|<level>"),
@@ -321,7 +318,6 @@ fn player_seek(c: &Ctx, to: crate::devtools::SeekTo) -> Result<bool> {
 }
 
 fn playpause(c: &Ctx, _: &[String]) -> Result<()> {
-    c.tv.connect()?;
     if let Some(player) = player_in_front(&c.tv) {
         if player.play_pause(&c.tv).or_fallback()?.is_some() {
             return Ok(());
@@ -332,7 +328,6 @@ fn playpause(c: &Ctx, _: &[String]) -> Result<()> {
 
 fn skip(c: &Ctx, name: &str, args: &[String], sign: f64) -> Result<()> {
     let (amount, step) = parse_skip_args(name, args)?;
-    c.tv.connect()?;
     if let Amount::Seconds(s) = amount {
         if player_seek(c, crate::devtools::SeekTo::By(sign * s))? {
             return Ok(());
@@ -359,7 +354,6 @@ fn rew(c: &Ctx, args: &[String]) -> Result<()> {
 /// Jump to an absolute position by skipping the difference from where we are.
 fn seek(c: &Ctx, args: &[String]) -> Result<()> {
     let (amount, step) = parse_skip_args("seek", args)?;
-    c.tv.connect()?;
     let exact = match amount {
         Amount::Seconds(s) => crate::devtools::SeekTo::At(s),
         Amount::Fraction(f) => crate::devtools::SeekTo::Fraction(f),

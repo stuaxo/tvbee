@@ -21,7 +21,6 @@ const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_USER: &str = "kodi";
 
 pub fn detect(tv: &Tv) -> Result<bool> {
-    tv.connect()?;
     let out = tv.shell(&["cmd", "package", "list", "packages", PACKAGE])?;
     Ok(out.lines().any(|l| l.trim() == format!("package:{PACKAGE}")))
 }

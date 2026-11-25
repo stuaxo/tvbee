@@ -11,7 +11,6 @@ const CAT: &str = "philips";
 const JOINTSPACE_PKG: &str = "org.droidtv.xtv";
 
 pub fn detect(tv: &Tv) -> Result<bool> {
-    tv.connect()?;
     let out = tv.shell(&["cmd", "package", "list", "packages", JOINTSPACE_PKG])?;
     Ok(out.lines().any(|l| l.trim() == format!("package:{JOINTSPACE_PKG}")))
 }
@@ -342,7 +341,6 @@ fn guide_infos(tv: &Tv) -> Result<Infos> {
     let (map, at) = match cached {
         Some(c) => c,
         None => {
-            tv.connect()?;
             let mut all = Vec::new();
             for page in 0.. {
                 let cmd = format!(
@@ -385,7 +383,6 @@ fn guide_events(tv: &Tv) -> Result<Guide> {
     let (events, at) = match cached {
         Some(c) => c,
         None => {
-            tv.connect()?;
             let cmd = format!("content query --uri {GUIDE_URI} --projection {GUIDE_COLUMNS}");
             let mut events = parse_events(&tv.shell(&[&cmd])?);
             events.sort_by_key(|e| (e.channel, e.start));
@@ -577,7 +574,6 @@ const FAVOURITE_LIST: &str = "1";
 /// live TV in front, keep trying a while.
 fn modify_favourite(tv: &Tv, list: &str, ccid: u32, add: bool) -> Result<bool> {
     const LIVE_TV: &str = "org.droidtv.zapster";
-    tv.connect()?;
     if super::info::focus_package(&tv.window_dump()?).as_deref() != Some(LIVE_TV) {
         return Ok(false);
     }

@@ -47,7 +47,6 @@ fn text(c: &Ctx, args: &[String]) -> Result<()> {
     if args.is_empty() {
         return usage("text: missing text");
     }
-    c.tv.connect()?;
     crate::keys::type_text(&c.tv, &args.join(" "))
 }
 
@@ -78,7 +77,6 @@ fn inputs(c: &Ctx, args: &[String]) -> Result<()> {
     };
     if !all {
         // what the TV's own input framework reports (format varies by firmware)
-        c.tv.try_connect();
         let dump = c.tv.shell(&["dumpsys", "tv_input"]).unwrap_or_default();
         let found: Vec<String> = dump
             .lines()
@@ -103,7 +101,6 @@ fn channel(c: &Ctx, args: &[String]) -> Result<()> {
         Some("up") => c.tv.key(166),
         Some("down") => c.tv.key(167),
         Some(n) if !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()) => {
-            c.tv.connect()?;
             channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))
         }
         _ => usage("usage: tveee channel up|down|<number>"),

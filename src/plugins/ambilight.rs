@@ -156,7 +156,6 @@ pub fn parse_lights(json: &str) -> Vec<Light> {
 /// The lights and the colours they're showing now, as lines; with a block of
 /// the colour itself when `swatch` (a terminal).
 pub fn lights(tv: &Tv, swatch: bool) -> Result<Vec<String>> {
-    tv.connect()?;
     let list = parse_lights(&get(tv, "/6/ambilight/processed")?);
     if list.is_empty() {
         return failed("ambilight: the TV didn't list any lights");
@@ -273,7 +272,6 @@ impl State {
 
 /// What the lights are doing, read from the TV.
 pub fn state(tv: &Tv) -> Result<State> {
-    tv.connect()?;
     let (power, mode, config, hue, layout) = std::thread::scope(|sc| {
         let p = sc.spawn(|| get(tv, "/6/ambilight/power"));
         let m = sc.spawn(|| get(tv, "/6/ambilight/mode"));

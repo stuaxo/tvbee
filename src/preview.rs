@@ -100,7 +100,6 @@ impl Scrcpy {
     pub fn start(tv: &Tv) -> Result<Scrcpy> {
         let Some((jar, version)) = scrcpy_server() else { return failed("preview: scrcpy isn't installed here") };
         let Some(ffmpeg) = program("ffmpeg") else { return failed("preview: ffmpeg isn't installed here") };
-        tv.connect()?;
         let push = || tv.adb(&["push", &jar.to_string_lossy(), SERVER_ON_TV]);
         // a second go: it has failed once for no reason that stayed
         push().or_else(|_| {

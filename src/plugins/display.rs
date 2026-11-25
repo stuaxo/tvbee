@@ -48,7 +48,6 @@ pub fn menu() -> Vec<crate::menu::MenuItem> {
 fn screenshot(c: &Ctx, args: &[String]) -> Result<()> {
     let out = args.first().cloned().unwrap_or_else(default_name);
     let tv = &c.tv;
-    tv.connect()?;
     // stream the PNG straight over adb (no temp file on the TV); look at the
     // compositor and foreground app at the same time for context
     let (png, layers, window) = std::thread::scope(|sc| {
@@ -88,7 +87,6 @@ fn scrcpy(tv: &crate::tv::Tv) -> Result<Proc> {
     if Proc::new("scrcpy").arg("--version").output().is_err() {
         return failed("mirror: scrcpy not found (install it, e.g. 'sudo apt install scrcpy')");
     }
-    tv.connect()?;
     let mut cmd = Proc::new("scrcpy");
     cmd.args(["-s", &tv.serial()])
         .args(["--window-title", &format!("TV {}", tv.ip)])
