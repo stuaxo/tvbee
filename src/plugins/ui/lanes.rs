@@ -259,6 +259,9 @@ pub(super) struct Refresher {
     /// The app's better name ([`nowplaying::named`]): for which package,
     /// when it was read, and the name.
     pub(super) named: Option<(String, Instant, Who)>,
+    /// The last window dump that said what's in front: a busy TV's dumpsys
+    /// sometimes answers with nothing, which isn't "nothing in front".
+    pub(super) last_window: String,
 }
 
 impl Refresher {
@@ -330,7 +333,13 @@ impl Refresher {
             let y = y.join().ok().and_then(|r| r.ok()).unwrap_or_default();
             (j(p), j(w), j(m), a, y, l.join().ok().flatten())
         });
-        let (power, window, audio) = (power?, window?, audio?);
+        let (power, mut window, audio) = (power?, window?, audio?);
+        if !window.contains("mCurrentFocus") {
+            crate::tlog!("refresh: empty window dump ({} bytes); asking again", window.len());
+            window = tv.window_dump().ok().filter(|w| w.contains("mCurrentFocus")).unwrap_or_else(|| self.last_window.clone());
+        } else {
+            self.last_window.clone_from(&window);
+        }
         let media_dump = media_dump.unwrap_or_default();
         let awake = power.lines().any(|l| l.trim() == "mWakefulness=Awake");
         let pkg = info::focus_package(&window);

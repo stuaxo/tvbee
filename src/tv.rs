@@ -315,7 +315,18 @@ impl Tv {
     /// Forward a free local TCP port to a device abstract socket. The forward
     /// is removed when the returned guard is dropped.
     pub fn forward_abstract(&self, socket: &str) -> Result<Forward> {
-        let out = self.adb(&["forward", "tcp:0", &format!("localabstract:{socket}")])?;
+        self.forward(&format!("localabstract:{socket}"))
+    }
+
+    /// Forward a free local port to a TCP port on the TV itself (reaching
+    /// what only listens there).
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub fn forward_tcp(&self, port: u16) -> Result<Forward> {
+        self.forward(&format!("tcp:{port}"))
+    }
+
+    fn forward(&self, remote: &str) -> Result<Forward> {
+        let out = self.adb(&["forward", "tcp:0", remote])?;
         match out.trim().parse() {
             Ok(port) => Ok(Forward { tv: Tv { ip: self.ip.clone() }, port }),
             Err(_) => failed(format!("adb forward: unexpected reply '{}'", out.trim())),

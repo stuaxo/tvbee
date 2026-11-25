@@ -441,8 +441,21 @@ pub fn player_notification(msg: &str) -> Option<String> {
 /// Call `on` with each of Kodi's player notifications until `go` says stop.
 fn watch_notifications(tv: &Tv, on: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Result<()> {
     use std::io::{ErrorKind, Read};
-    let addr = std::net::SocketAddr::new(tv.ip.parse().map_err(|_| Error::Unavailable(format!("{} isn't an IP address", tv.ip)))?, TCP_PORT);
-    let mut s = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).map_err(|_| off())?;
+    let wait = std::time::Duration::from_secs(2);
+    let direct = tv.ip.parse().ok().and_then(|ip| std::net::TcpStream::connect_timeout(&std::net::SocketAddr::new(ip, TCP_PORT), wait).ok());
+    // Kodi only listens on the TV itself unless "Allow remote control from
+    // applications on other systems" is on: reach it through adb then
+    let mut _fwd = None;
+    let mut s = match direct {
+        Some(s) => s,
+        None => {
+            let fwd = tv.forward_tcp(TCP_PORT)?;
+            let local = std::net::SocketAddr::from(([127, 0, 0, 1], fwd.port));
+            let s = std::net::TcpStream::connect_timeout(&local, wait).map_err(|_| off())?;
+            _fwd = Some(fwd);
+            s
+        }
+    };
     s.set_read_timeout(Some(std::time::Duration::from_secs(1)))?;
     crate::tlog!("kodi: listening for notifications on port {TCP_PORT}");
     let mut split = crate::ws::JsonSplitter::default();
