@@ -99,7 +99,7 @@ fn post(tv: &Tv, login: &(u16, String, String), body: &str) -> Result<String> {
     let (port, user, pass) = login;
     let url = format!("http://{}:{port}/jsonrpc", tv.ip);
     let auth = (!pass.is_empty()).then_some((user.as_str(), pass.as_str()));
-    let reply = crate::https::request(&crate::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: false, timeout_secs: 4 });
+    let reply = crate::https::request(&crate::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: None, timeout_secs: 4 });
     match reply {
         Ok((200, text)) => Ok(text),
         Ok((401, _)) => failed("Kodi wants a username and password: run 'tveee pair kodi'"),

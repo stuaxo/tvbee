@@ -49,6 +49,12 @@ fn credentials(saved: &crate::pairing::Saved) -> Option<(&str, &str)> {
     Some((saved.get("user")?, saved.get("key")?))
 }
 
+/// Whether the TV is awake (adb says so): then a refused JointSpace
+/// connection is live TV restarting the API, worth waiting for.
+pub fn awake(tv: &Tv) -> bool {
+    tv.shell(&["dumpsys power | grep mWakefulness="]).is_ok_and(|s| s.contains("mWakefulness=Awake"))
+}
+
 /// Whether tveee is paired with this TV's JointSpace.
 pub fn paired(tv: &Tv) -> bool {
     crate::pairing::load(PAIRING, &tv.ip).as_ref().and_then(credentials).is_some()
@@ -56,7 +62,7 @@ pub fn paired(tv: &Tv) -> bool {
 
 fn https_get(tv: &Tv, saved: &crate::pairing::Saved, path: &str) -> Result<(u16, String)> {
     let Some(digest) = credentials(saved) else { return Err(crate::pairing::required_error(PAIRING, path)) };
-    crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, path), body: None, digest: Some(digest), basic: None, retry: true, timeout_secs: 10 })
+    crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, path), body: None, digest: Some(digest), basic: None, retry: Some(&|| awake(tv)), timeout_secs: 10 })
 }
 
 /// GET a path that needs pairing; `what` names it in the "pairing required"
@@ -70,7 +76,7 @@ pub fn js_get_paired(tv: &Tv, path: &str, what: &str) -> Result<(u16, String)> {
 pub fn js_post(tv: &Tv, path: &str, body: &str, what: &str) -> Result<(u16, String)> {
     let saved = crate::pairing::require(PAIRING, tv, what)?;
     let Some(digest) = credentials(&saved) else { return Err(crate::pairing::required_error(PAIRING, what)) };
-    crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, path), body: Some(body), digest: Some(digest), basic: None, retry: true, timeout_secs: 10 })
+    crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, path), body: Some(body), digest: Some(digest), basic: None, retry: Some(&|| awake(tv)), timeout_secs: 10 })
 }
 
 fn read_pin() -> Result<String> {
@@ -102,7 +108,7 @@ pub fn pair_start(tv: &Tv) -> Result<PairStart> {
     let id = new_device_id();
     let ask = format!(r#"{{"scope":["read","write","control"],"device":{}}}"#, device_json(&id));
     let (status, reply) =
-        crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, "/6/pair/request"), body: Some(&ask), digest: None, basic: None, retry: true, timeout_secs: 15 })?;
+        crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, "/6/pair/request"), body: Some(&ask), digest: None, basic: None, retry: Some(&|| awake(tv)), timeout_secs: 15 })?;
     let v = crate::http::json(&reply).unwrap_or_default();
     let key = crate::http::text(&v, "auth_key");
     let timestamp = crate::http::number(&v, "timestamp").map(|t| t as i64);
@@ -125,7 +131,7 @@ pub fn pair_finish(tv: &Tv, s: &PairStart, pin: &str) -> Result<crate::pairing::
         url: &https_url(&tv.ip, "/6/pair/grant"),
         body: Some(&grant),
         digest: Some((&s.id, &s.key)),
-        basic: None, retry: true, timeout_secs: 15,
+        basic: None, retry: Some(&|| awake(tv)), timeout_secs: 15,
     })?;
     let ok = status == 200 && crate::http::json(&reply).and_then(|v| crate::http::text(&v, "error_id")).is_none_or(|e| e == "SUCCESS");
     if !ok {

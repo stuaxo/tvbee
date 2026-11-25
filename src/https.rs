@@ -15,8 +15,10 @@ pub struct Request<'a> {
     pub digest: Option<(&'a str, &'a str)>,
     /// Basic authentication (user, password), e.g. Kodi's.
     pub basic: Option<(&'a str, &'a str)>,
-    /// Keep trying a refused connection for a while (see [`RETRY_FOR`]).
-    pub retry: bool,
+    /// Keep trying a refused connection for a while (see [`RETRY_FOR`]) if
+    /// this says it's worth it: asked once, at the first refusal (a TV in
+    /// standby refuses too, and won't come back by itself).
+    pub retry: Option<&'a dyn Fn() -> bool>,
     pub timeout_secs: u32,
 }
 
@@ -72,6 +74,7 @@ const RETRY_FOR: std::time::Duration = std::time::Duration::from_secs(10);
 /// for a while (see [`RETRY_FOR`]).
 pub fn request(r: &Request) -> Result<(u16, String)> {
     let start = std::time::Instant::now();
+    let mut worth_it: Option<bool> = None;
     loop {
         let reply = request_once(r);
         crate::tlog!(
@@ -86,7 +89,9 @@ pub fn request(r: &Request) -> Result<(u16, String)> {
             }
         );
         match reply {
-            Err(Refused(_)) if r.retry && start.elapsed() < RETRY_FOR => std::thread::sleep(std::time::Duration::from_millis(700)),
+            Err(Refused(_)) if start.elapsed() < RETRY_FOR && *worth_it.get_or_insert_with(|| r.retry.is_some_and(|f| f())) => {
+                std::thread::sleep(std::time::Duration::from_millis(700))
+            }
             Err(Refused(e)) | Err(Other(e)) => return Err(e),
             Ok(reply) => return Ok(reply),
         }
@@ -136,7 +141,7 @@ mod tests {
 
     #[test]
     fn builds_curl_calls() {
-        let r = Request { url: "https://tv:1926/6/pair/grant", body: Some(r#"{"a":"b\"c"}"#), digest: Some(("dev", "k\"ey")), basic: None, retry: true, timeout_secs: 10 };
+        let r = Request { url: "https://tv:1926/6/pair/grant", body: Some(r#"{"a":"b\"c"}"#), digest: Some(("dev", "k\"ey")), basic: None, retry: None, timeout_secs: 10 };
         let args = curl_args(&r);
         assert!(args.contains(&"--insecure".to_string()) && args.last().unwrap() == "https://tv:1926/6/pair/grant");
         // the password and body never appear as arguments
@@ -145,8 +150,25 @@ mod tests {
         assert!(c.contains("digest\n"));
         assert!(c.contains(r#"user = "dev:k\"ey""#));
         assert!(c.contains(r#"data-binary = "{\"a\":\"b\\\"c\"}""#));
-        let get = Request { url: "https://tv/x", body: None, digest: None, basic: None, retry: true, timeout_secs: 5 };
+        let get = Request { url: "https://tv/x", body: None, digest: None, basic: None, retry: None, timeout_secs: 5 };
         assert_eq!(curl_config(&get), "");
+    }
+
+    #[test]
+    fn refused_is_retried_only_when_worth_it() {
+        // a closed local port: curl says "refused" straight away
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let url = format!("https://127.0.0.1:{port}/x");
+        let asked = std::cell::Cell::new(0);
+        let check = || {
+            asked.set(asked.get() + 1);
+            false
+        };
+        let started = std::time::Instant::now();
+        let r = Request { url: &url, body: None, digest: None, basic: None, retry: Some(&check), timeout_secs: 2 };
+        assert!(request(&r).is_err());
+        assert_eq!(asked.get(), 1);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]
