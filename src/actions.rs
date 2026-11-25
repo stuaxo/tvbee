@@ -95,6 +95,9 @@ pub struct ActionDescriptor {
     /// What it does, as the menu says it.
     pub title: &'static str,
     pub params: Params,
+    /// The arguments it takes, as usage text ("[next|off]"), for `tveee do`
+    /// and `tveee app <app>`. Commands say theirs in [`Cli::usage`].
+    pub args: &'static str,
     /// None: interactive front ends only.
     pub cli: Option<Cli>,
     /// Its key in the ui menu.
@@ -107,12 +110,12 @@ pub struct ActionDescriptor {
 
 impl ActionDescriptor {
     pub const fn new(id: &'static str, category: &'static str, title: &'static str, run: Do) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, cli: None, key: None, confirm: None, run: Run::Do(run) }
+        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, run: Run::Do(run) }
     }
 
     /// A command-line action that prints for itself (see [`Terminal`]).
     pub const fn terminal(id: &'static str, category: &'static str, title: &'static str, run: Terminal) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, cli: None, key: None, confirm: None, run: Run::Terminal(run) }
+        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, run: Run::Terminal(run) }
     }
 
     /// Reachable as `tveee <name>`, `desc` its one-line help.
@@ -134,6 +137,12 @@ impl ActionDescriptor {
         if let Some(c) = &mut self.cli {
             c.aliases = aliases;
         }
+        self
+    }
+
+    /// The arguments it takes, as usage text.
+    pub const fn args(mut self, args: &'static str) -> Self {
+        self.args = args;
         self
     }
 

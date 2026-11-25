@@ -106,10 +106,10 @@ fn do_action(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(id) = args.first() else {
         let mut all: Vec<_> = c.actions.iter().collect();
         all.sort_by_key(|a| a.id);
-        let width = all.iter().map(|a| a.id.len()).max().unwrap_or(0);
+        let call = |a: &crate::actions::ActionDescriptor| format!("{} {}", a.id, a.args).trim_end().to_string();
+        let width = all.iter().map(|a| call(a).len()).max().unwrap_or(0);
         for a in all {
-            let more = if a.params != crate::actions::Params::None { "..." } else { "" };
-            println!("{:<width$}  {}{more}", a.id, a.title);
+            println!("{:<width$}  {}", call(a), a.title);
         }
         return Ok(());
     };
@@ -192,8 +192,8 @@ pub fn actions() -> Vec<ActionDescriptor> {
             .cli("do", "[<id> [args...]]", "run any action by its id (list them with no id)")
             .long(
                 "Everything tveee can do has an id, including what only the ui menu offers\n\
-                 (e.g. 'tveee do kodi.subtitles.off'). With no id, lists them; '...' marks\n\
-                 those that take text.",
+                 (e.g. 'tveee do kodi.subtitles.off'). With no id, lists them, with the\n\
+                 arguments each takes.",
             ),
         ActionDescriptor::terminal("tools.commands", CAT, "list all command names and aliases", commands_list).cli("commands", "", "list all command names and aliases"),
         ActionDescriptor::terminal("tools.completion", CAT, "print a bash/zsh completion script", completion).cli("completion", "", "print a bash/zsh completion script"),

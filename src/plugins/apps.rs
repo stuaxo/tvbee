@@ -641,6 +641,18 @@ pub fn parse_app_args(args: &[String]) -> std::result::Result<AppAsk, String> {
     }
 }
 
+/// The actions of the provider for `pkg` that `app <app> <word>` reaches:
+/// `<provider>.<word>` (one word, no deeper ids like `kodi.subtitles.off`).
+fn own_actions(c: &Ctx, pkg: &str) -> Vec<(String, crate::actions::ActionDescriptor)> {
+    let Some(p) = crate::provider::for_package(pkg) else { return Vec::new() };
+    let prefix = format!("{}.", p.id());
+    c.actions
+        .iter()
+        .filter_map(|a| Some((a.id.strip_prefix(&prefix)?.to_string(), *a)))
+        .filter(|(word, a)| !word.contains('.') && a.cli.is_none())
+        .collect()
+}
+
 /// `app [<app> [--restart [--disable-restore] | --page [--json] | <action...>]]`
 fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(app) = args.first() else {
@@ -660,12 +672,16 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
         return usage("app: 'home' is a place, not an app");
     }
     let pkg = pkg_of(app).to_string();
-    // the app's own actions: `tveee app kodi subtitles next`
-    let actions = crate::provider::for_package(&pkg).and_then(|p| p.actions());
-    if let (Some((_, run)), Some(first)) = (actions, args.get(1)) {
-        if !first.starts_with("--") {
-            println!("{}", run(&c.tv, &args[1..])?);
-            return Ok(());
+    // the app's own actions: `tveee app kodi subtitles next` runs the
+    // action kodi.subtitles with "next"
+    let own = own_actions(c, &pkg);
+    if let Some(first) = args.get(1).filter(|a| !a.starts_with("--")) {
+        if let Some((_, a)) = own.iter().find(|(word, _)| word == first) {
+            return a.run.call(c, &args[2..]);
+        }
+        if !own.is_empty() {
+            let words: Vec<_> = own.iter().map(|(w, a)| format!("{w} {}", a.args).trim_end().to_string()).collect();
+            return usage(format!("app: {app}'s actions are: {}", words.join(" | ")));
         }
     }
     let ask = parse_app_args(&args[1..]).or_else(|e| usage(format!("app: {e}")))?;
@@ -685,8 +701,11 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
                 if sessions { ", back where it was (--disable-restore: fresh)" } else { "" }
             );
             println!("  --page [--json]   what its page shows, for apps tveee can look inside (web apps)");
-            if let Some((usage, _)) = provider.and_then(|p| p.actions()) {
-                println!("  its own actions:  {usage}");
+            if !own.is_empty() {
+                println!("  its own actions:");
+                for (word, a) in &own {
+                    println!("    {:<34} {}", format!("{word} {}", a.args).trim_end(), a.title);
+                }
             }
             Ok(())
         }
@@ -825,7 +844,7 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
              \x20                      > the focused one), for web apps tveee can look\n\
              \x20                      inside through their devtools socket (YouTube)\n\
              \x20 <action...>          the app's own actions, listed by 'tveee app <app>'\n\
-             \x20                      (Kodi: find, play, subtitles, audio, scan, notify)",
+             \x20                      (Kodi: find, play, subtitles, audio, scan, clean, notify)",
         ),
         ActionDescriptor::terminal("apps.free", CAT, "force-stop idle RAM-hungry apps", free).cli("free", "", "force-stop idle RAM-hungry apps"),
         ActionDescriptor::terminal("apps.apps", CAT, "list app aliases installed on the TV", apps).cli("apps", "[--all | --others]", "list app aliases installed on the TV").long(

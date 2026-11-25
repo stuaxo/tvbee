@@ -521,11 +521,11 @@ impl Actor {
             },
             Action::Menu(i) => match self.menu.get(i) {
                 Some(m) if m.params != Params::None => "that needs some text".into(),
-                Some(m) => m.run(&self.tv, &[])?.text,
+                Some(m) => m.run(&self.tv, &[])?.text.replace('\n', "; "),
                 None => "no such menu item".into(),
             },
             Action::MenuText(i, text) => match self.menu.get(i) {
-                Some(m) if matches!(m.params, Params::Text { .. }) => m.run(&self.tv, &[text])?.text,
+                Some(m) if matches!(m.params, Params::Text { .. }) => m.run(&self.tv, &[text])?.text.replace('\n', "; "),
                 _ => "no such menu item".into(),
             },
             Action::Launch(target) => {
