@@ -245,11 +245,20 @@ pub(super) fn send_running(tv: &Tv, tx: &Sender<Msg>) {
 
 /// The refresh lane: what's on, every [`REFRESH`], or sooner when woken
 /// (after an action). Holds off while an action runs.
+/// An app's name and kind, if known.
+type Who = Option<(String, apps::Kind)>;
+
+/// How often the refresh asks again which NetTV app is showing.
+const NAMED_EVERY: Duration = Duration::from_secs(30);
+
 pub(super) struct Refresher {
     pub(super) tv: Tv,
     pub(super) shared: Arc<Shared>,
     /// Live TV's channel, and when it was read.
     pub(super) channel: Option<(crate::provider::Channel, Instant)>,
+    /// The app's better name ([`nowplaying::named`]): for which package,
+    /// when it was read, and the name.
+    pub(super) named: Option<(String, Instant, Who)>,
 }
 
 impl Refresher {
@@ -291,6 +300,21 @@ impl Refresher {
         nowplaying::live_on(&self.tv, pkg, ch)
     }
 
+    /// [`nowplaying::named`], read again every [`NAMED_EVERY`] (it costs an adb call).
+    fn named(&mut self, pkg: &str, who: Who) -> Who {
+        if pkg != crate::plugins::philips::NETTV_BROWSER {
+            return who;
+        }
+        match &self.named {
+            Some((p, at, name)) if p == pkg && at.elapsed() < NAMED_EVERY => name.clone(),
+            _ => {
+                let name = nowplaying::named(&self.tv, pkg, who);
+                self.named = Some((pkg.to_string(), Instant::now(), name.clone()));
+                name
+            }
+        }
+    }
+
     pub(super) fn snapshot(&mut self) -> Result<Snapshot> {
         let tv = &self.tv;
         let watch_lights = self.shared.ambilight.load(Ordering::Relaxed);
@@ -312,6 +336,10 @@ impl Refresher {
         let pkg = info::focus_package(&window);
         *lock(&self.shared.pkg) = pkg.clone();
         let sessions = media::parse_media_sessions(&media_dump);
+        let sessions = match &pkg {
+            Some(p) => media::with_audio_players(sessions, p, info::window_uid(&window, p), &media::parse_audio_players(&audio)),
+            None => sessions,
+        };
         let guesses = lock(&self.shared.guesses).clone();
         let mut exact = false;
         // live TV: the channel and programme (when the TV can say)
@@ -322,7 +350,7 @@ impl Refresher {
         let activity = match (&pkg, awake) {
             (_, false) => Some(Activity::just("In standby")),
             (Some(_), true) if live.is_some() => live.take(),
-            (Some(pkg), true) => nowplaying::activity_with(pkg, apps::identify(pkg, &guesses), &sessions),
+            (Some(pkg), true) => nowplaying::activity_with(pkg, self.named(pkg, apps::identify(pkg, &guesses)), &sessions),
             (None, true) => None,
         };
         // an app with its own player (YouTube, Kodi): exact position, the

@@ -552,7 +552,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     spawn_named("background", move || background(&sh, &idle_rx, idle_msgs));
     let (preview_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
     spawn_named("preview", move || preview_lane(&sh, &preview_msgs));
-    let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None };
+    let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None };
     spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);
     let mut app = App {

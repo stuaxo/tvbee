@@ -205,6 +205,31 @@ fn jointspace(c: &Ctx, args: &[String]) -> Result<()> {
     }
 }
 
+/// The browser the NetTV web apps (iPlayer, Arte, ...) run in.
+pub const NETTV_BROWSER: &str = "org.droidtv.nettvbrowser";
+
+/// The name of the NetTV app a launch link is for (the browser opens e.g.
+/// `https://www.live.bbctvapps.co.uk/tap/iplayer?origin=portal`): one tveee
+/// knows, else the link's host.
+pub fn nettv_app_name(link: &str) -> String {
+    const KNOWN: &[(&str, &str)] = &[("iplayer", "iPlayer"), ("arte", "Arte"), ("dailymotion", "Dailymotion")];
+    let lower = link.to_lowercase();
+    if let Some((_, name)) = KNOWN.iter().find(|(k, _)| lower.contains(k)) {
+        return (*name).to_string();
+    }
+    let host = lower.split("://").nth(1).unwrap_or(&lower).split(['/', '?', ':']).next().unwrap_or_default();
+    host.strip_prefix("www.").unwrap_or(host).to_string()
+}
+
+/// The NetTV app the browser is showing, from the link its activity was
+/// started with (grepped on the TV: the whole dump is large).
+pub fn nettv_app(tv: &Tv) -> Option<String> {
+    let cmd = format!("dumpsys activity activities | grep -m1 -o 'dat=[^ ]* .*cmp={NETTV_BROWSER}/'");
+    let out = tv.shell(&[&cmd]).ok()?;
+    let link = out.split_whitespace().next()?.strip_prefix("dat=")?;
+    Some(nettv_app_name(link))
+}
+
 /// Philips' apps: the NetTV web apps (each a small wrapper package that opens
 /// org.droidtv.nettvbrowser), the browser itself, and the TV app.
 pub fn apps() -> Vec<crate::plugins::apps::App> {
@@ -214,7 +239,7 @@ pub fn apps() -> Vec<crate::plugins::apps::App> {
         app("dailymotion", "Dailymotion", "org.droidtv.nettvapp1984/com.zeasn.app.linux.MainActivity", Kind::Video),
         app("arte", "Arte", "org.droidtv.nettvapp1814/com.zeasn.app.linux.MainActivity", Kind::Video),
         // the NetTV web apps (iPlayer, Arte, ...) all run inside this browser
-        known("a NetTV app", "org.droidtv.nettvbrowser", Kind::Video),
+        known("a NetTV app", NETTV_BROWSER, Kind::Video),
         app("livetv", "live TV", "org.droidtv.zapster", Kind::LiveTv),
     ]
 }
@@ -681,6 +706,13 @@ pub fn commands() -> Vec<Command> {
 #[cfg(test)]
 mod guide_tests {
     use super::*;
+
+    #[test]
+    fn nettv_app_names() {
+        assert_eq!(nettv_app_name("https://www.live.bbctvapps.co.uk/tap/iplayer?origin=portal"), "iPlayer");
+        assert_eq!(nettv_app_name("https://www.arte.tv/hbbtv"), "Arte");
+        assert_eq!(nettv_app_name("http://www.example.com:80/app?x=1"), "example.com");
+    }
 
     #[test]
     fn pairing_bits() {

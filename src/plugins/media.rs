@@ -141,7 +141,7 @@ pub fn parse_media_duration_ms(dump: &str) -> Option<u64> {
 
 /// One session from `dumpsys media_session`: who owns it, its playback state and
 /// what the app says is playing.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct MediaInfo {
     pub package: String,
     /// PlaybackState: 1 stopped, 2 paused, 3 playing, 6 buffering, ...
@@ -193,6 +193,33 @@ pub fn parse_media_sessions(dump: &str) -> Vec<MediaInfo> {
         }
     }
     out
+}
+
+/// Android's audio players (`dumpsys audio`, "playback activity"): the
+/// uid of each and its state ("started", "paused", "idle", ...).
+pub fn parse_audio_players(dump: &str) -> Vec<(u32, String)> {
+    dump.lines()
+        .filter_map(|l| {
+            let uid = l.split("u/pid:").nth(1)?.split('/').next()?.parse().ok()?;
+            let state = l.split("state:").nth(1)?.split_whitespace().next()?;
+            Some((uid, state.to_string()))
+        })
+        .collect()
+}
+
+/// `sessions`, plus one standing in for `pkg` (whose windows belong to
+/// `uid`) when no session of its says it's playing but its audio player
+/// does: apps like the NetTV browser (iPlayer) play without a media session.
+/// Only for apps' own uids: system uids are shared with other processes.
+pub fn with_audio_players(mut sessions: Vec<MediaInfo>, pkg: &str, uid: Option<u32>, players: &[(u32, String)]) -> Vec<MediaInfo> {
+    let Some(uid) = uid.filter(|u| *u >= 10_000) else { return sessions };
+    if sessions.iter().any(|s| s.package == pkg && (s.playing() || s.paused())) {
+        return sessions;
+    }
+    let mine = |state: &str| players.iter().any(|(u, s)| *u == uid && s == state);
+    let state = if mine("started") { 3 } else if mine("paused") { 2 } else { return sessions };
+    sessions.push(MediaInfo { package: pkg.to_string(), state: Some(state), ..Default::default() });
+    sessions
 }
 
 const MAX_PRESSES: u32 = 120;
@@ -399,6 +426,27 @@ pub fn commands() -> Vec<Command> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn audio_players_stand_in_for_a_session() {
+        use super::*;
+        let dump = "  ID:23 -- type:android.media.SoundPool -- u/pid:1000/1733 -- state:started -- attr:AudioAttributes: usage=13\n\
+                    \x20 ID:119 -- type:android.media.MediaPlayer -- u/pid:10039/2741 -- state:started -- attr:AudioAttributes: usage=1\n\
+                    \x20 ID:15 -- type:android.media.MediaPlayer -- u/pid:10043/1907 -- state:paused -- attr:AudioAttributes: usage=0\n";
+        let players = parse_audio_players(dump);
+        assert_eq!(players, vec![(1000, "started".into()), (10039, "started".into()), (10043, "paused".into())]);
+        let pkg = "org.droidtv.nettvbrowser";
+        let s = with_audio_players(vec![], pkg, Some(10039), &players);
+        assert!(s.len() == 1 && s[0].package == pkg && s[0].playing());
+        assert!(with_audio_players(vec![], "x", Some(10043), &players)[0].paused());
+        // nothing playing, unknown uid, or a system uid: no stand-in
+        assert!(with_audio_players(vec![], "x", Some(10050), &players).is_empty());
+        assert!(with_audio_players(vec![], "x", None, &players).is_empty());
+        assert!(with_audio_players(vec![], "x", Some(1000), &players).is_empty());
+        // a session that says so already: left as it is
+        let own = MediaInfo { package: pkg.into(), state: Some(2), title: Some("t".into()), subtitle: None };
+        assert_eq!(with_audio_players(vec![own.clone()], pkg, Some(10039), &players), vec![own]);
+    }
+
     use super::*;
 
     const DUMP: &str = "- STREAM_RING:\n   Muted: true\n- STREAM_MUSIC:\n   Muted: false\n   Min: 0\n- STREAM_ALARM:\n   Muted: true\n";

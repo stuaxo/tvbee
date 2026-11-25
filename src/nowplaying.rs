@@ -180,11 +180,22 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
         Some(a) => Some((a.name.to_string(), a.kind)),
         None => apps::identify(pkg, &apps::guesses(tv)),
     };
-    let a = live(tv, pkg).or_else(|| activity_with(pkg, who, sessions));
+    let a = live(tv, pkg).or_else(|| activity_with(pkg, named(tv, pkg, who), sessions));
     match crate::provider::for_package(pkg).and_then(|p| p.player()) {
         Some(player) => with_player(tv, pkg, player, a).0,
         None => a,
     }
+}
+
+/// `who`, more exactly where the TV can say: which NetTV app the NetTV
+/// browser is showing (iPlayer, ...).
+pub fn named(tv: &Tv, pkg: &str, who: Option<(String, Kind)>) -> Option<(String, Kind)> {
+    if pkg == crate::plugins::philips::NETTV_BROWSER {
+        if let Some(name) = crate::plugins::philips::nettv_app(tv) {
+            return Some((name, Kind::Video));
+        }
+    }
+    who
 }
 
 /// `a`, filled in from an app's own player API when it says what's playing

@@ -10,6 +10,13 @@ fn focus_line(dump: &str) -> Option<&str> {
     dump.lines().find(|l| l.contains("mCurrentFocus")).map(str::trim)
 }
 
+/// The uid owning `pkg`'s windows (`mOwnerUid=10039 ... package=org.x`).
+pub fn window_uid(dump: &str, pkg: &str) -> Option<u32> {
+    dump.lines()
+        .filter(|l| l.split_whitespace().any(|w| w.strip_prefix("package=") == Some(pkg)))
+        .find_map(|l| l.split("mOwnerUid=").nth(1)?.split_whitespace().next()?.parse().ok())
+}
+
 /// `Window{eeb8591 u0 org.x/org.x.Activity}` -> `org.x/org.x.Activity`
 pub fn focus_window(dump: &str) -> Option<String> {
     let line = focus_line(dump)?;
@@ -262,12 +269,18 @@ fn wakefulness(power: &str) -> Option<String> {
 }
 
 /// What the TV is doing, from the power, window and media_session dumps.
-fn activity_from(tv: &Tv, wake: Option<&str>, window: &str, media: &str) -> Option<Activity> {
+/// `audio`: `dumpsys audio`, for apps that play without a media session.
+fn activity_from(tv: &Tv, wake: Option<&str>, window: &str, media: &str, audio: &str) -> Option<Activity> {
     match (wake, focus_package(window)) {
         (Some(w), _) if w != "Awake" => {
             Some(Activity::just("In standby"))
         }
-        (_, Some(pkg)) => nowplaying::activity(tv, &pkg, &super::media::parse_media_sessions(media)),
+        (_, Some(pkg)) => {
+            let sessions = super::media::parse_media_sessions(media);
+            let players = super::media::parse_audio_players(audio);
+            let sessions = super::media::with_audio_players(sessions, &pkg, window_uid(window, &pkg), &players);
+            nowplaying::activity(tv, &pkg, &sessions)
+        }
         _ => None,
     }
 }
@@ -307,7 +320,7 @@ fn status_text(tv: &Tv) -> Result<String> {
     // media sessions only feed the optional what/title lines, so don't fail on them
     let media = media.unwrap_or_default();
     let wake = wakefulness(&power);
-    let activity = activity_from(tv, wake.as_deref(), &window, &media);
+    let activity = activity_from(tv, wake.as_deref(), &window, &media, &audio);
 
     let mut out = String::new();
     push_line(&mut out, "TV", &tv.ip);
@@ -352,13 +365,15 @@ const NOTHING: &str = "nothing playing that tveee recognises\n";
 
 /// Just the what / title / progress / url lines.
 fn nowplaying_text(tv: &Tv) -> Result<String> {
-    let ((power, window), media) = join2(
+    let ((power, window), (media, audio)) = join2(
         || join2(|| tv.shell(&["dumpsys", "power"]), || tv.window_dump()),
-        || tv.shell(&["dumpsys", "media_session"]),
+        || join2(|| tv.shell(&["dumpsys", "media_session"]), || tv.shell(&["dumpsys", "audio"])),
     );
     let (power, window, media) = (power?, window?, media?);
+    // only for apps without a media session: don't fail on it
+    let audio = audio.unwrap_or_default();
     let mut out = String::new();
-    match activity_from(tv, wakefulness(&power).as_deref(), &window, &media) {
+    match activity_from(tv, wakefulness(&power).as_deref(), &window, &media, &audio) {
         Some(a) => push_activity(&mut out, &a),
         None => out.push_str(NOTHING),
     }
@@ -692,6 +707,14 @@ pub fn commands() -> Vec<Command> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn finds_window_uid() {
+        let dump = "    mOwnerUid=1000 mShowToOwnerOnly=true package=android appop=NONE\n\
+                    \x20   mOwnerUid=10039 mShowToOwnerOnly=true package=org.droidtv.nettvbrowser appop=NONE\n";
+        assert_eq!(super::window_uid(dump, "org.droidtv.nettvbrowser"), Some(10039));
+        assert_eq!(super::window_uid(dump, "org.droidtv"), None);
+    }
+
     use super::*;
 
     const DUMP: &str = "  mCurrentFocus=Window{eeb8591 u0 org.droidtv.nettvbrowser/org.droidtv.nettvbrowser.BrowserNetTvActivity}\n";
