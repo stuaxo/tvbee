@@ -206,8 +206,14 @@ YouTube (`youtube`). The `kodi` plugin (when Kodi is installed) uses Kodi's own
 remote control, once it's on in Kodi (Settings > Services > Control > Allow
 remote control via HTTP): what's playing with its exact position, exact
 seeking, artwork in the ui's preview, `goto kodi movies|tvshows|music|...`,
-links played in Kodi, and restarting it where it was. `tveee pair kodi` saves
-its login if it has a password.
+links played in Kodi, and restarting it where it was. `tveee details` shows the
+plot, cast and streams; `tveee app kodi find|play <title>` searches its
+library; `tveee app kodi subtitles|audio|scan|notify` switch tracks, scan the
+library and show a message (also in the ui's menu). With `TVEEE_KODI_PATHS`
+(see `.env.example`) the ui's preview shows frames of the video, not its
+artwork. The ui hears Kodi's play/pause/seek at once (its port 9090, on with
+"Allow remote control from applications on other systems"). `tveee pair kodi`
+saves its login if it has a password.
 
 ## Plugins
 

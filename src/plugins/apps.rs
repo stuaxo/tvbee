@@ -641,7 +641,7 @@ pub fn parse_app_args(args: &[String]) -> std::result::Result<AppAsk, String> {
     }
 }
 
-/// `app [<app> [--restart [--disable-restore] | --page [--json]]]`
+/// `app [<app> [--restart [--disable-restore] | --page [--json] | <action...>]]`
 fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(app) = args.first() else {
         // the apps tveee has more to offer for
@@ -659,8 +659,16 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     if target(app) == "@home" {
         return usage("app: 'home' is a place, not an app");
     }
-    let ask = parse_app_args(&args[1..]).or_else(|e| usage(format!("app: {e}")))?;
     let pkg = pkg_of(app).to_string();
+    // the app's own actions: `tveee app kodi subtitles next`
+    let actions = crate::provider::for_package(&pkg).and_then(|p| p.actions());
+    if let (Some((_, run)), Some(first)) = (actions, args.get(1)) {
+        if !first.starts_with("--") {
+            println!("{}", run(&c.tv, &args[1..])?);
+            return Ok(());
+        }
+    }
+    let ask = parse_app_args(&args[1..]).or_else(|e| usage(format!("app: {e}")))?;
     let name = by_package(&pkg).map_or_else(|| crate::labels::name(&pkg).unwrap_or_else(|| pkg.clone()), |a| list_name(a.name));
     match ask {
         AppAsk::Info => {
@@ -677,6 +685,9 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
                 if sessions { ", back where it was (--disable-restore: fresh)" } else { "" }
             );
             println!("  --page [--json]   what its page shows, for apps tveee can look inside (web apps)");
+            if let Some((usage, _)) = provider.and_then(|p| p.actions()) {
+                println!("  its own actions:  {usage}");
+            }
             Ok(())
         }
         AppAsk::Restart { restore } => {
@@ -799,7 +810,7 @@ pub fn commands() -> Vec<Command> {
             "Prints the foreground window, with the app alias first if it has one,\ne.g. 'kodi (org.xbmc.kodi/.Splash)'. The NetTV webapps (iPlayer, Arte, ...) all run\ninside org.droidtv.nettvbrowser, so they show as that package.",
         ),
         Command::new(CAT, "kill", "<app>", "force-stop one app", kill),
-        Command::new(CAT, "app", "[<app> [--restart [--disable-restore] | --page [--json]]]", "what tveee can do with an app, and app-specific actions", app_cmd).long(
+        Command::new(CAT, "app", "[<app> [--restart [--disable-restore] | --page [--json] | <action...>]]", "what tveee can do with an app, and app-specific actions", app_cmd).long(
             "With no app: the apps tveee has extra support for, and what it is.\n\
              With an app (alias or package): what tveee knows about it, and:\n\
              \n\
@@ -810,7 +821,9 @@ pub fn commands() -> Vec<Command> {
              \x20 --disable-restore    with --restart: start it fresh instead\n\
              \x20 --page [--json]      what its page shows (route, title, focusable items,\n\
              \x20                      > the focused one), for web apps tveee can look\n\
-             \x20                      inside through their devtools socket (YouTube)",
+             \x20                      inside through their devtools socket (YouTube)\n\
+             \x20 <action...>          the app's own actions, listed by 'tveee app <app>'\n\
+             \x20                      (Kodi: find, play, subtitles, audio, scan, notify)",
         ),
         Command::new(CAT, "free", "", "force-stop idle RAM-hungry apps", free),
         Command::new(CAT, "apps", "[--all | --others]", "list app aliases installed on the TV", apps).long(

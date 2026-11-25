@@ -207,7 +207,7 @@ pub trait Channels {
 /// More about what's playing (description, chapters, ...).
 pub trait Details {
     /// Details for the link [`Provider::watch_link`] made for what's on.
-    fn details(&self, link: &str) -> Result<crate::more::Details>;
+    fn details(&self, tv: &crate::tv::Tv, link: &str) -> Result<crate::more::Details>;
 }
 
 /// A place in an app to come back to: opening `link` in the app gets there.
@@ -309,6 +309,10 @@ pub trait Player: Sync {
     fn stop(&self) {}
 }
 
+/// What runs an app's own actions: the TV and the words after the app's
+/// name; returns what happened.
+pub type Actions = fn(&crate::tv::Tv, &[String]) -> Result<String>;
+
 /// A source of content. Everything but the identity is optional.
 pub trait Provider: Sync {
     /// Short id: `tveee guide --provider <id>`.
@@ -358,6 +362,12 @@ pub trait Provider: Sync {
     fn details(&self) -> Option<&dyn Details> {
         None
     }
+    /// The app's own actions (`tveee app <app> <action...>`): their usage
+    /// ("subtitles [next|off] | ..."), and what runs them (returns what
+    /// happened).
+    fn actions(&self) -> Option<(&'static str, Actions)> {
+        None
+    }
     fn guide(&self) -> Option<&dyn Guide> {
         None
     }
@@ -398,6 +408,9 @@ pub fn capabilities(p: &dyn Provider) -> Vec<&'static str> {
     }
     if p.has_sessions() {
         v.push("sessions");
+    }
+    if p.actions().is_some() {
+        v.push("actions");
     }
     if p.player().is_some() {
         v.push("player");

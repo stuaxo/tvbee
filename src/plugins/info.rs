@@ -531,7 +531,7 @@ fn details_cmd(c: &Ctx, args: &[String]) -> Result<()> {
         return failed(format!("details: tveee has no details for {name}"));
     };
     let Some(url) = url else { return failed(format!("details: nothing playing in {name} that tveee can look up")) };
-    let d = hook.details(&url)?;
+    let d = hook.details(&c.tv, &url)?;
     println!("{:<10}{url}", "link:");
     for (k, v) in &d.fields {
         println!("{:<10}{v}", format!("{k}:"));
@@ -610,7 +610,7 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     // links from what's on (only for the app in front)
     let links = || -> Vec<crate::more::Link> {
         match (provider.and_then(|p| p.details()), &url) {
-            (Some(hook), Some(u)) => hook.details(u).map(|d| d.links).unwrap_or_default(),
+            (Some(hook), Some(u)) => hook.details(tv, u).map(|d| d.links).unwrap_or_default(),
             _ => Vec::new(),
         }
     };

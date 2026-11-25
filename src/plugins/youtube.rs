@@ -101,7 +101,7 @@ impl crate::provider::Provider for YouTube {
 }
 
 impl crate::provider::Details for YouTube {
-    fn details(&self, link: &str) -> Result<Details> {
+    fn details(&self, _tv: &Tv, link: &str) -> Result<Details> {
         details(link)
     }
 }

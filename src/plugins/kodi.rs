@@ -209,7 +209,64 @@ fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>)>> {
     let item = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{ITEM_FIELDS}}}"#))?;
     let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":{PLAYER_FIELDS}}}"#))?;
     let file = item.get("item").and_then(|i| str_of(i, "file"));
-    Ok(Some((parse_playing(&item, &props), file)))
+    let mut playing = parse_playing(&item, &props);
+    // the file is the link (`tveee details`), unless it has a login in it:
+    // it's shown
+    playing.link = file.clone().filter(|f| !has_login(f));
+    // a copy this computer can read: frames of it for the preview, not the artwork
+    if let Some(local) = file.as_deref().and_then(|f| local_path(f, &std::env::var(PATHS_VAR).unwrap_or_default())).filter(|p| p.is_file()) {
+        let art = playing.art.take().unwrap_or_default();
+        playing.art = Some(format!("{FRAME}{}\n{art}", local.display()));
+        playing.art_moves = true;
+    }
+    Ok(Some((playing, file)))
+}
+
+/// Whether a path has a login in it (`smb://user:pass@nas/...`).
+pub fn has_login(path: &str) -> bool {
+    path.split_once("://").is_some_and(|(_, rest)| rest.split('/').next().is_some_and(|host| host.contains('@')))
+}
+
+/// Where Kodi's files are on this computer: `TVEEE_KODI_PATHS`, pairs of
+/// Kodi's path and the local one, `;`-separated
+/// (`smb://nas/media=/mnt/nas/media`).
+const PATHS_VAR: &str = "TVEEE_KODI_PATHS";
+/// [`Playing::art`] for a frame of a local copy: `frame:<path>\n<artwork>`.
+const FRAME: &str = "frame:";
+
+/// Kodi's `file` on this computer, by the first mapping in `map` it starts with.
+pub fn local_path(file: &str, map: &str) -> Option<std::path::PathBuf> {
+    map.split(';').filter_map(|pair| pair.split_once('=')).find_map(|(kodi, here)| {
+        let kodi = kodi.trim().trim_end_matches('/');
+        let rest = file.strip_prefix(kodi)?;
+        // a whole path part, not "media2" for "media"
+        if !(rest.is_empty() || rest.starts_with('/')) {
+            return None;
+        }
+        let rest = percent_decode(rest);
+        Some(std::path::PathBuf::from(format!("{}{rest}", here.trim().trim_end_matches('/'))))
+    })
+}
+
+/// `%20` and the like, as Kodi writes some paths.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16);
+        match (b[i], b.get(i + 1).copied().and_then(hex), b.get(i + 2).copied().and_then(hex)) {
+            (b'%', Some(h), Some(l)) => {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+            }
+            (c, _, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// The body that seeks to `to` (Kodi's own forms: relative seconds, a
@@ -267,6 +324,12 @@ impl crate::provider::Provider for Kodi {
     }
     fn player(&self) -> Option<&dyn crate::provider::Player> {
         Some(self)
+    }
+    fn details(&self) -> Option<&dyn crate::provider::Details> {
+        Some(self)
+    }
+    fn actions(&self) -> Option<(&'static str, crate::provider::Actions)> {
+        Some((ACTIONS, action))
     }
     fn has_sessions(&self) -> bool {
         true
@@ -343,7 +406,19 @@ impl crate::provider::Player for Kodi {
         });
         done.into()
     }
-    fn picture(&self, tv: &Tv, art: &str, _at: Option<f64>) -> Outcome<Vec<u8>> {
+    fn picture(&self, tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {
+        let art = match art.strip_prefix(FRAME).and_then(|a| a.split_once('\n')) {
+            Some((path, artwork)) => {
+                if let Some(jpeg) = crate::plugins::youtube::frame_of(std::path::Path::new(path), at.unwrap_or(0.0)) {
+                    return Outcome::Handled(jpeg);
+                }
+                if artwork.is_empty() {
+                    return Outcome::Fallback;
+                }
+                artwork
+            }
+            None => art,
+        };
         self.art_bytes(tv, art).into()
     }
     // Kodi's TCP API (port 9090) sends notifications as they happen
@@ -416,6 +491,262 @@ impl Kodi {
         }
         Ok(out.stdout)
     }
+}
+
+// --- details ----------------------------------------------------------------------
+
+const DETAIL_FIELDS: &str = r#"["title","showtitle","season","episode","year","plot","tagline","rating","genre","director","cast","studio","runtime","streamdetails","file"]"#;
+
+/// Names in a JSON list of strings, joined; None if there are none.
+fn names(v: &Value, key: &str) -> Option<String> {
+    let all: Vec<&str> = v.get(key)?.as_array()?.iter().filter_map(Value::as_str).filter(|s| !s.is_empty()).collect();
+    (!all.is_empty()).then(|| all.join(", "))
+}
+
+/// `tveee details` from a Kodi item (Player.GetItem's or Files.GetFileDetails').
+pub fn parse_details(item: &Value) -> crate::more::Details {
+    let mut fields: Vec<(&'static str, String)> = Vec::new();
+    let mut add = |k: &'static str, v: Option<String>| {
+        if let Some(v) = v {
+            fields.push((k, v));
+        }
+    };
+    add("title", str_of(item, "title").or_else(|| str_of(item, "label")));
+    let num = |k| num_of(item, k).filter(|n| *n > 0.0);
+    add(
+        "show",
+        str_of(item, "showtitle").map(|show| match (num("season"), num("episode")) {
+            (Some(s), Some(e)) => format!("{show}, series {s}, episode {e}"),
+            _ => show,
+        }),
+    );
+    add("year", num("year").map(|y| format!("{y}")));
+    add("rating", num("rating").map(|r| format!("{r:.1}/10")));
+    add("genre", names(item, "genre"));
+    add("director", names(item, "director"));
+    let cast: Vec<String> = item
+        .get("cast")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(6)
+        .filter_map(|c| {
+            let name = str_of(c, "name")?;
+            Some(match str_of(c, "role") {
+                Some(role) => format!("{name} ({role})"),
+                None => name,
+            })
+        })
+        .collect();
+    add("cast", (!cast.is_empty()).then(|| cast.join(", ")));
+    add("studio", names(item, "studio"));
+    add("length", num("runtime").map(crate::nowplaying::clock));
+    if let Some(v) = item.pointer("/streamdetails/video/0") {
+        let h = num_of(v, "height").unwrap_or(0.0) as u32;
+        let codec = str_of(v, "codec").unwrap_or_default().to_uppercase();
+        add("video", (h > 0).then(|| format!("{h}p {codec}").trim().to_string()));
+    }
+    let audio: Vec<String> = item
+        .pointer("/streamdetails/audio")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|a| {
+            let lang = str_of(a, "language").unwrap_or_else(|| "?".into());
+            let codec = str_of(a, "codec").map(|c| format!(" {}", c.to_uppercase())).unwrap_or_default();
+            let ch = num_of(a, "channels").map(|c| format!(" {c}ch")).unwrap_or_default();
+            format!("{lang}{codec}{ch}")
+        })
+        .collect();
+    add("audio", (!audio.is_empty()).then(|| audio.join(", ")));
+    let subs: Vec<String> =
+        item.pointer("/streamdetails/subtitle").and_then(Value::as_array).into_iter().flatten().filter_map(|s| str_of(s, "language")).collect();
+    add("subtitles", (!subs.is_empty()).then(|| subs.join(", ")));
+    let description = match (str_of(item, "tagline"), str_of(item, "plot")) {
+        (Some(t), Some(p)) => Some(format!("{t}\n\n{p}")),
+        (t, p) => p.or(t),
+    };
+    crate::more::Details { fields, description, chapters: Vec::new(), links: Vec::new() }
+}
+
+impl crate::provider::Details for Kodi {
+    // `link` is the file: what's playing if it's that, else what Kodi knows of the file
+    fn details(&self, tv: &Tv, link: &str) -> Result<crate::more::Details> {
+        if let Some((id, _)) = player_id(tv)? {
+            let r = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{DETAIL_FIELDS}}}"#))?;
+            let item = r.get("item").cloned().unwrap_or_default();
+            if str_of(&item, "file").as_deref() == Some(link) {
+                return Ok(parse_details(&item));
+            }
+        }
+        let r = call(tv, "Files.GetFileDetails", &format!(r#"{{"file":{},"media":"video","properties":{DETAIL_FIELDS}}}"#, quote(link)))?;
+        Ok(parse_details(r.get("filedetails").unwrap_or(&Value::Null)))
+    }
+}
+
+// --- the app's own actions -------------------------------------------------------
+
+const ACTIONS: &str = "find <words> | play <words> | subtitles [next|off|on] | audio [next] | scan [clean] | notify <text>";
+
+/// `tveee app kodi <action...>`.
+fn action(tv: &Tv, args: &[String]) -> Result<String> {
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let usage = || crate::error::usage(format!("app kodi: one of: {ACTIONS}"));
+    match words.as_slice() {
+        ["find", q @ ..] if !q.is_empty() => find(tv, &q.join(" ")),
+        ["play", q @ ..] if !q.is_empty() => play(tv, &q.join(" ")),
+        ["subtitles"] => subtitles(tv, "next"),
+        ["subtitles", how @ ("next" | "off" | "on" | "previous")] => subtitles(tv, how),
+        ["audio"] | ["audio", "next"] => audio(tv, "next"),
+        ["audio", "previous"] => audio(tv, "previous"),
+        ["scan"] => call(tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is looking for new videos (its library scan)".into()),
+        ["scan", "clean"] => call(tv, "VideoLibrary.Clean", "{}").map(|_| "Kodi is removing missing videos from its library".into()),
+        ["notify", text @ ..] if !text.is_empty() => notify(tv, &text.join(" ")),
+        _ => usage(),
+    }
+}
+
+/// Something in Kodi's library.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    /// "movie" or "tvshow".
+    pub kind: &'static str,
+    pub id: u64,
+    pub title: String,
+    pub year: Option<u32>,
+}
+
+/// The library's movies and TV shows with `q` in their title.
+fn search_library(tv: &Tv, q: &str) -> Result<Vec<Found>> {
+    let filter = format!(r#"{{"filter":{{"field":"title","operator":"contains","value":{}}},"properties":["title","year"],"limits":{{"end":25}}}}"#, quote(q));
+    let mut out = Vec::new();
+    for (kind, method, list, id) in [("movie", "VideoLibrary.GetMovies", "movies", "movieid"), ("tvshow", "VideoLibrary.GetTVShows", "tvshows", "tvshowid")] {
+        let r = call(tv, method, &filter)?;
+        out.extend(parse_found(&r, kind, list, id));
+    }
+    Ok(out)
+}
+
+pub fn parse_found(r: &Value, kind: &'static str, list: &str, id: &str) -> Vec<Found> {
+    r.get(list)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            Some(Found {
+                kind,
+                id: m.get(id)?.as_u64()?,
+                title: str_of(m, "title").or_else(|| str_of(m, "label"))?,
+                year: num_of(m, "year").filter(|y| *y > 0.0).map(|y| y as u32),
+            })
+        })
+        .collect()
+}
+
+fn found_line(f: &Found) -> String {
+    let kind = if f.kind == "movie" { "film" } else { "TV show" };
+    match f.year {
+        Some(y) => format!("{kind:<8} {} ({y})", f.title),
+        None => format!("{kind:<8} {}", f.title),
+    }
+}
+
+fn find(tv: &Tv, q: &str) -> Result<String> {
+    let found = search_library(tv, q)?;
+    if found.is_empty() {
+        return Ok(format!("nothing in Kodi's library called \"{q}\""));
+    }
+    Ok(found.iter().map(found_line).collect::<Vec<_>>().join("\n"))
+}
+
+/// The best match for `q`: the one whose title is `q` (any case), else the
+/// only one.
+pub fn best_match<'a>(found: &'a [Found], q: &str) -> Option<&'a Found> {
+    found.iter().find(|f| f.title.eq_ignore_ascii_case(q)).or(match found {
+        [one] => Some(one),
+        _ => None,
+    })
+}
+
+/// Play a film, or open a TV show's episodes, by title.
+fn play(tv: &Tv, q: &str) -> Result<String> {
+    let found = search_library(tv, q)?;
+    let Some(f) = best_match(&found, q) else {
+        return match found.len() {
+            0 => failed(format!("nothing in Kodi's library called \"{q}\"")),
+            n => failed(format!("{n} things in Kodi's library match \"{q}\"; say which:\n{}", found.iter().map(found_line).collect::<Vec<_>>().join("\n"))),
+        };
+    };
+    let _ = crate::plugins::apps::bring_to_front(tv, PACKAGE);
+    if f.kind == "movie" {
+        call(tv, "Player.Open", &format!(r#"{{"item":{{"movieid":{}}}}}"#, f.id))?;
+        Ok(format!("playing {}", f.title))
+    } else {
+        let link = format!("kodi-window:videos|videodb://tvshows/titles/{}/", f.id);
+        call(tv, "GUI.ActivateWindow", &window_params(&link).unwrap_or_default())?;
+        Ok(format!("opened {} in Kodi", f.title))
+    }
+}
+
+/// The playing video's player id, or a failure saying nothing is playing.
+fn video_player(tv: &Tv) -> Result<u32> {
+    match player_id(tv)? {
+        Some((id, kind)) if kind == "video" => Ok(id),
+        _ => failed("Kodi isn't playing a video"),
+    }
+}
+
+fn subtitles(tv: &Tv, how: &str) -> Result<String> {
+    let id = video_player(tv)?;
+    let params = match how {
+        "on" | "off" => format!(r#"{{"playerid":{id},"subtitle":"{how}"}}"#),
+        _ => format!(r#"{{"playerid":{id},"subtitle":"{how}","enable":true}}"#),
+    };
+    call(tv, "Player.SetSubtitle", &params)?;
+    let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":["currentsubtitle","subtitleenabled"]}}"#))?;
+    Ok(match props.get("subtitleenabled").and_then(Value::as_bool) {
+        Some(true) => format!("subtitles: {}", track_name(props.get("currentsubtitle")).unwrap_or_else(|| "on".into())),
+        _ => "subtitles off".into(),
+    })
+}
+
+fn audio(tv: &Tv, how: &str) -> Result<String> {
+    let id = video_player(tv)?;
+    call(tv, "Player.SetAudioStream", &format!(r#"{{"playerid":{id},"stream":"{how}"}}"#))?;
+    let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":["currentaudiostream"]}}"#))?;
+    Ok(format!("audio: {}", track_name(props.get("currentaudiostream")).unwrap_or_else(|| "changed".into())))
+}
+
+/// "English AC3", from a stream Kodi describes.
+fn track_name(t: Option<&Value>) -> Option<String> {
+    let t = t?;
+    let name = str_of(t, "name").or_else(|| str_of(t, "language"))?;
+    Some(match str_of(t, "codec") {
+        Some(c) => format!("{name} {}", c.to_uppercase()),
+        None => name,
+    })
+}
+
+fn notify(tv: &Tv, text: &str) -> Result<String> {
+    call(tv, "GUI.ShowNotification", &format!(r#"{{"title":"tveee","message":{}}}"#, quote(text)))?;
+    Ok("shown in Kodi".into())
+}
+
+/// Menu items for the ui.
+pub fn menu() -> Vec<crate::menu::MenuItem> {
+    use crate::menu::MenuItem;
+    vec![
+        MenuItem::new("kodi", 'k', "kodi: next subtitles", |tv| subtitles(tv, "next")),
+        MenuItem::new("kodi", 'K', "kodi: subtitles off", |tv| subtitles(tv, "off")),
+        MenuItem::new("kodi", 'a', "kodi: next audio track", |tv| audio(tv, "next")),
+        MenuItem::new("kodi", 'L', "kodi: look for new videos (library scan)", |tv| {
+            call(tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is scanning its library".into())
+        }),
+        MenuItem::with_text("kodi", 'F', "kodi: find in the library", "Find in Kodi:", "a film or show's title", |tv, q| {
+            // one line, for the status line
+            find(tv, q).map(|s| s.replace('\n', "; "))
+        }),
+    ]
 }
 
 pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
@@ -492,6 +823,44 @@ mod tests {
     // as Kodi 21 answers
     const ITEM: &str = r#"{"item":{"art":{"fanart":"image://smb%3a%2f%2fnas%2ffanart.jpg/","poster":"image://p.jpg/"},"episode":4,"fanart":"","file":"smb://nas/tv/Taskmaster/S03E04.mkv","id":7,"label":"S03E04","season":3,"showtitle":"Taskmaster","streamdetails":{"audio":[{"channels":6,"codec":"ac3","language":"eng"}],"subtitle":[{"language":"eng"}],"video":[{"aspect":1.78,"codec":"h264","duration":2700,"height":1080,"width":1920}]},"thumbnail":"","title":"A Very Nuanced Character","type":"episode","year":2016}}"#;
     const PROPS: &str = r#"{"currentaudiostream":{"bitrate":0,"channels":6,"codec":"ac3","index":0,"language":"eng","name":"English"},"currentsubtitle":{"index":0,"language":"eng","name":"English"},"speed":1,"subtitleenabled":false,"time":{"hours":0,"milliseconds":500,"minutes":3,"seconds":20},"totaltime":{"hours":0,"milliseconds":0,"minutes":45,"seconds":0}}"#;
+
+    #[test]
+    fn details_of_an_episode() {
+        let item = json(r#"{"title":"A Very Nuanced Character","showtitle":"Taskmaster","season":3,"episode":4,"year":2016,"rating":7.84,"genre":["Comedy"],"director":[],"cast":[{"name":"Greg Davies","role":"Taskmaster"},{"name":"Alex Horne"}],"runtime":2700,"plot":"Five comedians.","tagline":"","streamdetails":{"audio":[{"channels":6,"codec":"ac3","language":"eng"},{"channels":2,"codec":"aac","language":"fre"}],"subtitle":[{"language":"eng"}],"video":[{"codec":"h264","height":1080}]}}"#);
+        let d = parse_details(&item);
+        let f = |k| d.fields.iter().find(|(n, _)| *n == k).map(|(_, v)| v.as_str());
+        assert_eq!(f("show"), Some("Taskmaster, series 3, episode 4"));
+        assert_eq!(f("rating"), Some("7.8/10"));
+        assert_eq!(f("cast"), Some("Greg Davies (Taskmaster), Alex Horne"));
+        assert_eq!(f("director"), None);
+        assert_eq!(f("length"), Some("45:00"));
+        assert_eq!(f("video"), Some("1080p H264"));
+        assert_eq!(f("audio"), Some("eng AC3 6ch, fre AAC 2ch"));
+        assert_eq!(f("subtitles"), Some("eng"));
+        assert_eq!(d.description.as_deref(), Some("Five comedians."));
+    }
+
+    #[test]
+    fn local_copies() {
+        let map = "smb://nas/media=/mnt/nas/media; nfs://box/films/ = /srv/films";
+        assert_eq!(local_path("smb://nas/media/TV/A%20B.mkv", map), Some("/mnt/nas/media/TV/A B.mkv".into()));
+        assert_eq!(local_path("nfs://box/films/x.mkv", map), Some("/srv/films/x.mkv".into()));
+        assert_eq!(local_path("smb://nas/media2/x.mkv", map), None);
+        assert_eq!(local_path("smb://nas/media/x.mkv", ""), None);
+        assert!(has_login("smb://me:secret@nas/x.mkv") && !has_login("smb://nas/a@b.mkv") && !has_login("/storage/x.mkv"));
+    }
+
+    #[test]
+    fn library_search() {
+        let r = json(r#"{"limits":{"end":2,"start":0,"total":2},"movies":[{"label":"Dune","movieid":3,"title":"Dune","year":2021},{"label":"Dune: Part Two","movieid":9,"title":"Dune: Part Two","year":2024}]}"#);
+        let found = parse_found(&r, "movie", "movies", "movieid");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0], Found { kind: "movie", id: 3, title: "Dune".into(), year: Some(2021) });
+        assert_eq!(best_match(&found, "dune").map(|f| f.id), Some(3));
+        assert_eq!(best_match(&found, "part"), None);
+        assert_eq!(best_match(&found[1..], "part").map(|f| f.id), Some(9));
+        assert!(parse_found(&json(r#"{"limits":{"total":0}}"#), "movie", "movies", "movieid").is_empty());
+    }
 
     #[test]
     fn notifications() {
