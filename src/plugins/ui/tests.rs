@@ -225,7 +225,7 @@ fn menu_keys() {
     let it = items();
     let k = |o, c| overlay_key(o, c, &it);
     // a plain item runs straight away; a risky one asks first
-    assert_eq!(k(Overlay::Menu(0), KeyCode::Char('s')), (Overlay::None, Some(Action::Menu(0))));
+    assert_eq!(k(Overlay::Menu(0), KeyCode::Char('s')), (Overlay::None, Some(Action::Run { id: "power.sleep", args: vec![] })));
     assert_eq!(k(Overlay::Menu(0), KeyCode::Char('X')), (Overlay::Confirm { item: 1, yes: false }, None));
     assert_eq!(k(Overlay::Menu(1), KeyCode::Enter), (Overlay::Confirm { item: 1, yes: false }, None));
     assert_eq!(k(Overlay::Menu(0), KeyCode::Down), (Overlay::Menu(1), None));
@@ -243,10 +243,10 @@ fn confirmations_default_to_no() {
     assert_eq!(k(ask, KeyCode::Enter), (Overlay::None, None));
     assert_eq!(k(ask, KeyCode::Char('n')), (Overlay::None, None));
     assert_eq!(k(ask, KeyCode::Char(' ')), (Overlay::None, None));
-    assert_eq!(k(ask, KeyCode::Char('y')), (Overlay::None, Some(Action::Menu(1))));
+    assert_eq!(k(ask, KeyCode::Char('y')), (Overlay::None, Some(Action::Run { id: "power.off", args: vec![] })));
     let yes = Overlay::Confirm { item: 1, yes: true };
     assert_eq!(k(ask, KeyCode::Right), (yes, None));
-    assert_eq!(k(yes, KeyCode::Enter), (Overlay::None, Some(Action::Menu(1))));
+    assert_eq!(k(yes, KeyCode::Enter), (Overlay::None, Some(Action::Run { id: "power.off", args: vec![] })));
 }
 
 #[test]
@@ -341,17 +341,17 @@ fn typing_a_link() {
     let none = KeyModifiers::NONE;
     let mut t = String::new();
     for c in "youtu.be/x".chars() {
-        assert_eq!(prompt_key(3, KeyCode::Char(c), none, &mut t), (Overlay::Prompt(3), None));
+        assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Char(c), none, &mut t), (Overlay::Prompt(3), None));
     }
-    assert_eq!(prompt_key(3, KeyCode::Backspace, none, &mut t), (Overlay::Prompt(3), None));
+    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Backspace, none, &mut t), (Overlay::Prompt(3), None));
     assert_eq!(t, "youtu.be/");
-    assert_eq!(prompt_key(3, KeyCode::Char('u'), KeyModifiers::CONTROL, &mut t), (Overlay::Prompt(3), None));
+    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Char('u'), KeyModifiers::CONTROL, &mut t), (Overlay::Prompt(3), None));
     assert_eq!(t, "");
     // Enter on nothing stays put; with text it runs the item
-    assert_eq!(prompt_key(3, KeyCode::Enter, none, &mut t), (Overlay::Prompt(3), None));
+    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::Prompt(3), None));
     t.push_str("  vlc http://h/f.mkv ");
-    assert_eq!(prompt_key(3, KeyCode::Enter, none, &mut t), (Overlay::None, Some(Action::MenuText(3, "vlc http://h/f.mkv".into()))));
-    assert_eq!(prompt_key(3, KeyCode::Esc, none, &mut t), (Overlay::None, None));
+    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::None, Some(Action::Run { id: "apps.open_link", args: vec!["vlc http://h/f.mkv".into()] })));
+    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Esc, none, &mut t), (Overlay::None, None));
     assert_eq!(paste_text("https://youtu.be/x\r\n"), "https://youtu.be/x");
     assert_eq!(paste_text("vlc\thttp://h/f.mkv"), "vlc http://h/f.mkv");
 }

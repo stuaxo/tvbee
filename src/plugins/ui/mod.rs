@@ -334,7 +334,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     }
                 } else if let Overlay::Prompt(item) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
-                    let (next, action) = prompt_key(item, k.code, k.modifiers, &mut text);
+                    let id = app.menu.get(item).map_or("", |m| m.id);
+                    let (next, action) = prompt_key(item, id, k.code, k.modifiers, &mut text);
                     app.prompt = text;
                     app.apply_overlay(next, action, actions);
                 } else if let Overlay::Apps { tab, sel } = app.overlay {
@@ -394,7 +395,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     if !std::io::stdout().is_terminal() {
         return crate::error::usage("ui needs a terminal");
     }
-    let engine = Engine::start(&c.tv.ip, c.menu.clone());
+    let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App {
         ip: c.tv.ip.clone(),
         st: engine.handle.state(),
@@ -663,15 +664,13 @@ impl App {
             self.apps_tab = tab;
         }
         match (was, next, action) {
-            (_, _, Some(a @ Action::Menu(i))) => {
-                self.note = format!("{}...", self.menu.get(i).map_or("", |m| m.title));
-                let _ = actions.send(a);
-            }
-            (_, _, Some(a @ Action::MenuText(i, _))) => {
-                // e.g. "open a link": something new should come up
-                self.note = format!("{}...", self.menu.get(i).map_or("", |m| m.title));
-                self.settle(self.note.clone(), None);
-                let _ = actions.send(a);
+            (_, _, Some(Action::Run { id, args })) => {
+                self.note = format!("{}...", crate::actions::find(&self.menu, id).map_or(id, |m| m.title));
+                // with text typed (e.g. "open a link"): something new should come up
+                if !args.is_empty() {
+                    self.settle(self.note.clone(), None);
+                }
+                let _ = actions.dispatch(id, args);
             }
             (Overlay::Prompt(_) | Overlay::Search(_), Overlay::None, None) => self.note = "cancelled".into(),
             (_, _, Some(Action::Search { pkg, query, keys })) => {
@@ -730,7 +729,7 @@ impl App {
             }
             (Overlay::Menu(_), Some(Hit::Popup)) => {}
             (Overlay::Confirm { item, .. }, Some(Hit::ConfirmYes)) => {
-                self.apply_overlay(Overlay::None, Some(Action::Menu(item)), actions)
+                self.apply_overlay(Overlay::None, run_item(&self.menu, item), actions)
             }
             (Overlay::Confirm { .. }, Some(Hit::Popup)) => {}
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {

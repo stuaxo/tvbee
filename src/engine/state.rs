@@ -137,6 +137,12 @@ impl Handle {
         f(Arc::make_mut(&mut lanes::lock(&self.state)));
     }
 
+    /// Run the action `id` (`crate::actions`) with `args`, in turn with the
+    /// user's other actions.
+    pub fn dispatch(&self, id: &'static str, args: Vec<String>) -> std::result::Result<(), mpsc::SendError<Action>> {
+        self.send(Action::Run { id, args })
+    }
+
     /// Ask for `a`. What shows at once does now (the guide loading, a star
     /// toggled); the rest when the lanes are done.
     pub fn send(&self, a: Action) -> std::result::Result<(), mpsc::SendError<Action>> {

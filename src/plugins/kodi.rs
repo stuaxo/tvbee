@@ -735,13 +735,6 @@ fn words(args: &[String], what: &str) -> Result<String> {
 pub fn actions() -> Vec<ActionDescriptor> {
     use crate::actions::ActionDescriptor as A;
     vec![
-        A::new("kodi.find", "kodi", "kodi: find in the library", |cx, a| find(cx.tv, &words(a, "a title")?).map(Into::into))
-            .args("<words>")
-            .key('F')
-            .text("Find in Kodi:", "a film or show's title"),
-        A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?).map(Into::into))
-            .args("<words>")
-            .text("Play in Kodi:", "a film or show's title"),
         A::new("kodi.subtitles", "kodi", "kodi: next subtitles", |cx, a| match a.first().map(String::as_str) {
             None => subtitles(cx.tv, "next").map(Into::into),
             Some(how @ ("next" | "off" | "on" | "previous")) => subtitles(cx.tv, how).map(Into::into),
@@ -765,6 +758,13 @@ pub fn actions() -> Vec<ActionDescriptor> {
         })
         .args("[clean]")
         .key('L'),
+        A::new("kodi.find", "kodi", "kodi: find in the library", |cx, a| find(cx.tv, &words(a, "a title")?).map(Into::into))
+            .args("<words>")
+            .key('F')
+            .text("Find in Kodi:", "a film or show's title"),
+        A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?).map(Into::into))
+            .args("<words>")
+            .text("Play in Kodi:", "a film or show's title"),
         A::new("kodi.clean", "kodi", "kodi: forget videos that are gone (library clean)", |cx, _| clean(cx.tv))
             .confirm("Remove the videos Kodi can't find any more from its library?"),
         A::new("kodi.notify", "kodi", "kodi: show a notification", |cx, a| notify(cx.tv, &words(a, "a message")?).map(Into::into))

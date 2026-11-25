@@ -72,21 +72,21 @@ pub fn search_key(at: usize, code: KeyCode, mods: KeyModifiers, text: &mut Strin
             ),
             _ => (Overlay::Search(at), None),
         },
-        _ => match prompt_key(0, code, mods, text) {
+        _ => match prompt_key(0, "", code, mods, text) {
             (Overlay::None, _) => (Overlay::None, None),
             _ => (Overlay::Search(at), None),
         },
     }
 }
 
-/// Keys while typing into a prompt: edit `text`; Enter runs item `item` with
-/// it, Esc cancels. Ctrl-U clears.
-pub fn prompt_key(item: usize, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
+/// Keys while typing into a prompt for menu item `item` (action `id`): edit
+/// `text`; Enter runs the action with it, Esc cancels. Ctrl-U clears.
+pub fn prompt_key(item: usize, id: &'static str, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
     match code {
         KeyCode::Esc => (Overlay::None, None),
         KeyCode::Enter => {
             let t = text.trim().to_string();
-            if t.is_empty() { (Overlay::Prompt(item), None) } else { (Overlay::None, Some(Action::MenuText(item, t))) }
+            if t.is_empty() { (Overlay::Prompt(item), None) } else { (Overlay::None, Some(Action::Run { id, args: vec![t] })) }
         }
         KeyCode::Backspace => {
             text.pop();
@@ -142,9 +142,9 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         // handled by App::options_key
         Overlay::Options(i) => (Overlay::Options(i), None),
         Overlay::Confirm { item, yes } => match code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(Action::Menu(item))),
+            KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, run_item(items, item)),
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { item, yes: !yes }, None),
-            KeyCode::Enter if yes => (Overlay::None, Some(Action::Menu(item))),
+            KeyCode::Enter if yes => (Overlay::None, run_item(items, item)),
             // anything else, including Enter on "No", cancels
             _ => (Overlay::None, None),
         },
@@ -155,12 +155,17 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
     }
 }
 
+/// Running menu item `i` (with nothing typed).
+pub fn run_item(items: &[ActionDescriptor], i: usize) -> Option<Action> {
+    items.get(i).map(|it| Action::Run { id: it.id, args: Vec::new() })
+}
+
 /// What a menu item does when chosen: run it, or ask first if it's risky.
 pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
     match items.get(i) {
         Some(it) if matches!(it.params, Params::Text { .. }) => (Overlay::Prompt(i), None),
         Some(it) if it.confirm.is_some() => (Overlay::Confirm { item: i, yes: false }, None),
-        Some(_) => (Overlay::None, Some(Action::Menu(i))),
+        Some(_) => (Overlay::None, run_item(items, i)),
         None => (Overlay::None, None),
     }
 }

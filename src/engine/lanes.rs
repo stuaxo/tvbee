@@ -411,7 +411,8 @@ impl Refresher {
 pub(crate) struct Actor {
     pub(crate) tv: Tv,
     pub(crate) shared: Arc<Shared>,
-    pub(crate) menu: Vec<ActionDescriptor>,
+    /// What `Action::Run` can run.
+    pub(crate) actions: Vec<ActionDescriptor>,
     /// Wakes the refresh.
     pub(crate) wake: Sender<()>,
     /// The read lane (to update the running apps after launching, closing).
@@ -519,14 +520,11 @@ impl Actor {
                 }
                 None => "jumping needs a video tveee can read (currently YouTube)".into(),
             },
-            Action::Menu(i) => match self.menu.get(i) {
-                Some(m) if m.params != Params::None => "that needs some text".into(),
-                Some(m) => m.run(&self.tv, &[])?.text.replace('\n', "; "),
-                None => "no such menu item".into(),
-            },
-            Action::MenuText(i, text) => match self.menu.get(i) {
-                Some(m) if matches!(m.params, Params::Text { .. }) => m.run(&self.tv, &[text])?.text.replace('\n', "; "),
-                _ => "no such menu item".into(),
+            Action::Run { id, args } => match crate::actions::find(&self.actions, id) {
+                Some(a) if args.is_empty() && matches!(a.params, Params::Text { .. }) => "that needs some text".into(),
+                // one line, for a status line
+                Some(a) => a.run(&self.tv, &args)?.text.replace('\n', "; "),
+                None => format!("no action '{id}' here"),
             },
             Action::Launch(target) => {
                 apps::start(&self.tv, &target)?;

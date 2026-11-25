@@ -2,7 +2,9 @@
 //! so a front end never waits on adb. It reads what's on (the refresh), runs
 //! what the user asks for (keys, actions, reads, background work), makes
 //! pictures for a preview, and listens for players that push changes. A front
-//! end sends [`Action`]s and receives [`Msg`]s ([`Engine::start`]).
+//! end sends [`Action`]s through a [`Handle`] (or runs any registered action
+//! by id: [`Handle::dispatch`]), reads the [`TvState`], and is told what
+//! changed with [`CoreEvent`]s ([`Engine::start`]).
 //!
 //! No terminal in here: `tveee ui` is one front end, a GUI could be another.
 
@@ -93,10 +95,9 @@ pub enum Action {
     Key(u32),
     /// Type this text into the TV (remote mode).
     Text(String),
-    /// Run menu item N (an index into the plugins' menu items).
-    Menu(usize),
-    /// Run menu item N with the text the user typed for it.
-    MenuText(usize, String),
+    /// Run an action (`crate::actions`) by id, with these arguments (for one
+    /// that asks for text: the line typed).
+    Run { id: &'static str, args: Vec<String> },
     /// Start an app: an alias, package or package/activity.
     Launch(String),
     /// Bring a running app's task to the front.
@@ -184,10 +185,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Start the lanes for the TV at `ip`; `menu` is what `Action::Menu(i)`
-    /// indexes into. Reads what's on at once; meanwhile the state is what
-    /// was seen last run.
-    pub fn start(ip: &str, menu: Vec<ActionDescriptor>) -> Engine {
+    /// Start the lanes for the TV at `ip`; `actions` are those `Action::Run`
+    /// can run (the enabled plugins'). Reads what's on at once; meanwhile the
+    /// state is what was seen last run.
+    pub fn start(ip: &str, actions: Vec<ActionDescriptor>) -> Engine {
         let (act_tx, act_rx) = mpsc::channel();
         let (msg_tx, msg_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
@@ -206,7 +207,7 @@ impl Engine {
         spawn_named("route", move || route(&act_rx, &sh, &lanes));
         let (key_msgs, key_tv) = (msg_tx.clone(), shared.tv());
         spawn_named("keys", move || send_keys(key_tv, &key_rx, &key_msgs));
-        let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), menu, wake: wake_tx, reads: read_tx, pairing: None };
+        let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), actions, wake: wake_tx, reads: read_tx, pairing: None };
         let actor_msgs = msg_tx.clone();
         spawn_named("actions", move || actor.run(&do_rx, actor_msgs));
         let (read_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
