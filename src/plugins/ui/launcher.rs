@@ -55,24 +55,6 @@ pub fn choice_action(c: AppChoice, e: &Entry) -> (Option<Action>, bool) {
     }
 }
 
-/// How many lines a tab draws: its entries, plus section headings on Other.
-pub fn tab_rows(all: &[Entry], tab: AppTab) -> usize {
-    let list = tab_list(all, tab);
-    let headings = if tab == AppTab::Other {
-        let mut s: Vec<&str> = list.iter().map(|e| e.section).collect();
-        s.dedup();
-        s.len()
-    } else {
-        0
-    };
-    list.len() + headings
-}
-
-/// The rows of one tab.
-pub fn tab_list(all: &[Entry], tab: AppTab) -> Vec<Entry> {
-    all.iter().filter(|e| tab.holds(e)).cloned().collect()
-}
-
 /// Keys in the launcher (`list` is the current tab's rows): arrows + Enter,
 /// a letter to jump to the next app whose alias (or name) starts with it, so
 /// every letter jumps; Tab, ← or → switch tabs; Esc or Backspace close.

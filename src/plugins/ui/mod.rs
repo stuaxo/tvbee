@@ -41,21 +41,6 @@ pub use self::overlays::*;
 pub use self::drawing::*;
 
 const CAT: &str = "ui";
-/// A volume level and its maximum.
-pub type Vol = (u32, u32);
-
-/// The volume to show as current (this refresh's, or a recent one), and
-/// the last known one when that's too old to (shown greyed). `last`: the
-/// last reported volume and how long ago.
-pub fn volume_shown(now: Option<Vol>, last: Option<(Vol, Duration)>) -> (Option<Vol>, Option<Vol>) {
-    match (now, last) {
-        (Some(v), _) => (Some(v), None),
-        (None, Some((v, age))) if age < VOLUME_STALE => (Some(v), None),
-        (None, Some((v, _))) => (None, Some(v)),
-        (None, None) => (None, None),
-    }
-}
-
 struct App {
     ip: String,
     /// The engine: where requests go, and what it knows (`st`).
