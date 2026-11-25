@@ -73,6 +73,17 @@ const RETRY_FOR: std::time::Duration = std::time::Duration::from_secs(10);
 /// Make the request; returns (status, body). A refused connection is retried
 /// for a while (see [`RETRY_FOR`]).
 pub fn request(r: &Request) -> Result<(u16, String)> {
+    // answered from a recording (`crate::mock`), or recorded
+    let what = ["https", crate::mock::url_key(r.url), r.body.unwrap_or("")];
+    if let Some(answer) = crate::mock::replay(&what) {
+        return crate::mock::http_answer(&answer?);
+    }
+    let result = request_live(r);
+    crate::mock::record(&what, result.as_ref().map(|(s, b)| crate::mock::http_bytes(*s, b)).as_deref().map_err(ToString::to_string));
+    result
+}
+
+fn request_live(r: &Request) -> Result<(u16, String)> {
     let start = std::time::Instant::now();
     let mut worth_it: Option<bool> = None;
     loop {

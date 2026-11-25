@@ -14,6 +14,7 @@ mod keys;
 mod labels;
 mod log;
 mod mdns;
+mod mock;
 mod more;
 mod nowplaying;
 mod options;
