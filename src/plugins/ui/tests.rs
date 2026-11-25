@@ -58,7 +58,7 @@ fn guide_filters_and_moves() {
     // the grid: 60s a cell, from 0
     let grid = |w| grid_row(&day.events, 0, 60, w, 0, None).into_iter().map(|(_, t, _)| t).collect::<String>();
     // Apple 0-100s (1 cell), Banana 100-200s (cells 1-3), gap, Cherry 250-300s (cell 4)
-    assert_eq!(grid(6), "││0 │ ");
+    assert_eq!(grid(6), "││B │ ");
     let long = [ev("A long title here", 0, 1800), ev("B", 1800, 2400)];
     let row = grid_row(&long, 0, 60, 40, 0, Some(1800));
     let flat: String = row.iter().map(|(_, t, _)| t.as_str()).collect();
@@ -72,11 +72,17 @@ fn guide_filters_and_moves() {
     // off the half hour: the time too
     let odd: String = grid_row(&[ev("C", 300, 1800)], 0, 60, 30, 0, None).iter().map(|(_, t, _)| t.as_str()).collect();
     assert_eq!(odd.trim_end(), "     │00:05 C");
+    // too narrow for the time as well: just the title
+    let narrow: String = grid_row(&[ev("Newsnight", 300, 900)], 0, 60, 20, 0, None).iter().map(|(_, t, _)| t.as_str()).collect();
+    assert_eq!(narrow.trim_end(), "     │Newsnight");
     // started before the left edge; and a cut-off title
     let flat: String = grid_row(&long, 300, 60, 10, 0, None).iter().map(|(_, t, _)| t.as_str()).collect();
     assert_eq!(flat, "◂A long t…");
     let (ruler, mark) = grid_ruler(0, 60, 40, 600, 0);
     assert_eq!((ruler.trim_end(), mark), ("00:00                         00:30", Some(10)));
+    // now on a time: the marker goes just before it, or after it at the edge
+    assert_eq!(grid_ruler(0, 60, 40, 30 * 60 + 60, 0).1, Some(29));
+    assert_eq!(grid_ruler(0, 60, 40, 60, 0).1, Some(5));
     assert_eq!(grid_scale(90), 80);
     // the details text
     let mut e = ev("Garage Squad", 0, 3600);

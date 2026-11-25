@@ -52,8 +52,9 @@ pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: 
         let mut content: Vec<(char, Seg)> = Vec::new();
         if e.start >= start {
             content.push(('│', Seg::Edge));
-            // the ruler says the time on the hour and half hour
-            if e.start % GUIDE_STEP != 0 {
+            // the ruler says the time on the hour and half hour; and a
+            // narrow block keeps its room for the title
+            if e.start % GUIDE_STEP != 0 && x1 - x0 >= MIN_FOR_TIME {
                 content.extend(format!("{} ", crate::plugins::guide::hhmm(e.start, offset)).chars().map(|c| (c, Seg::Time)));
             }
         } else {
@@ -166,6 +167,10 @@ pub fn details_text(e: &crate::provider::Event, ch: &crate::provider::Channel, i
     out
 }
 
+/// Cells a programme needs before its start time is shown: "│HH:MM " and a
+/// few letters of title.
+const MIN_FOR_TIME: usize = 11;
+
 /// The time ruler over the grid: half-hour labels, and ▼ at `now`.
 pub fn grid_ruler(start: i64, spc: i64, width: usize, now: i64, offset: i64) -> (String, Option<usize>) {
     let mut buf = vec![' '; width];
@@ -180,6 +185,15 @@ pub fn grid_ruler(start: i64, spc: i64, width: usize, now: i64, offset: i64) -> 
         t += GUIDE_STEP;
     }
     let marker = (now >= start && now < start + spc * width as i64).then(|| ((now - start) / spc) as usize);
+    // not over a time: just before it instead, else just after it
+    let marker = marker.and_then(|m| match buf.get(m) {
+        Some(' ') | None => Some(m),
+        Some(_) => {
+            let first = (0..=m).rev().take_while(|&i| buf[i] != ' ').last().unwrap_or(m);
+            let last = (m..width).take_while(|&i| buf[i] != ' ').last().unwrap_or(m);
+            first.checked_sub(1).or(Some(last + 1)).filter(|&i| i < width && buf[i] == ' ')
+        }
+    });
     (buf.into_iter().collect(), marker)
 }
 
