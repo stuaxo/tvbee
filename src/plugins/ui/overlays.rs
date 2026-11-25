@@ -12,7 +12,7 @@ pub enum Overlay {
     /// Changing the Ambilight: the highlighted row and option.
     Ambilight { row: usize, col: usize },
     /// Typing a colour for option `col` of the dialog's lights row (0: all).
-    AmbiColour { col: usize },
+    AmbiColour { row: usize, col: usize },
     Help,
     /// The "more" menu, with the highlighted item.
     Menu(usize),
@@ -72,21 +72,21 @@ pub fn search_key(at: usize, code: KeyCode, mods: KeyModifiers, text: &mut Strin
             ),
             _ => (Overlay::Search(at), None),
         },
-        _ => match prompt_key(0, code, mods, text) {
+        _ => match prompt_key(0, "", code, mods, text) {
             (Overlay::None, _) => (Overlay::None, None),
             _ => (Overlay::Search(at), None),
         },
     }
 }
 
-/// Keys while typing into a prompt: edit `text`; Enter runs item `item` with
-/// it, Esc cancels. Ctrl-U clears.
-pub fn prompt_key(item: usize, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
+/// Keys while typing into a prompt for menu item `item` (action `id`): edit
+/// `text`; Enter runs the action with it, Esc cancels. Ctrl-U clears.
+pub fn prompt_key(item: usize, id: &'static str, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
     match code {
         KeyCode::Esc => (Overlay::None, None),
         KeyCode::Enter => {
             let t = text.trim().to_string();
-            if t.is_empty() { (Overlay::Prompt(item), None) } else { (Overlay::None, Some(Action::MenuText(item, t))) }
+            if t.is_empty() { (Overlay::Prompt(item), None) } else { (Overlay::None, Some(Action::Run { id, args: vec![t] })) }
         }
         KeyCode::Backspace => {
             text.pop();
@@ -142,17 +142,22 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         // handled by App::options_key
         Overlay::Options(i) => (Overlay::Options(i), None),
         Overlay::Confirm { item, yes } => match code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(Action::Menu(item))),
+            KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, run_item(items, item)),
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { item, yes: !yes }, None),
-            KeyCode::Enter if yes => (Overlay::None, Some(Action::Menu(item))),
+            KeyCode::Enter if yes => (Overlay::None, run_item(items, item)),
             // anything else, including Enter on "No", cancels
             _ => (Overlay::None, None),
         },
         // handled where it's typed (the PIN is `App::prompt`)
         Overlay::Pin => (Overlay::Pin, None),
         Overlay::Ambilight { row, col } => (Overlay::Ambilight { row, col }, None),
-        Overlay::AmbiColour { col } => (Overlay::AmbiColour { col }, None),
+        Overlay::AmbiColour { row, col } => (Overlay::AmbiColour { row, col }, None),
     }
+}
+
+/// Running menu item `i` (with nothing typed).
+pub fn run_item(items: &[ActionDescriptor], i: usize) -> Option<Action> {
+    items.get(i).map(|it| Action::Run { id: it.id, args: Vec::new() })
 }
 
 /// What a menu item does when chosen: run it, or ask first if it's risky.
@@ -160,7 +165,7 @@ pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
     match items.get(i) {
         Some(it) if matches!(it.params, Params::Text { .. }) => (Overlay::Prompt(i), None),
         Some(it) if it.confirm.is_some() => (Overlay::Confirm { item: i, yes: false }, None),
-        Some(_) => (Overlay::None, Some(Action::Menu(i))),
+        Some(_) => (Overlay::None, run_item(items, i)),
         None => (Overlay::None, None),
     }
 }
@@ -228,9 +233,9 @@ impl App {
 
     /// Open the search box on `pkg` (or the app in front).
     pub(super) fn open_search(&mut self, pkg: Option<String>) {
-        let front = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
+        let front = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
         let first = pkg.or(front);
-        self.search_targets = search_targets(first.as_deref(), self.searchable.as_deref().unwrap_or_default());
+        self.search_targets = search_targets(first.as_deref(), self.st.searchable_list());
         self.prompt.clear();
         self.overlay = Overlay::Search(0);
     }
@@ -247,7 +252,7 @@ impl App {
             Overlay::Search(at) => self.draw_search(f, at),
             Overlay::Prompt(item) => self.draw_prompt(f, item),
             Overlay::Ambilight { row, col } => self.draw_ambi_dialog(f, row, col),
-            Overlay::AmbiColour { col } => self.draw_ambi_colour(f, col),
+            Overlay::AmbiColour { row, col } => self.draw_ambi_colour(f, row, col),
             Overlay::Pin => self.draw_pin(f),
             Overlay::Confirm { item, yes } => self.draw_confirm(f, item, yes),
         }
@@ -314,7 +319,7 @@ impl App {
             ]),
             Line::default(),
         ];
-        if self.searchable.is_none() {
+        if self.st.searchable.is_none() {
             text.push(Line::from("(still checking which apps can search...)").italic());
         }
         text.push(Line::from("⏎ search   esc cancel   paste works   ctrl-u clears").fg(Color::DarkGray));

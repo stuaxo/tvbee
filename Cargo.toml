@@ -27,8 +27,10 @@ image = { version = "0.25.6", optional = true, default-features = false, feature
 
 [features]
 default = []
+# the engine front ends run on: what's on, actions, previews, on worker threads
+engine = ["dep:image"]
 # `tveee ui`: interactive terminal remote (pulls in ratatui + crossterm)
-ui = ["dep:ratatui", "dep:ratatui-image", "dep:image"]
+ui = ["engine", "dep:ratatui", "dep:ratatui-image"]
 
 [profile.release]
 strip = true

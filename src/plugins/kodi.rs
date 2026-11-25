@@ -133,6 +133,16 @@ pub fn ping(tv: &Tv) -> bool {
     call(tv, "JSONRPC.Ping", "{}").is_ok_and(|r| r == "pong")
 }
 
+/// `tveee diagnose`: is its remote control on?
+pub fn diagnose(tv: &Tv) -> Vec<crate::plugin::Finding> {
+    let (ok, detail) = if ping(tv) {
+        (Some(true), "its remote control answers (position, exact seeking, artwork, places)")
+    } else {
+        (None, "installed, but its remote control doesn't answer (Kodi not running, or off: Settings > Services > Control > Allow remote control via HTTP; with a password, 'tveee pair kodi')")
+    };
+    vec![crate::plugin::Finding { ok, what: "kodi", detail: detail.into() }]
+}
+
 /// Wait for Kodi's API to answer (Kodi starting), up to `secs`.
 fn wait_ready(tv: &Tv, secs: u64) -> Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
@@ -406,7 +416,7 @@ impl crate::provider::Player for Kodi {
     fn picture(&self, tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {
         let art = match art.strip_prefix(FRAME).and_then(|a| a.split_once('\n')) {
             Some((path, artwork)) => {
-                if let Some(jpeg) = crate::plugins::youtube::frame_of(std::path::Path::new(path), at.unwrap_or(0.0)) {
+                if let Some(jpeg) = crate::frames::frame_of(std::path::Path::new(path), at.unwrap_or(0.0)) {
                     return Outcome::Handled(jpeg);
                 }
                 if artwork.is_empty() {
@@ -735,13 +745,6 @@ fn words(args: &[String], what: &str) -> Result<String> {
 pub fn actions() -> Vec<ActionDescriptor> {
     use crate::actions::ActionDescriptor as A;
     vec![
-        A::new("kodi.find", "kodi", "kodi: find in the library", |cx, a| find(cx.tv, &words(a, "a title")?).map(Into::into))
-            .args("<words>")
-            .key('F')
-            .text("Find in Kodi:", "a film or show's title"),
-        A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?).map(Into::into))
-            .args("<words>")
-            .text("Play in Kodi:", "a film or show's title"),
         A::new("kodi.subtitles", "kodi", "kodi: next subtitles", |cx, a| match a.first().map(String::as_str) {
             None => subtitles(cx.tv, "next").map(Into::into),
             Some(how @ ("next" | "off" | "on" | "previous")) => subtitles(cx.tv, how).map(Into::into),
@@ -765,6 +768,13 @@ pub fn actions() -> Vec<ActionDescriptor> {
         })
         .args("[clean]")
         .key('L'),
+        A::new("kodi.find", "kodi", "kodi: find in the library", |cx, a| find(cx.tv, &words(a, "a title")?).map(Into::into))
+            .args("<words>")
+            .key('F')
+            .text("Find in Kodi:", "a film or show's title"),
+        A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?).map(Into::into))
+            .args("<words>")
+            .text("Play in Kodi:", "a film or show's title"),
         A::new("kodi.clean", "kodi", "kodi: forget videos that are gone (library clean)", |cx, _| clean(cx.tv))
             .confirm("Remove the videos Kodi can't find any more from its library?"),
         A::new("kodi.notify", "kodi", "kodi: show a notification", |cx, a| notify(cx.tv, &words(a, "a message")?).map(Into::into))
@@ -799,6 +809,10 @@ fn ask(prompt: &str, default: &str) -> Result<String> {
 impl crate::pairing::Pairing for KodiLogin {
     fn id(&self) -> &'static str {
         PAIRING
+    }
+    // only with a password: its diagnose check says when
+    fn optional(&self) -> bool {
+        true
     }
     fn name(&self) -> &'static str {
         "Kodi's remote control (JSON-RPC)"

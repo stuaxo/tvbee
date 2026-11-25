@@ -3,7 +3,6 @@
 
 use super::*;
 
-pub(super) const MEM_HISTORY: usize = 600;
 /// Height of the memory graph.
 pub(super) const GRAPH_ROWS: u16 = 3;
 
@@ -207,7 +206,7 @@ impl App {
         let area = outer.inner(f.area());
         f.render_widget(outer, f.area());
 
-        let bs = buttons(self.mode, self.snap.as_ref().is_some_and(|s| s.exact), self.ambi_supported);
+        let bs = buttons(self.mode, self.st.snap.as_ref().is_some_and(|s| s.exact), self.panel_id().is_some());
         let places = flow(&bs, area.width);
         let rows = places.iter().map(|(r, _)| r + 1).max().unwrap_or(1);
         let [body, _, footer, status] = Layout::vertical([
@@ -234,7 +233,7 @@ impl App {
         } else {
             body
         };
-        let body = if self.ambi_open && self.ambi_supported {
+        let body = if self.ambi_open && self.panel_id().is_some() {
             let want = self.ambilight_height();
             let h = want.min(body.height.saturating_sub(4));
             let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
@@ -274,7 +273,7 @@ impl App {
             self.hits.push((rect, Hit::Input(b.input.clone())));
         }
 
-        let line = match &self.error {
+        let line = match &self.st.error {
             Some(e) => Line::from(format!("! {e}")).style(Style::new().fg(Color::Red)),
             None => Line::from(self.note.clone()).style(Style::new().add_modifier(Modifier::ITALIC)),
         };
@@ -292,7 +291,7 @@ impl App {
         // (line, what clicking it does)
         let mut lines: Vec<(Line, Option<Hit>)> = Vec::new();
         let settling = self.settling_label();
-        match &self.snap {
+        match &self.st.snap {
             None => lines.push((Line::from("waiting for the TV...").italic(), None)),
             Some(s) => {
                 match &s.activity {
@@ -303,7 +302,7 @@ impl App {
                     }
                     Some(a) => {
                         let mut what = vec![label("what"), Span::raw(a.what.clone()).bold()];
-                        if self.seeded {
+                        if self.st.seeded {
                             what.push(Span::styled("  (last seen; waiting for the TV...)", Style::new().fg(Color::DarkGray).italic()));
                         }
                         lines.push((Line::from(what), None));
@@ -319,7 +318,7 @@ impl App {
                         }
                         if let Some(mut p) = a.progress {
                             if !p.paused {
-                                p.position += self.at.elapsed().as_secs_f64();
+                                p.position += self.st.at.elapsed().as_secs_f64();
                                 if let Some(d) = p.duration {
                                     p.position = p.position.min(d);
                                 }
@@ -351,7 +350,7 @@ impl App {
                 let vol_w = width.saturating_sub(9 + 8).clamp(10, 40);
                 // this refresh's volume, else the last one: as it is while
                 // recent, greyed once it's old; a grey empty bar before any
-                let (known, stale) = volume_shown(s.volume, self.last_volume.map(|(v, at)| (v, at.elapsed())));
+                let (known, stale) = volume_shown(s.volume, self.st.last_volume.map(|(v, at)| (v, at.elapsed())));
                 let vol_hit = Some(Hit::Volume { x0: body.x + LABEL, width: u16::try_from(vol_w).unwrap_or(u16::MAX) });
                 let (vol, hit) = match (known, stale, s.muted) {
                     (_, _, Some(true)) => (
@@ -394,7 +393,7 @@ impl App {
     }
 
     pub(super) fn panel_disks(&self) -> Vec<(&'static str, info::Disk)> {
-        self.snap.as_ref().map_or_else(Vec::new, |s| {
+        self.st.snap.as_ref().map_or_else(Vec::new, |s| {
             info::interesting_disks(&s.system.disks).into_iter().map(|(l, d)| (l, d.clone())).collect()
         })
     }
@@ -412,7 +411,7 @@ impl App {
             .border_style(Style::new().fg(Color::DarkGray));
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let Some(s) = &self.snap else { return };
+        let Some(s) = &self.st.snap else { return };
         let sys = &s.system;
         let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(Color::DarkGray));
         let width = usize::from(inner.width);
@@ -485,8 +484,8 @@ impl App {
     pub(super) fn draw_mem_graph(&self, f: &mut Frame, rect: ratatui::layout::Rect, total_mb: u64) {
         let x = rect.x + 9;
         let w = rect.width.saturating_sub(9 + 1);
-        let n = usize::from(w).min(self.mem_history.len());
-        let recent = &self.mem_history[self.mem_history.len() - n..];
+        let n = usize::from(w).min(self.st.mem_history.len());
+        let recent = &self.st.mem_history[self.st.mem_history.len() - n..];
         let hot = recent.last().is_some_and(|u| total_mb > 0 && *u * 10 >= total_mb * 9);
         let graph = ratatui::widgets::Sparkline::default()
             .data(recent)

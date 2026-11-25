@@ -42,6 +42,10 @@ impl Saved {
     }
 }
 
+/// Finishing a pairing a front end started, with what the user typed (the
+/// PIN the TV shows); returns what to save.
+pub type Finish = Box<dyn FnOnce(&Tv, &str) -> Result<Saved> + Send>;
+
 /// A service tveee can pair with.
 pub trait Pairing: Sync {
     /// Short id: `tveee pair <id>`.
@@ -53,6 +57,16 @@ pub trait Pairing: Sync {
     fn how(&self) -> &'static str;
     /// Do the pairing (talking to the user as needed); returns what to save.
     fn pair(&self, tv: &Tv) -> Result<Saved>;
+    /// Only needed sometimes (Kodi: with a password): `diagnose` doesn't
+    /// list it as missing; the plugin's own check says if it's needed.
+    fn optional(&self) -> bool {
+        false
+    }
+    /// For front ends: start pairing (the TV shows a PIN), to finish with
+    /// what the user types. None: it can't be done that way.
+    fn start(&self, _tv: &Tv) -> Option<Result<Finish>> {
+        None
+    }
     /// After saving: a quick read showing it works, as a line to print.
     fn check(&self, _tv: &Tv, _saved: &Saved) -> Option<String> {
         None
@@ -61,6 +75,16 @@ pub trait Pairing: Sync {
 
 static REGISTRY: std::sync::OnceLock<Vec<&'static dyn Pairing>> = std::sync::OnceLock::new();
 
+/// Before `install` (main installs first): none; in tests, every plugin's.
+#[cfg(not(test))]
+fn not_installed() -> Vec<&'static dyn Pairing> {
+    Vec::new()
+}
+#[cfg(test)]
+fn not_installed() -> Vec<&'static dyn Pairing> {
+    crate::plugins::all().iter().flat_map(|p| (p.pairings)()).collect()
+}
+
 /// Set the pairings of the enabled plugins (main does).
 pub fn install(pairings: Vec<&'static dyn Pairing>) {
     let _ = REGISTRY.set(pairings);
@@ -68,7 +92,7 @@ pub fn install(pairings: Vec<&'static dyn Pairing>) {
 
 /// Every pairing. Without [`install`] (tests) that's every plugin's.
 pub fn all() -> &'static [&'static dyn Pairing] {
-    REGISTRY.get_or_init(|| crate::plugins::all().iter().flat_map(|p| (p.pairings)()).collect())
+    REGISTRY.get_or_init(not_installed)
 }
 
 pub fn by_id(id: &str) -> Option<&'static dyn Pairing> {

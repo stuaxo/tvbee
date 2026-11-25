@@ -138,6 +138,17 @@ impl Tv {
     /// `adb connect` (whose error, e.g. the TV being off, is the one returned)
     /// and run it again.
     fn run(&self, args: &[&str]) -> Result<Output> {
+        // answered from a recording (`crate::mock`), or recorded
+        let what: Vec<&str> = std::iter::once("adb").chain(args.iter().copied()).collect();
+        if let Some(answer) = crate::mock::replay(&what) {
+            return answer.map(|stdout| Output { status: Default::default(), stdout, stderr: Vec::new() });
+        }
+        let result = self.run_adb(args);
+        crate::mock::record(&what, result.as_ref().map(|o| o.stdout.as_slice()).map_err(ToString::to_string));
+        result
+    }
+
+    fn run_adb(&self, args: &[&str]) -> Result<Output> {
         let started = std::time::Instant::now();
         let go = || Proc::new(adb_program()).arg("-s").arg(self.serial()).args(args).output().map_err(adb_err);
         let mut out = go()?;

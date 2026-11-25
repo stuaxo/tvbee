@@ -10,7 +10,7 @@ use crate::plugins::apps::{self, Kind};
 use crate::plugins::media::MediaInfo;
 use crate::tv::Tv;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Activity {
     /// e.g. "Watching YouTube"
     pub what: String,
@@ -187,15 +187,39 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
     }
 }
 
+/// A plugin's way of telling which app a host package is showing (Philips:
+/// which NetTV app its browser has open), registered with
+/// `Plugin::with_namers`.
+#[derive(Clone, Copy)]
+pub struct Namer {
+    pub package: &'static str,
+    pub name: fn(&Tv) -> Option<String>,
+}
+
+static NAMERS: std::sync::OnceLock<Vec<Namer>> = std::sync::OnceLock::new();
+
+/// Set the enabled plugins' namers (main does).
+pub fn install_namers(namers: Vec<Namer>) {
+    let _ = NAMERS.set(namers);
+}
+
+fn namer(pkg: &str) -> Option<&'static Namer> {
+    NAMERS.get()?.iter().find(|n| n.package == pkg)
+}
+
+/// Whether [`named`] can say more about `pkg` (it costs an adb call).
+#[cfg_attr(not(feature = "engine"), allow(dead_code))]
+pub fn has_namer(pkg: &str) -> bool {
+    namer(pkg).is_some()
+}
+
 /// `who`, more exactly where the TV can say: which NetTV app the NetTV
 /// browser is showing (iPlayer, ...).
 pub fn named(tv: &Tv, pkg: &str, who: Option<(String, Kind)>) -> Option<(String, Kind)> {
-    if pkg == crate::plugins::philips::NETTV_BROWSER {
-        if let Some(name) = crate::plugins::philips::nettv_app(tv) {
-            return Some((name, Kind::Video));
-        }
+    match namer(pkg).and_then(|n| (n.name)(tv)) {
+        Some(name) => Some((name, Kind::Video)),
+        None => who,
     }
-    who
 }
 
 /// `a`, filled in from an app's own player API when it says what's playing

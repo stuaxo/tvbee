@@ -117,7 +117,7 @@ fn do_action(c: &Ctx, args: &[String]) -> Result<()> {
         Some(a) => a.run.call(c, &args[1..]),
         None => {
             // one of a plugin's that isn't enabled?
-            let all = crate::plugins::all();
+            let all = (c.all)();
             if let Some((p, s)) = all.iter().zip(&c.plugins).find(|(p, _)| (p.actions)().iter().any(|a| a.id == id)) {
                 return failed(format!(
                     "do: '{id}' is in the '{}' plugin, which is not enabled for this TV ({}); see 'tveee plugins'",
@@ -164,7 +164,7 @@ fn plugins_cmd(c: &Ctx, args: &[String]) -> Result<()> {
         Some("--refresh") => {
             let overrides = plugin::parse_overrides(&std::env::var("TVEEE_PLUGINS").unwrap_or_default());
             refreshed = plugin::resolve(
-                &crate::plugins::all(),
+                &(c.all)(),
                 &c.tv,
                 Mode::Refresh,
                 &overrides,

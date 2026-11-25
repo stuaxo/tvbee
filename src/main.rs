@@ -1,9 +1,12 @@
 mod devtools;
+#[cfg(feature = "engine")]
+mod engine;
 mod dotenv;
 mod actions;
 mod crypto;
 mod error;
 mod favourites;
+mod frames;
 mod http;
 mod lineups;
 mod https;
@@ -11,13 +14,15 @@ mod keys;
 mod labels;
 mod log;
 mod mdns;
+mod mock;
 mod more;
 mod nowplaying;
 mod options;
 mod plugin;
-#[cfg(feature = "ui")]
+#[cfg(feature = "engine")]
 mod preview;
 mod pairing;
+mod panel;
 mod plugins;
 mod provider;
 mod registry;
@@ -41,6 +46,10 @@ pub struct Ctx {
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub menu: Vec<actions::ActionDescriptor>,
     pub plugins: Vec<PluginState>,
+    /// Every plugin, enabled or not (`plugins --refresh` probes them all).
+    pub all: fn() -> Vec<plugin::Plugin>,
+    /// The enabled plugins' parts of `tveee diagnose`.
+    pub diagnoses: Vec<fn(&Tv) -> Vec<plugin::Finding>>,
 }
 
 fn main() {
@@ -75,6 +84,8 @@ fn main() {
     plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
     provider::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.providers)()).collect());
     pairing::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.pairings)()).collect());
+    panel::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.panels)()).collect());
+    nowplaying::install_namers(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.namers)()).collect());
     let actions: Vec<actions::ActionDescriptor> = all
         .iter()
         .zip(&states)
@@ -82,7 +93,8 @@ fn main() {
         .flat_map(|(p, _)| (p.actions)())
         .collect();
     let menu = actions.iter().filter(|a| a.key.is_some()).copied().collect();
-    let ctx = Ctx { tv, commands, actions, menu, plugins: states };
+    let diagnoses = all.iter().zip(&states).filter(|(_, s)| s.enabled).map(|(p, _)| p.diagnose).collect();
+    let ctx = Ctx { tv, commands, actions, menu, plugins: states, all: plugins::all, diagnoses };
 
     // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {

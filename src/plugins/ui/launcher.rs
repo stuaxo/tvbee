@@ -55,125 +55,6 @@ pub fn choice_action(c: AppChoice, e: &Entry) -> (Option<Action>, bool) {
     }
 }
 
-/// A row in the launcher.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Entry {
-    pub name: String,
-    pub alias: Option<&'static str>,
-    /// What to pass to `apps::start`.
-    pub target: String,
-    pub package: String,
-    /// What kind of app it is, shown beside apps without an alias ("player").
-    pub tag: Option<&'static str>,
-    pub tab: AppTab,
-    /// The heading it's listed under in the Other tab.
-    pub section: &'static str,
-}
-
-/// A package's friendly name, for the status line.
-pub fn app_name(pkg: &str) -> String {
-    apps::by_package(pkg).map_or_else(|| crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()), |a| list_name(a.name))
-}
-
-/// Other-tab headings, in the order they're shown.
-pub const SECTIONS: &[&str] = &["Other home apps", "Video & music", "Players", "Live TV", "Stores", "Other apps"];
-
-pub(super) fn section_of(kind: apps::Kind) -> &'static str {
-    match kind {
-        apps::Kind::Launcher => SECTIONS[0],
-        apps::Kind::Video | apps::Kind::Music => SECTIONS[1],
-        apps::Kind::Player => SECTIONS[2],
-        apps::Kind::LiveTv => SECTIONS[3],
-        apps::Kind::Store => SECTIONS[4],
-        apps::Kind::Other => SECTIONS[5],
-    }
-}
-
-/// The launcher's rows. Apps tab: the aliased apps, `home` standing for the
-/// default home app. Other tab: home apps that aren't the default, then the
-/// rest of the TV-launcher apps, by section.
-pub fn launcher_entries(known: &[&'static apps::App], guessed: &[apps::Guess], default_home: Option<&str>) -> Vec<Entry> {
-    let is_default = |pkg: &str| default_home == Some(pkg);
-    let mut rows: Vec<Entry> = Vec::new();
-    let mut others: Vec<Entry> = Vec::new();
-    for a in known {
-        let pkg = a.package();
-        let other_home = a.kind == apps::Kind::Launcher && a.target != "@home";
-        if other_home && is_default(pkg) {
-            // that's what "home" opens
-            continue;
-        }
-        let e = Entry {
-            // "the home screen" says nothing about which one; the package does
-            name: if other_home { crate::labels::name(pkg).unwrap_or_else(|| pkg.to_string()) } else { list_name(a.name) },
-            alias: a.alias,
-            target: a.alias.unwrap_or(a.target).to_string(),
-            package: pkg.to_string(),
-            tag: None,
-            tab: if other_home { AppTab::Other } else { AppTab::Known },
-            section: section_of(a.kind),
-        };
-        if other_home { others.push(e) } else { rows.push(e) }
-    }
-    for g in guessed {
-        if is_default(&g.package) || rows.iter().chain(&others).any(|r| r.package == g.package) {
-            continue;
-        }
-        let Some(component) = g.component.clone() else { continue };
-        let table = apps::by_package(&g.package);
-        // generic table names ("the home screen", "a NetTV app") don't say
-        // which app this is; the package does
-        // which app this is; its own name does (or failing that, its package)
-        let name = match table {
-            Some(a) if !a.name.starts_with("a ") && !a.name.starts_with("the ") => list_name(a.name),
-            _ => crate::labels::name(&g.package).unwrap_or_else(|| g.package.clone()),
-        };
-        let kind = table.map_or(g.kind, |a| a.kind);
-        let tag = (kind != apps::Kind::Other).then(|| kind.as_str());
-        others.push(Entry { name, alias: None, target: component, package: g.package.clone(), tag, tab: AppTab::Other, section: section_of(kind) });
-    }
-    let order = |e: &Entry| SECTIONS.iter().position(|s| *s == e.section).unwrap_or(SECTIONS.len());
-    others.sort_by_key(|e| (order(e), e.name.to_lowercase()));
-    rows.extend(others);
-    rows
-}
-
-/// The launcher's tabs: apps tveee has aliases for, and the rest of the
-/// TV-launcher apps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppTab {
-    Known,
-    Other,
-}
-
-impl AppTab {
-    pub fn other(self) -> AppTab {
-        if self == AppTab::Known { AppTab::Other } else { AppTab::Known }
-    }
-
-    pub fn holds(self, e: &Entry) -> bool {
-        e.tab == self
-    }
-}
-
-/// How many lines a tab draws: its entries, plus section headings on Other.
-pub fn tab_rows(all: &[Entry], tab: AppTab) -> usize {
-    let list = tab_list(all, tab);
-    let headings = if tab == AppTab::Other {
-        let mut s: Vec<&str> = list.iter().map(|e| e.section).collect();
-        s.dedup();
-        s.len()
-    } else {
-        0
-    };
-    list.len() + headings
-}
-
-/// The rows of one tab.
-pub fn tab_list(all: &[Entry], tab: AppTab) -> Vec<Entry> {
-    all.iter().filter(|e| tab.holds(e)).cloned().collect()
-}
-
 /// Keys in the launcher (`list` is the current tab's rows): arrows + Enter,
 /// a letter to jump to the next app whose alias (or name) starts with it, so
 /// every letter jumps; Tab, ← or → switch tabs; Esc or Backspace close.
@@ -203,14 +84,14 @@ pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Over
 
 impl App {
     /// Carry out choice `at` of the actions pop-up for launcher row `sel`.
-    pub(super) fn run_choice(&mut self, tab: AppTab, sel: usize, at: usize, actions: &Sender<Action>) {
-        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+    pub(super) fn run_choice(&mut self, tab: AppTab, sel: usize, at: usize, actions: &Handle) {
+        let rows = tab_list(self.st.apps_list(), tab);
         let Some(e) = rows.get(sel) else {
             self.overlay = Overlay::None;
             return;
         };
-        let running = self.running.contains(&e.package);
-        let Some(choice) = app_choices(e, running, self.fixed.contains(&e.package)).get(at).copied() else { return };
+        let running = self.st.running.contains(&e.package);
+        let Some(choice) = app_choices(e, running, self.st.fixed.contains(&e.package)).get(at).copied() else { return };
         match choice_action(choice, e) {
             // done: back to the list, with what's running brought up to date
             (Some(a), _) => {
@@ -224,9 +105,9 @@ impl App {
     }
 
     /// Keys in the actions pop-up.
-    pub(super) fn choice_key(&mut self, tab: AppTab, sel: usize, at: usize, code: KeyCode, actions: &Sender<Action>) {
-        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
-        let n = rows.get(sel).map_or(1, |e| app_choices(e, self.running.contains(&e.package), self.fixed.contains(&e.package)).len());
+    pub(super) fn choice_key(&mut self, tab: AppTab, sel: usize, at: usize, code: KeyCode, actions: &Handle) {
+        let rows = tab_list(self.st.apps_list(), tab);
+        let n = rows.get(sel).map_or(1, |e| app_choices(e, self.st.running.contains(&e.package), self.st.fixed.contains(&e.package)).len());
         match code {
             KeyCode::Up => self.overlay = Overlay::AppActions { tab, sel, at: (at + n - 1) % n },
             KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::AppActions { tab, sel, at: (at + 1) % n },
@@ -238,8 +119,8 @@ impl App {
 
     /// The launcher pop-up; `behind` another pop-up it's dimmed and inert.
     pub(super) fn draw_apps(&mut self, f: &mut Frame, tab: AppTab, sel: usize, behind: bool) {
-        let pkg = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
-        let all = self.apps.as_deref().unwrap_or_default();
+        let pkg = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
+        let all = self.st.apps_list();
         let list = tab_list(all, tab);
         let show_pkgs = crate::options::get(crate::options::SHOW_PACKAGES);
         // the tab labels, with counts
@@ -266,7 +147,7 @@ impl App {
         );
         // (line, the entry it shows); section headings show none
         let mut rows: Vec<(Line, Option<usize>)> = Vec::new();
-        if self.apps.is_none() {
+        if self.st.apps.is_none() {
             rows.push((Line::from("looking for installed apps...").italic(), None));
         } else if list.is_empty() {
             rows.push((Line::from("none on this TV").italic(), None));
@@ -281,7 +162,7 @@ impl App {
             }
             let on = if Some(e.package.as_str()) == pkg.as_deref() { "  (on now)" } else { "" };
             let extra = e.alias.or(e.tag).unwrap_or("");
-            let dot = match (self.running.contains(&e.package) && e.target != "home", self.fixed.contains(&e.package)) {
+            let dot = match (self.st.running.contains(&e.package) && e.target != "home", self.st.fixed.contains(&e.package)) {
                 (true, true) => "⊘",
                 (true, false) => "●",
                 _ => " ",
@@ -340,10 +221,10 @@ impl App {
     pub(super) fn draw_app_actions(&mut self, f: &mut Frame, tab: AppTab, sel: usize, at: usize) {
         // the list stays behind it, dimmed
         self.draw_apps(f, tab, sel, true);
-        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+        let rows = tab_list(self.st.apps_list(), tab);
         let Some(e) = rows.get(sel) else { return };
-        let running = self.running.contains(&e.package);
-        let fixed = self.fixed.contains(&e.package);
+        let running = self.st.running.contains(&e.package);
+        let fixed = self.st.fixed.contains(&e.package);
         let choices = app_choices(e, running, fixed);
         let mut text: Vec<Line> = vec![
             Line::from(format!(

@@ -39,9 +39,7 @@ impl Picture {
     }
 }
 
-fn program(name: &str) -> Option<PathBuf> {
-    crate::tv::search_path(name, std::env::var_os("PATH").as_deref())
-}
+use crate::frames::program;
 
 // --- scrcpy -----------------------------------------------------------------
 

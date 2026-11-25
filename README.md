@@ -239,7 +239,10 @@ module in `src/plugins/` exporting `commands()`, registered in
 Environment: `TVEEE_PLUGINS`, `TV_IP` (default 192.168.1.19), and
 `TVEEE_LOG=<file>`: a debug log of what tveee does (adb and HTTPS calls with
 their timings, and failures the ui otherwise only shows briefly, or not at
-all).
+all). For working on tveee without the TV: `TVEEE_MOCK_DIR=<dir>` with
+`TVEEE_MOCK=record` saves what the TV answers (adb, HTTP, HTTPS) in `<dir>`;
+without `TVEEE_MOCK=record`, tveee answers from there instead of asking the
+TV (use the same `TV_IP`; see `src/mock.rs`).
 
 These can also go in a `.env` file in the current directory, or in
 `~/.config/tveee/env` for every directory (see `.env.example`). Settings

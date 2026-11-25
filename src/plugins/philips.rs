@@ -174,6 +174,9 @@ impl crate::pairing::Pairing for JointSpace {
             Err(e) => format!("check failed: {e}"),
         })
     }
+    fn start(&self, tv: &Tv) -> Option<Result<crate::pairing::Finish>> {
+        Some(pair_start(tv).map(|s| Box::new(move |tv: &Tv, pin: &str| pair_finish(tv, &s, pin)) as crate::pairing::Finish))
+    }
 }
 
 pub fn pairings() -> Vec<&'static dyn crate::pairing::Pairing> {
@@ -234,6 +237,11 @@ pub fn nettv_app(tv: &Tv) -> Option<String> {
     let out = tv.shell(&[&cmd]).ok()?;
     let link = out.split_whitespace().next()?.strip_prefix("dat=")?;
     Some(nettv_app_name(link))
+}
+
+/// Which NetTV app the browser is showing (`nowplaying::named`).
+pub fn namers() -> Vec<crate::nowplaying::Namer> {
+    vec![crate::nowplaying::Namer { package: NETTV_BROWSER, name: nettv_app }]
 }
 
 /// Philips' apps: the NetTV web apps (each a small wrapper package that opens

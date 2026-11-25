@@ -29,6 +29,18 @@ fn complete(raw: &[u8]) -> bool {
 /// GET over HTTP/1.1 (Chromium's devtools server ignores 1.0 requests). Stops at
 /// Content-Length if the server keeps the socket open; decodes chunked bodies.
 pub fn get(host: &str, port: u16, path: &str) -> Result<(u16, String)> {
+    // answered from a recording (`crate::mock`), or recorded
+    let port_s = port.to_string();
+    let what = ["http", &port_s, path];
+    if let Some(answer) = crate::mock::replay(&what) {
+        return crate::mock::http_answer(&answer?);
+    }
+    let result = get_live(host, port, path);
+    crate::mock::record(&what, result.as_ref().map(|(s, b)| crate::mock::http_bytes(*s, b)).as_deref().map_err(ToString::to_string));
+    result
+}
+
+fn get_live(host: &str, port: u16, path: &str) -> Result<(u16, String)> {
     let addr = (host, port)
         .to_socket_addrs()?
         .next()

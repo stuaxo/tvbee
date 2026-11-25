@@ -57,7 +57,7 @@ pub fn load(ip: &str) -> Option<LastSeen> {
 }
 
 /// Keep what a snapshot shows (not while in standby: there's nothing to see).
-pub(super) fn of(s: &Snapshot) -> Option<LastSeen> {
+pub(crate) fn of(s: &Snapshot) -> Option<LastSeen> {
     let a = s.activity.as_ref().filter(|_| !s.standby)?;
     Some(LastSeen { what: a.what.clone(), title: a.title.clone(), volume: s.volume, at: now() })
 }
@@ -71,7 +71,7 @@ pub fn save(ip: &str, l: &LastSeen) {
 }
 
 /// A snapshot to draw until the first real one comes.
-pub(super) fn seed(l: &LastSeen) -> Snapshot {
+pub(crate) fn seed(l: &LastSeen) -> Snapshot {
     let mut a = Activity::just(l.what.clone());
     a.title = l.title.clone();
     Snapshot { activity: Some(a), ..Snapshot::default() }
