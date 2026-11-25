@@ -93,6 +93,11 @@ impl ActionDescriptor {
         ActionDescriptor { id, category, title, params: Params::None, cli: None, key: None, confirm: None, run: Run::Do(run) }
     }
 
+    /// A command-line action that prints for itself (see [`Terminal`]).
+    pub const fn terminal(id: &'static str, category: &'static str, title: &'static str, run: Terminal) -> Self {
+        ActionDescriptor { id, category, title, params: Params::None, cli: None, key: None, confirm: None, run: Run::Terminal(run) }
+    }
+
     /// Reachable as `tveee <name>`, `desc` its one-line help.
     pub const fn cli(mut self, name: &'static str, usage: &'static str, desc: &'static str) -> Self {
         self.cli = Some(Cli { name, usage, desc, long: "", aliases: &[] });

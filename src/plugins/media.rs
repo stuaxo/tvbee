@@ -1,7 +1,6 @@
 use crate::error::{failed, usage, Result};
-use crate::registry::Command;
+use crate::actions::{ActionDescriptor as A, Cx, Output};
 use crate::tv::Tv;
-use crate::Ctx;
 
 const CAT: &str = "media";
 
@@ -53,20 +52,23 @@ pub fn set_mute(tv: &Tv, want: bool) -> Result<()> {
     Ok(())
 }
 
-fn mute(c: &Ctx, _: &[String]) -> Result<()> {
-    set_mute(&c.tv, true)
+fn mute(c: &Cx, _: &[String]) -> Result<Output> {
+    set_mute(c.tv, true)?;
+    Ok("muted".into())
 }
 
-fn unmute(c: &Ctx, _: &[String]) -> Result<()> {
-    set_mute(&c.tv, false)
+fn unmute(c: &Cx, _: &[String]) -> Result<Output> {
+    set_mute(c.tv, false)?;
+    Ok("unmuted".into())
 }
 
-fn vol(c: &Ctx, args: &[String]) -> Result<()> {
+fn vol(c: &Cx, args: &[String]) -> Result<Output> {
     match args.first().map(String::as_str) {
-        Some("up") => c.tv.key(24),
-        Some("down") => c.tv.key(25),
+        Some("up") => c.tv.key(24).map(|()| "volume up".into()),
+        Some("down") => c.tv.key(25).map(|()| "volume down".into()),
         Some(n) if !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()) => {
-            c.tv.shell(&["media", "volume", "--stream", "3", "--set", n]).map(drop)
+            c.tv.shell(&["media", "volume", "--stream", "3", "--set", n])?;
+            Ok(format!("volume {n}").into())
         }
         _ => usage("usage: tveee vol up|down|<level>"),
     }
@@ -306,7 +308,7 @@ fn parse_skip_args(name: &str, args: &[String]) -> Result<(Amount, f64)> {
 }
 
 /// Send enough fast-forward (secs > 0) or rewind (secs < 0) presses.
-fn skip_by(c: &Ctx, secs: f64, step: f64) -> Result<()> {
+fn skip_by(c: &Cx, secs: f64, step: f64) -> Result<String> {
     let n = presses(secs.abs(), step);
     if n > MAX_PRESSES {
         return usage(format!("that is {n} presses at {step}s each; use a larger --step"));
@@ -314,11 +316,10 @@ fn skip_by(c: &Ctx, secs: f64, step: f64) -> Result<()> {
     let key = if secs >= 0.0 { FFW_KEY } else { REW_KEY };
     c.tv.keys(&vec![key; n as usize])?;
     let dir = if secs >= 0.0 { "forward" } else { "back" };
-    println!("skipped {dir} ~{}s ({n} x {step}s)", (n as f64 * step).round());
-    Ok(())
+    Ok(format!("skipped {dir} ~{}s ({n} x {step}s)", (n as f64 * step).round()))
 }
 
-fn session(c: &Ctx) -> Result<Session> {
+fn session(c: &Cx) -> Result<Session> {
     match parse_session(&c.tv.shell(&["dumpsys", "media_session"])?) {
         Some(s) => Ok(s),
         None => failed("no active media session on the TV (the app may not publish one)"),
@@ -332,32 +333,28 @@ fn player_in_front(tv: &crate::tv::Tv) -> Option<&'static dyn crate::provider::P
     player.playing(tv).handled().map(|_| player)
 }
 
-/// Seek through the app's own player when it has one; false: do it with keys.
-fn player_seek(c: &Ctx, to: crate::devtools::SeekTo) -> Result<bool> {
-    let Some(player) = player_in_front(&c.tv) else { return Ok(false) };
-    match player.seek(&c.tv, to).or_fallback()? {
-        Some(at) => {
-            println!("now at {}", crate::nowplaying::clock(at));
-            Ok(true)
-        }
-        None => Ok(false),
-    }
+/// Seek through the app's own player when it has one ("now at ..."); None:
+/// do it with keys.
+fn player_seek(c: &Cx, to: crate::devtools::SeekTo) -> Result<Option<String>> {
+    let Some(player) = player_in_front(c.tv) else { return Ok(None) };
+    Ok(player.seek(c.tv, to).or_fallback()?.map(|at| format!("now at {}", crate::nowplaying::clock(at))))
 }
 
-fn playpause(c: &Ctx, _: &[String]) -> Result<()> {
-    if let Some(player) = player_in_front(&c.tv) {
-        if player.play_pause(&c.tv).or_fallback()?.is_some() {
-            return Ok(());
+fn playpause(c: &Cx, _: &[String]) -> Result<Output> {
+    if let Some(player) = player_in_front(c.tv) {
+        if player.play_pause(c.tv).or_fallback()?.is_some() {
+            return Ok("play/pause".into());
         }
     }
-    c.tv.keyevent(85)
+    c.tv.keyevent(85)?;
+    Ok("play/pause".into())
 }
 
-fn skip(c: &Ctx, name: &str, args: &[String], sign: f64) -> Result<()> {
+fn skip(c: &Cx, name: &str, args: &[String], sign: f64) -> Result<Output> {
     let (amount, step) = parse_skip_args(name, args)?;
     if let Amount::Seconds(s) = amount {
-        if player_seek(c, crate::devtools::SeekTo::By(sign * s))? {
-            return Ok(());
+        if let Some(said) = player_seek(c, crate::devtools::SeekTo::By(sign * s))? {
+            return Ok(said.into());
         }
     }
     let secs = match amount {
@@ -367,26 +364,26 @@ fn skip(c: &Ctx, name: &str, args: &[String], sign: f64) -> Result<()> {
             None => return failed(format!("{name}: can't read the media duration; give a time instead")),
         },
     };
-    skip_by(c, sign * secs, step)
+    skip_by(c, sign * secs, step).map(Into::into)
 }
 
-fn ffw(c: &Ctx, args: &[String]) -> Result<()> {
+fn ffw(c: &Cx, args: &[String]) -> Result<Output> {
     skip(c, "ffw", args, 1.0)
 }
 
-fn rew(c: &Ctx, args: &[String]) -> Result<()> {
+fn rew(c: &Cx, args: &[String]) -> Result<Output> {
     skip(c, "rew", args, -1.0)
 }
 
 /// Jump to an absolute position by skipping the difference from where we are.
-fn seek(c: &Ctx, args: &[String]) -> Result<()> {
+fn seek(c: &Cx, args: &[String]) -> Result<Output> {
     let (amount, step) = parse_skip_args("seek", args)?;
     let exact = match amount {
         Amount::Seconds(s) => crate::devtools::SeekTo::At(s),
         Amount::Fraction(f) => crate::devtools::SeekTo::Fraction(f),
     };
-    if player_seek(c, exact)? {
-        return Ok(());
+    if let Some(said) = player_seek(c, exact)? {
+        return Ok(said.into());
     }
     let sess = session(c)?;
     let target = match amount {
@@ -396,30 +393,32 @@ fn seek(c: &Ctx, args: &[String]) -> Result<()> {
             None => return failed("seek: can't read the media duration; give a time instead"),
         },
     };
-    let now = sess.position_now_ms(uptime_ms(&c.tv)?) / 1000.0;
-    println!("position ~{now:.0}s -> {target:.0}s");
+    let now = sess.position_now_ms(uptime_ms(c.tv)?) / 1000.0;
+    let from = format!("position ~{now:.0}s -> {target:.0}s");
     let delta = target - now;
     if delta.abs() < step / 2.0 {
-        println!("already there (within {step}s)");
-        return Ok(());
+        return Ok(format!("{from}\nalready there (within {step}s)").into());
     }
-    skip_by(c, delta, step)
+    Ok(format!("{from}\n{}", skip_by(c, delta, step)?).into())
 }
 
-pub fn commands() -> Vec<Command> {
+
+
+pub fn actions() -> Vec<A> {
     vec![
-        Command::new(CAT, "play", "", "media play", |c, _| c.tv.key(126)),
-        Command::new(CAT, "pause", "", "media pause", |c, _| c.tv.key(127)),
-        Command::new(CAT, "stop", "", "media stop", |c, _| c.tv.key(86)),
-        Command::new(CAT, "playpause", "", "toggle play/pause", playpause),
-        Command::new(CAT, "mute", "", "mute (no-op if already muted)", mute),
-        Command::new(CAT, "unmute", "", "unmute (no-op if not muted)", unmute),
-        Command::new(CAT, "ffw", SKIP_USAGE, "fast-forward by an amount", ffw).long(SKIP_LONG),
-        Command::new(CAT, "rew", SKIP_USAGE, "rewind by an amount", rew).long(SKIP_LONG),
-        Command::new(CAT, "seek", SKIP_USAGE, "jump to a position (time or percent of the way through)", seek).long(
+        A::new("media.play", CAT, "play", |c, _| c.tv.key(126).map(|()| "play".into())).cli("play", "", "media play"),
+        A::new("media.pause", CAT, "pause", |c, _| c.tv.key(127).map(|()| "pause".into())).cli("pause", "", "media pause"),
+        A::new("media.stop", CAT, "stop", |c, _| c.tv.key(86).map(|()| "stop".into())).cli("stop", "", "media stop"),
+        A::new("media.playpause", CAT, "play/pause", playpause).cli("playpause", "", "toggle play/pause"),
+        A::new("media.mute", CAT, "mute", mute).cli("mute", "", "mute (no-op if already muted)"),
+        A::new("media.unmute", CAT, "unmute", unmute).cli("unmute", "", "unmute (no-op if not muted)"),
+        A::new("media.ffw", CAT, "fast-forward", ffw).cli("ffw", SKIP_USAGE, "fast-forward by an amount").long(SKIP_LONG),
+        A::new("media.rew", CAT, "rewind", rew).cli("rew", SKIP_USAGE, "rewind by an amount").long(SKIP_LONG),
+        A::new("media.seek", CAT, "seek", seek).cli("seek", SKIP_USAGE, "jump to a position (time or percent of the way through)").long(
             "Like ffw/rew but absolute. Apps tveee can control directly (Kodi, with its\nremote control on) seek exactly. Otherwise it reads the current position from\nthe TV's media session, then skips the difference. Needs an app that publishes a media session\nwith a position (and a duration for percentages). Approximate: accuracy is\nlimited by --step, so seeking lands within about one step of the target.",
         ),
-        Command::new(CAT, "vol", "up|down|<level>", "change volume", vol)
+        A::new("media.volume", CAT, "volume", vol)
+            .cli("vol", "up|down|<level>", "change volume")
             .long("A number sets an absolute level with 'media volume'."),
     ]
 }

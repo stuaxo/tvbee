@@ -36,8 +36,8 @@ pub fn all() -> Vec<Plugin> {
         Plugin::builtin("pairing", "pairing tveee with services on the TV", crate::pairing::commands),
         Plugin::builtin("display", "seeing the TV screen", display::commands).with_actions(display::actions),
         Plugin::builtin("info", "querying the TV's state", info::commands),
-        Plugin::builtin("input", "remote-control keys, text, inputs and channels", input::commands).with_actions(input::actions),
-        Plugin::builtin("media", "playback keys, volume and mute", media::commands),
+        Plugin::builtin("input", "remote-control keys, text, inputs and channels", Vec::new).with_actions(input::actions),
+        Plugin::builtin("media", "playback keys, volume and mute", Vec::new).with_actions(media::actions),
         Plugin::builtin("power", "sleep, wake, reboot, shutdown", Vec::new).with_actions(power::actions),
         Plugin::builtin("tools", "housekeeping and the CLI itself", tools::commands),
         Plugin::detect(
