@@ -207,13 +207,14 @@ fn keys_by_mode() {
     assert_eq!(k(KeyCode::Char('x'), Mode::Player), Input::Nothing);
 }
 
-fn items() -> Vec<MenuItem> {
-    fn ok(_: &Tv) -> Result<String> {
-        Ok(String::new())
-    }
+fn ok(_: &crate::actions::Cx, _: &[String]) -> Result<crate::actions::Output> {
+    Ok(Default::default())
+}
+
+fn items() -> Vec<ActionDescriptor> {
     vec![
-        MenuItem::new("power", 's', "sleep", ok),
-        MenuItem::new("power", 'X', "power off", ok).confirm("sure?"),
+        ActionDescriptor::new("power.sleep", "power", "sleep", ok).key('s'),
+        ActionDescriptor::new("power.off", "power", "power off", ok).key('X').confirm("sure?"),
     ]
 }
 
@@ -355,10 +356,7 @@ fn typing_a_link() {
 
 #[test]
 fn text_items_open_a_prompt() {
-    fn ok(_: &Tv, _: &str) -> Result<String> {
-        Ok(String::new())
-    }
-    let items = vec![MenuItem::with_text("apps", 'o', "open a link", "Link:", "", ok)];
+    let items = vec![ActionDescriptor::new("apps.open_link", "apps", "open a link", ok).key('o').text("Link:", "")];
     assert_eq!(pick(&items, 0), (Overlay::Prompt(0), None));
     assert_eq!(overlay_key(Overlay::Menu(0), KeyCode::Char('o'), &items), (Overlay::Prompt(0), None));
 }

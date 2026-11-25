@@ -745,20 +745,23 @@ fn notify(tv: &Tv, text: &str) -> Result<String> {
     Ok("shown in Kodi".into())
 }
 
-/// Menu items for the ui.
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    use crate::menu::MenuItem;
+/// What it can do (for now, the ui menu's items).
+pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+    use crate::actions::ActionDescriptor as A;
     vec![
-        MenuItem::new("kodi", 'k', "kodi: next subtitles", |tv| subtitles(tv, "next")),
-        MenuItem::new("kodi", 'K', "kodi: subtitles off", |tv| subtitles(tv, "off")),
-        MenuItem::new("kodi", 'a', "kodi: next audio track", |tv| audio(tv, "next")),
-        MenuItem::new("kodi", 'L', "kodi: look for new videos (library scan)", |tv| {
-            call(tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is scanning its library".into())
-        }),
-        MenuItem::with_text("kodi", 'F', "kodi: find in the library", "Find in Kodi:", "a film or show's title", |tv, q| {
+        A::new("kodi.subtitles.next", "kodi", "kodi: next subtitles", |cx, _| subtitles(cx.tv, "next").map(Into::into)).key('k'),
+        A::new("kodi.subtitles.off", "kodi", "kodi: subtitles off", |cx, _| subtitles(cx.tv, "off").map(Into::into)).key('K'),
+        A::new("kodi.audio.next", "kodi", "kodi: next audio track", |cx, _| audio(cx.tv, "next").map(Into::into)).key('a'),
+        A::new("kodi.scan", "kodi", "kodi: look for new videos (library scan)", |cx, _| {
+            call(cx.tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is scanning its library".into())
+        })
+        .key('L'),
+        A::new("kodi.find", "kodi", "kodi: find in the library", |cx, q| {
             // one line, for the status line
-            find(tv, q).map(|s| s.replace('\n', "; "))
-        }),
+            find(cx.tv, &q.join(" ")).map(|s| s.replace('\n', "; ").into())
+        })
+        .key('F')
+        .text("Find in Kodi:", "a film or show's title"),
     ]
 }
 

@@ -38,10 +38,11 @@ fn screenshot_item(tv: &crate::tv::Tv) -> Result<String> {
     Ok(format!("saved {out}{blank}"))
 }
 
-pub fn menu() -> Vec<crate::menu::MenuItem> {
+pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+    use crate::actions::ActionDescriptor as A;
     vec![
-        crate::menu::MenuItem::new(CAT, 'M', "mirror screen (scrcpy window)", mirror_item),
-        crate::menu::MenuItem::new(CAT, 'S', "screenshot (saved here)", screenshot_item),
+        A::new("display.mirror_window", CAT, "mirror screen (scrcpy window)", |cx, _| mirror_item(cx.tv).map(Into::into)).key('M'),
+        A::new("display.screenshot_here", CAT, "screenshot (saved here)", |cx, _| screenshot_item(cx.tv).map(Into::into)).key('S'),
     ]
 }
 

@@ -28,17 +28,17 @@ pub const NOT_BUILT: &[(&str, &str)] = &[
 /// Every plugin, built-in and vendor. Add new ones here.
 pub fn all() -> Vec<Plugin> {
     vec![
-        Plugin::builtin("apps", "launching and managing Android apps", apps::commands).with_menu(apps::menu),
+        Plugin::builtin("apps", "launching and managing Android apps", apps::commands).with_actions(apps::actions),
         Plugin::builtin("debloat", "disabling unwanted system apps, reversibly", debloat::commands),
         Plugin::builtin("diagnose", "finding the TV and checking the setup", diagnose::commands),
         Plugin::builtin("guide", "programme guides and content providers", guide::commands),
         Plugin::builtin("options", "tveee's own settings", crate::options::commands),
         Plugin::builtin("pairing", "pairing tveee with services on the TV", crate::pairing::commands),
-        Plugin::builtin("display", "seeing the TV screen", display::commands).with_menu(display::menu),
+        Plugin::builtin("display", "seeing the TV screen", display::commands).with_actions(display::actions),
         Plugin::builtin("info", "querying the TV's state", info::commands),
-        Plugin::builtin("input", "remote-control keys, text, inputs and channels", input::commands).with_menu(input::menu),
+        Plugin::builtin("input", "remote-control keys, text, inputs and channels", input::commands).with_actions(input::actions),
         Plugin::builtin("media", "playback keys, volume and mute", media::commands),
-        Plugin::builtin("power", "sleep, wake, reboot, shutdown", power::commands).with_menu(power::menu),
+        Plugin::builtin("power", "sleep, wake, reboot, shutdown", Vec::new).with_actions(power::actions),
         Plugin::builtin("tools", "housekeeping and the CLI itself", tools::commands),
         Plugin::detect(
             "philips",
@@ -49,11 +49,11 @@ pub fn all() -> Vec<Plugin> {
         .with_apps(philips::apps)
         .with_providers(philips::providers)
         .with_pairings(philips::pairings)
-        .with_menu(ambilight::menu),
+        .with_actions(ambilight::actions),
         Plugin::detect("kodi", "Kodi: what it's playing, exact seeking, artwork, places (its remote control)", kodi::detect, kodi::commands)
             .with_providers(kodi::providers)
             .with_pairings(kodi::pairings)
-            .with_menu(kodi::menu),
+            .with_actions(kodi::actions),
         Plugin::detect("youtube", "the YouTube app: what's on, search, looking inside it", youtube::detect, youtube::commands)
             .with_apps(youtube::apps)
             .with_providers(youtube::providers),

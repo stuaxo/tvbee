@@ -115,7 +115,7 @@ pub fn paste_text(s: &str) -> String {
 
 /// What a key does while an overlay is open: the new overlay, and maybe an
 /// action to run. Esc (or the key that opened it) closes; it never quits.
-pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Overlay, Option<Action>) {
+pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) -> (Overlay, Option<Action>) {
     let run = |i: usize| pick(items, i);
     match overlay {
         Overlay::None => (Overlay::None, None),
@@ -126,7 +126,7 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
             KeyCode::Up => (Overlay::Menu(sel.checked_sub(1).unwrap_or(items.len().saturating_sub(1))), None),
             KeyCode::Down => (Overlay::Menu(if sel + 1 >= items.len() { 0 } else { sel + 1 }), None),
             KeyCode::Enter => run(sel),
-            KeyCode::Char(c) => match items.iter().position(|it| it.key == c) {
+            KeyCode::Char(c) => match items.iter().position(|it| it.key == Some(c)) {
                 Some(i) => run(i),
                 None => (overlay, None),
             },
@@ -156,9 +156,9 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[MenuItem]) -> (Over
 }
 
 /// What a menu item does when chosen: run it, or ask first if it's risky.
-pub fn pick(items: &[MenuItem], i: usize) -> (Overlay, Option<Action>) {
+pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
     match items.get(i) {
-        Some(it) if matches!(it.run, Run::WithText { .. }) => (Overlay::Prompt(i), None),
+        Some(it) if matches!(it.params, Params::Text { .. }) => (Overlay::Prompt(i), None),
         Some(it) if it.confirm.is_some() => (Overlay::Confirm { item: i, yes: false }, None),
         Some(_) => (Overlay::None, Some(Action::Menu(i))),
         None => (Overlay::None, None),
@@ -324,7 +324,7 @@ impl App {
 
     pub(super) fn draw_prompt(&mut self, f: &mut Frame, item: usize) {
         let Some(it) = self.menu.get(item) else { return };
-        let Run::WithText { prompt, hint, .. } = it.run else { return };
+        let Params::Text { prompt, hint } = it.params else { return };
         let field = 60usize;
         // show the end of long input
         let shown: String = {
@@ -341,7 +341,7 @@ impl App {
             Line::default(),
             Line::from("⏎ go   esc cancel   paste works   ctrl-u clears").fg(Color::DarkGray),
         ];
-        let r = popup(f, &format!(" {} ", it.label), text, Color::Yellow);
+        let r = popup(f, &format!(" {} ", it.title), text, Color::Yellow);
         self.hits.push((r, Hit::Popup));
     }
 
@@ -370,7 +370,7 @@ impl App {
         };
         text.push(Line::from(vec![pick("No", !yes), Span::raw("   "), pick("Yes", yes)]));
         text.push(Line::from("y = yes   ←/→ choose   ⏎ confirm   any other key cancels").fg(Color::DarkGray));
-        let r = popup(f, &format!(" {} ", it.label), text, Color::Red);
+        let r = popup(f, &format!(" {} ", it.title), text, Color::Red);
         self.hits.push((r, Hit::Popup));
         let y = r.y + 1 + answers_row;
         // " No " then 3 spaces then " Yes "
@@ -384,13 +384,13 @@ impl App {
         let (mut lines, mut items) = (Vec::new(), Vec::new());
         let mut group = "";
         for (i, it) in self.menu.iter().enumerate() {
-            if it.group != group {
-                group = it.group;
+            if it.category != group {
+                group = it.category;
                 lines.push(Line::from(group).bold());
                 items.push(None);
             }
-            let dots = if it.confirm.is_some() || matches!(it.run, Run::WithText { .. }) { "..." } else { "" };
-            let line = Line::from(format!("  {}  {}{dots}", it.key, it.label));
+            let dots = if it.confirm.is_some() || it.params != Params::None { "..." } else { "" };
+            let line = Line::from(format!("  {}  {}{dots}", it.key.unwrap_or(' '), it.title));
             lines.push(if i == sel { line.reversed() } else { line });
             items.push(Some(i));
         }

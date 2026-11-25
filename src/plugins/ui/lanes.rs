@@ -411,7 +411,7 @@ impl Refresher {
 pub(super) struct Actor {
     pub(super) tv: Tv,
     pub(super) shared: Arc<Shared>,
-    pub(super) menu: Vec<MenuItem>,
+    pub(super) menu: Vec<ActionDescriptor>,
     /// Wakes the refresh.
     pub(super) wake: Sender<()>,
     /// The read lane (to update the running apps after launching, closing).
@@ -519,13 +519,13 @@ impl Actor {
                 }
                 None => "jumping needs a video tveee can read (currently YouTube)".into(),
             },
-            Action::Menu(i) => match self.menu.get(i).map(|m| m.run) {
-                Some(Run::Now(run)) => run(&self.tv)?,
-                Some(Run::WithText { .. }) => "that needs some text".into(),
+            Action::Menu(i) => match self.menu.get(i) {
+                Some(m) if m.params != Params::None => "that needs some text".into(),
+                Some(m) => m.run(&self.tv, &[])?.text,
                 None => "no such menu item".into(),
             },
-            Action::MenuText(i, text) => match self.menu.get(i).map(|m| m.run) {
-                Some(Run::WithText { run, .. }) => run(&self.tv, &text)?,
+            Action::MenuText(i, text) => match self.menu.get(i) {
+                Some(m) if matches!(m.params, Params::Text { .. }) => m.run(&self.tv, &[text])?.text,
                 _ => "no such menu item".into(),
             },
             Action::Launch(target) => {

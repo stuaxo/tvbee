@@ -547,35 +547,38 @@ pub fn commands() -> Vec<Command> {
     )]
 }
 
-fn item(f: fn(&Tv) -> Result<String>) -> fn(&Tv) -> Result<String> {
-    f
-}
-
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    use crate::menu::MenuItem;
+pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+    use crate::actions::ActionDescriptor as A;
     vec![
-        MenuItem::new(WHAT, 'A', "ambilight on/off", item(|tv| {
-            let on = crate::http::json(&get(tv, "/6/ambilight/power")?).and_then(|v| crate::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
-            set_power(tv, !on)
-        })),
-        MenuItem::new(WHAT, 'v', "ambilight: follow the video", item(|tv| {
-            set_style(tv, "FOLLOW_VIDEO", Some("STANDARD"), None)?;
+        A::new("ambilight.power", WHAT, "ambilight on/off", |cx, _| {
+            let on = crate::http::json(&get(cx.tv, "/6/ambilight/power")?).and_then(|v| crate::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
+            set_power(cx.tv, !on).map(Into::into)
+        })
+        .key('A'),
+        A::new("ambilight.video", WHAT, "ambilight: follow the video", |cx, _| {
+            set_style(cx.tv, "FOLLOW_VIDEO", Some("STANDARD"), None)?;
             Ok("ambilight follows the video".into())
-        })),
-        MenuItem::new(WHAT, 'u', "ambilight: follow the sound", item(|tv| {
-            set_style(tv, "FOLLOW_AUDIO", Some("ENERGY_ADAPTIVE_BRIGHTNESS"), None)?;
+        })
+        .key('v'),
+        A::new("ambilight.sound", WHAT, "ambilight: follow the sound", |cx, _| {
+            set_style(cx.tv, "FOLLOW_AUDIO", Some("ENERGY_ADAPTIVE_BRIGHTNESS"), None)?;
             Ok("ambilight follows the sound".into())
-        })),
-        MenuItem::new(WHAT, 'l', "ambilight: warm white (lounge light)", item(|tv| {
-            set_style(tv, "FOLLOW_COLOR", Some("ISF"), Some("Warm White"))?;
+        })
+        .key('u'),
+        A::new("ambilight.warm", WHAT, "ambilight: warm white (lounge light)", |cx, _| {
+            set_style(cx.tv, "FOLLOW_COLOR", Some("ISF"), Some("Warm White"))?;
             Ok("ambilight: warm white".into())
-        })),
-        MenuItem::with_text(WHAT, 'c', "ambilight: one colour (outside control)", "Colour:", "red, warm, #ff8800 or 255,136,0", |tv, text| {
-            match parse_colour(text) {
-                Some(rgb) => set_colour(tv, rgb),
+        })
+        .key('l'),
+        A::new("ambilight.colour", WHAT, "ambilight: one colour (outside control)", |cx, a| {
+            let text = a.join(" ");
+            match parse_colour(&text) {
+                Some(rgb) => set_colour(cx.tv, rgb).map(Into::into),
                 None => failed(format!("'{text}' isn't a colour tveee knows (try red, #ff8800 or 255,136,0)")),
             }
-        }),
+        })
+        .key('c')
+        .text("Colour:", "red, warm, #ff8800 or 255,136,0"),
     ]
 }
 

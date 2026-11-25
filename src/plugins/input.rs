@@ -131,22 +131,22 @@ pub fn commands() -> Vec<Command> {
 
 
 macro_rules! input_item {
-    ($key:expr, $label:expr, $code:expr) => {{
-        fn run(tv: &crate::tv::Tv) -> Result<String> {
-            tv.keyevent($code)?;
-            Ok(format!("switched to {}", $label))
+    ($id:expr, $key:expr, $label:expr, $code:expr) => {{
+        fn run(cx: &crate::actions::Cx, _: &[String]) -> Result<crate::actions::Output> {
+            cx.tv.keyevent($code)?;
+            Ok(format!("switched to {}", $label).into())
         }
-        crate::menu::MenuItem::new(CAT, $key, $label, run)
+        crate::actions::ActionDescriptor::new($id, CAT, $label, run).key($key)
     }};
 }
 
-pub fn menu() -> Vec<crate::menu::MenuItem> {
+pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
     vec![
-        input_item!('t', "TV tuner", 170),
-        input_item!('1', "HDMI 1", 243),
-        input_item!('2', "HDMI 2", 244),
-        input_item!('3', "HDMI 3", 245),
-        input_item!('4', "HDMI 4", 246),
+        input_item!("input.tuner", 't', "TV tuner", 170),
+        input_item!("input.hdmi1", '1', "HDMI 1", 243),
+        input_item!("input.hdmi2", '2', "HDMI 2", 244),
+        input_item!("input.hdmi3", '3', "HDMI 3", 245),
+        input_item!("input.hdmi4", '4', "HDMI 4", 246),
     ]
 }
 

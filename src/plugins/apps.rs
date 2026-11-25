@@ -788,9 +788,9 @@ fn others(c: &Ctx) -> Result<()> {
     Ok(())
 }
 
-/// Menu items for the ui: open a link (search has its own key, /).
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    super::open::menu()
+/// Actions: open a link (search has its own key in the ui, /).
+pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+    super::open::actions()
 }
 
 pub fn commands() -> Vec<Command> {

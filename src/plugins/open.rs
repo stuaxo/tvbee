@@ -147,15 +147,10 @@ pub fn open_link(tv: &Tv, line: &str) -> Result<String> {
     Ok(format!("opened in {}", label(&component)))
 }
 
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    vec![crate::menu::MenuItem::with_text(
-        "apps",
-        'o',
-        "open a link",
-        "Link to open:",
-        "e.g. https://youtu.be/...   or   vlc http://host/film.mkv",
-        open_link,
-    )]
+pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+    vec![crate::actions::ActionDescriptor::new("apps.open_link", "apps", "open a link", |cx, a| open_link(cx.tv, &a.join(" ")).map(Into::into))
+        .key('o')
+        .text("Link to open:", "e.g. https://youtu.be/...   or   vlc http://host/film.mkv")]
 }
 
 pub fn parse_args(args: &[String]) -> Result<(Option<&str>, &str, bool)> {

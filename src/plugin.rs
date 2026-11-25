@@ -9,7 +9,7 @@
 //! never touches the TV.
 
 use crate::error::Result;
-use crate::menu::{self, MenuItem};
+use crate::actions::{self, ActionDescriptor};
 use crate::plugins::apps::App;
 use crate::registry::Command;
 use crate::tv::Tv;
@@ -25,9 +25,10 @@ pub struct Plugin {
     pub name: &'static str,
     pub desc: &'static str,
     pub enable: Enable,
+    /// Commands that aren't actions (yet).
     pub commands: fn() -> Vec<Command>,
-    /// Actions for the `ui` menu.
-    pub menu: fn() -> Vec<MenuItem>,
+    /// What it can do (see `crate::actions`): commands, menu items, ...
+    pub actions: fn() -> Vec<ActionDescriptor>,
     /// Apps this plugin knows (added to the core list when it's enabled).
     pub apps: fn() -> Vec<App>,
     /// Content sources this plugin provides (live TV, YouTube, ...).
@@ -50,7 +51,7 @@ fn no_apps() -> Vec<App> {
 
 impl Plugin {
     pub fn builtin(name: &'static str, desc: &'static str, commands: fn() -> Vec<Command>) -> Self {
-        Plugin { name, desc, enable: Enable::Always, commands, menu: menu::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
+        Plugin { name, desc, enable: Enable::Always, commands, actions: actions::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
     }
 
     pub fn detect(
@@ -59,7 +60,7 @@ impl Plugin {
         detect: fn(&Tv) -> Result<bool>,
         commands: fn() -> Vec<Command>,
     ) -> Self {
-        Plugin { name, desc, enable: Enable::Detect(detect), commands, menu: menu::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
+        Plugin { name, desc, enable: Enable::Detect(detect), commands, actions: actions::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
     }
 
     /// Register these providers while the plugin is enabled.
@@ -80,15 +81,27 @@ impl Plugin {
         self
     }
 
-    /// Offer these actions in the `ui` menu.
-    pub fn with_menu(mut self, menu: fn() -> Vec<MenuItem>) -> Self {
-        self.menu = menu;
+    /// Add these actions (commands, ui menu items, ...).
+    pub fn with_actions(mut self, actions: fn() -> Vec<ActionDescriptor>) -> Self {
+        self.actions = actions;
         self
+    }
+
+    /// Its commands: the plain ones and those of its actions.
+    pub fn all_commands(&self) -> Vec<Command> {
+        let mut cmds = (self.commands)();
+        cmds.extend((self.actions)().iter().filter_map(ActionDescriptor::command));
+        cmds
+    }
+
+    /// Its actions with a key, for the ui menu.
+    pub fn menu(&self) -> Vec<ActionDescriptor> {
+        (self.actions)().into_iter().filter(|a| a.key.is_some()).collect()
     }
 
     /// Command names and aliases this plugin provides.
     pub fn command_names(&self) -> Vec<&'static str> {
-        (self.commands)()
+        self.all_commands()
             .iter()
             .flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied()))
             .collect()
