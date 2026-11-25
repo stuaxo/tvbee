@@ -34,6 +34,7 @@ mod launcher;
 mod ambi;
 mod overlays;
 mod drawing;
+mod last;
 #[cfg(test)]
 mod tests;
 
@@ -44,6 +45,7 @@ pub use self::preview::*;
 pub use self::launcher::*;
 pub use self::overlays::*;
 pub use self::drawing::*;
+pub use self::last::LastSeen;
 
 const CAT: &str = "ui";
 const REFRESH: Duration = Duration::from_secs(1);
@@ -176,6 +178,10 @@ enum Msg {
 struct App {
     ip: String,
     snap: Option<Snapshot>,
+    /// `snap` is what was last seen in an earlier run, not read yet.
+    seeded: bool,
+    /// What was last kept for the next run (kept again when it changes).
+    kept: Option<LastSeen>,
     /// When `snap` was taken, to move the progress bar along between refreshes.
     at: Instant,
     note: String,
@@ -223,6 +229,8 @@ struct App {
     ambi_open: bool,
     /// The guide pop-up's rows; None until fetched.
     guide: Option<std::result::Result<Guide, String>>,
+    /// The guide is being read afresh (the last copy shows meanwhile).
+    guide_loading: bool,
     /// How many GUIDE_STEPs ahead of now the guide shows.
     guide_later: i64,
     /// Where the grid's left edge is drawn now (Unix seconds); it slides
@@ -555,9 +563,12 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None };
     spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);
+    let seen = last::load(&c.tv.ip);
     let mut app = App {
         ip: c.tv.ip.clone(),
-        snap: None,
+        snap: seen.as_ref().map(last::seed),
+        seeded: seen.is_some(),
+        kept: seen.clone(),
         at: Instant::now(),
         note: String::new(),
         error: None,
@@ -578,13 +589,15 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         settle,
         ambi_supported: false,
         ambi_open: false,
-        last_volume: None,
+        // greyed: it's from before
+        last_volume: seen.as_ref().and_then(|l| Some((l.volume?, Instant::now().checked_sub(VOLUME_STALE * 2)?))),
         preview_open: false,
         preview: None,
         preview_source: "",
         preview_note: String::new(),
         picker: None,
         guide: None,
+        guide_loading: false,
         guide_later: 0,
         guide_view: 0,
         guide_slid: Instant::now(),
@@ -687,7 +700,15 @@ impl App {
                 if let Some(v) = s.volume {
                     self.last_volume = Some((v, Instant::now()));
                 }
-                (self.snap, self.at, self.error) = (Some(*s), at, None);
+                // kept for the next run's first frame, when what's on changes
+                if let Some(l) = last::of(&s) {
+                    let same = self.kept.as_ref().is_some_and(|k| (&k.what, &k.title, k.volume) == (&l.what, &l.title, l.volume));
+                    if !same {
+                        last::save(&self.ip, &l);
+                        self.kept = Some(l);
+                    }
+                }
+                (self.snap, self.at, self.error, self.seeded) = (Some(*s), at, None, false);
             }
             Msg::Note(n) => self.note = n,
             Msg::Failed(e) => {
@@ -733,6 +754,7 @@ impl App {
                     self.overlay = Overlay::Guide { tab, at: g.current.unwrap_or(first) };
                 }
                 self.guide = Some(g);
+                self.guide_loading = false;
             }
             Msg::Seeked(pos, at) => {
                 if let Some(p) = self.snap.as_mut().and_then(|s| s.activity.as_mut()).and_then(|a| a.progress.as_mut()) {
@@ -962,7 +984,7 @@ impl App {
                 }
                 self.watch_channel(id, actions);
             }
-            (Overlay::Guide { at, .. }, Some(Hit::GuideTab(t))) => self.overlay = Overlay::Guide { tab: t, at },
+            (Overlay::Guide { at, .. }, Some(Hit::GuideTab(t))) => self.guide_tab(t, at),
             (Overlay::None, Some(Hit::Open(o))) => self.open(o, actions),
             (Overlay::Guide { .. }, Some(Hit::Popup)) => {}
             // clicking outside closes it

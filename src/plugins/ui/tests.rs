@@ -62,12 +62,16 @@ fn guide_filters_and_moves() {
     let long = [ev("A long title here", 0, 1800), ev("B", 1800, 2400)];
     let row = grid_row(&long, 0, 60, 40, 0, Some(1800));
     let flat: String = row.iter().map(|(_, t, _)| t.as_str()).collect();
-    assert_eq!(flat, "│00:00 A long title here      │00:30 B  ");
+    // on the half hour: no time (the ruler says it)
+    assert_eq!(flat, "│A long title here            │B        ");
     assert_eq!(row[0], (Seg::Edge, "│".into(), false));
-    assert_eq!(row[1], (Seg::Time, "00:00 ".into(), false));
+    assert_eq!(row[1], (Seg::Title, "A long title here".into(), false));
     // the focused programme (B, from 1800) is flagged, its spaces too
     let marked: String = row.iter().filter(|(_, _, m)| *m).map(|(_, t, _)| t.as_str()).collect();
-    assert_eq!(marked, "│00:30 B  ");
+    assert_eq!(marked, "│B        ");
+    // off the half hour: the time too
+    let odd: String = grid_row(&[ev("C", 300, 1800)], 0, 60, 30, 0, None).iter().map(|(_, t, _)| t.as_str()).collect();
+    assert_eq!(odd.trim_end(), "     │00:05 C");
     // started before the left edge; and a cut-off title
     let flat: String = grid_row(&long, 300, 60, 10, 0, None).iter().map(|(_, t, _)| t.as_str()).collect();
     assert_eq!(flat, "◂A long t…");
@@ -84,6 +88,20 @@ fn guide_filters_and_moves() {
     // still loading: no body yet (the panel keeps its size with blank lines)
     let loading: Vec<String> = details_text(&e, &rows[3].channel, None, 30, 0).into_iter().map(|(l, _)| l).collect();
     assert_eq!(loading.len(), 3);
+    // access tags become words on the time line
+    e.info = Some("Teleshopping. [S,AD] [HD]".into());
+    let info = e.info.clone();
+    let lines: Vec<String> = details_text(&e, &rows[3].channel, Some(info.as_deref()), 60, 0).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(lines, ["Garage Squad", "Thu 00:00–01:00 (1h00) · 18 More 4 · documentary · subtitles · audio description · HD", "", "Teleshopping."]);
+    assert_eq!(split_tags("News. [SL]"), ("News.", vec!["signed"]));
+    assert_eq!(split_tags("Film [2019] [S]"), ("Film [2019]", vec!["subtitles"]));
+    assert_eq!(split_tags("[S]"), ("", vec!["subtitles"]));
+    assert_eq!(split_tags("Nothing here"), ("Nothing here", vec![]));
+    // switching tabs: the highlight stays if shown, else what's on, else the first
+    assert_eq!(guide_tab_pick(&[159, 143], 143, Some(159)), 143);
+    assert_eq!(guide_tab_pick(&[159, 143], 156, Some(159)), 159);
+    assert_eq!(guide_tab_pick(&[12], 156, Some(159)), 12);
+    assert_eq!(guide_tab_pick(&[], 156, None), 156);
     // steps land on the half hour
     assert_eq!(guide_time_at(1_000, 0), 1_000);
     assert_eq!(guide_time_at(1_000, 1), 1_800);
@@ -531,4 +549,14 @@ fn coalesces_repeats() {
     // typing fast: one `input text`
     let t = |s: &str| Text(s.into());
     assert_eq!(coalesce(vec![t("c"), t("a"), t("t"), Key(66), t("s")]), vec![t("cat"), Key(66), t("s")]);
+}
+
+#[test]
+fn last_seen_round_trip() {
+    let l = LastSeen { what: "Watching YouTube".into(), title: Some("A video".into()), volume: Some((12, 60)), at: 1_700_000_000 };
+    assert_eq!(super::last::parse(&super::last::format(&l)), Some(l));
+    let bare = LastSeen { what: "Live TV".into(), title: None, volume: None, at: 5 };
+    assert_eq!(super::last::parse(&super::last::format(&bare)), Some(bare));
+    assert_eq!(super::last::parse("what=x\n"), None); // no time
+    assert_eq!(super::last::parse(""), None);
 }

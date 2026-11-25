@@ -159,8 +159,13 @@ pub(super) fn textwrap(s: &str, w: usize) -> Vec<String> {
 
 /// A bordered box centred over the screen, sized to its text. Returns where.
 pub(super) fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {
+    popup_titled(f, title, "", text, border)
+}
+
+/// [`popup`] with a second title at the top right (a position, a count).
+pub(super) fn popup_titled(f: &mut Frame, title: &str, right: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {
     let h = u16::try_from(text.len()).unwrap_or(u16::MAX).saturating_add(2);
-    let widest = text.iter().map(Line::width).max().unwrap_or(0).max(title.chars().count());
+    let widest = text.iter().map(Line::width).max().unwrap_or(0).max(title.chars().count() + right.chars().count() + 1);
     let w = u16::try_from(widest).unwrap_or(u16::MAX).saturating_add(4);
     let area = f.area();
     let rect = ratatui::layout::Rect {
@@ -171,7 +176,12 @@ pub(super) fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) 
     };
     f.render_widget(ratatui::widgets::Clear, rect);
     f.render_widget(
-        Paragraph::new(text).block(Block::bordered().title(title.to_string()).border_style(Style::new().fg(border))),
+        Paragraph::new(text).block(
+            Block::bordered()
+                .title(title.to_string())
+                .title(Line::from(right.to_string()).right_aligned())
+                .border_style(Style::new().fg(border)),
+        ),
         rect,
     );
     rect
@@ -292,7 +302,11 @@ impl App {
                         lines.push((Line::from(vec![label("what"), Span::raw(label_text).italic()]), None));
                     }
                     Some(a) => {
-                        lines.push((Line::from(vec![label("what"), Span::raw(a.what.clone()).bold()]), None));
+                        let mut what = vec![label("what"), Span::raw(a.what.clone()).bold()];
+                        if self.seeded {
+                            what.push(Span::styled("  (last seen; waiting for the TV...)", Style::new().fg(Color::DarkGray).italic()));
+                        }
+                        lines.push((Line::from(what), None));
                         // fields that open something look like links
                         let field = |f: &nowplaying::Field| {
                             let v = Span::raw(f.value.clone());

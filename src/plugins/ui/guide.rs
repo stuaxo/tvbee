@@ -37,8 +37,8 @@ pub enum Seg {
 }
 
 /// One channel's row of the timeline grid: `width` cells from `start`,
-/// `spc` seconds a cell. A programme is `│HH:MM Title` over the cells its
-/// time covers; one that started before the left edge shows `◂Title`. Runs
+/// `spc` seconds a cell. A programme is `│Title` over the cells its time
+/// covers (`│HH:MM Title` if it starts off the ruler's half hours); one that started before the left edge shows `◂Title`. Runs
 /// of the programme starting at `focus` are flagged (to draw it marked).
 pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: usize, offset: i64, focus: Option<i64>) -> Vec<(Seg, String, bool)> {
     let mut buf = vec![(' ', Seg::Gap, false); width];
@@ -52,7 +52,10 @@ pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: 
         let mut content: Vec<(char, Seg)> = Vec::new();
         if e.start >= start {
             content.push(('│', Seg::Edge));
-            content.extend(format!("{} ", crate::plugins::guide::hhmm(e.start, offset)).chars().map(|c| (c, Seg::Time)));
+            // the ruler says the time on the hour and half hour
+            if e.start % GUIDE_STEP != 0 {
+                content.extend(format!("{} ", crate::plugins::guide::hhmm(e.start, offset)).chars().map(|c| (c, Seg::Time)));
+            }
         } else {
             content.push(('◂', Seg::Edge));
         }
@@ -101,8 +104,36 @@ pub enum Details {
     Focused,
 }
 
-/// Lines in the open details panel.
+/// Lines in the open details panel, at most and at least.
 pub(super) const DETAILS_ROWS: usize = 7;
+pub(super) const DETAILS_MIN: usize = 3;
+
+/// The guide's key help (under 80 columns), and the details panel's.
+pub(super) const GUIDE_KEYS: &str = "↑↓ choose  ←→ ½ hour  tab tabs  ⏎ watch  * favourite  ⇧tab details  esc close";
+pub(super) const GUIDE_KEYS_DETAILS: &str = "details: ↑↓ pgup/pgdn scroll  esc/⇧tab back to the guide  h hide";
+
+/// Freeview's tags at the end of a description ("... [S,AD]"), as words.
+const DVB_TAGS: [(&str, &str); 4] = [("S", "subtitles"), ("AD", "audio description"), ("SL", "signed"), ("HD", "HD")];
+
+/// A description without the access tags at its end, and what they say.
+/// Unknown tags stay in the text.
+pub fn split_tags(text: &str) -> (&str, Vec<&'static str>) {
+    let mut rest = text.trim_end();
+    let mut found: Vec<&'static str> = Vec::new();
+    while let Some(open) = rest.strip_suffix(']').and_then(|r| r.rfind('[')) {
+        let inner = &rest[open + 1..rest.len() - 1];
+        let words: Option<Vec<&'static str>> =
+            inner.split(',').map(|t| DVB_TAGS.iter().find(|(k, _)| *k == t.trim()).map(|(_, w)| *w)).collect();
+        let Some(words) = words else { break };
+        for w in words.into_iter().rev() {
+            if !found.contains(&w) {
+                found.insert(0, w);
+            }
+        }
+        rest = rest[..open].trim_end();
+    }
+    (rest, found)
+}
 
 /// The details panel's text for programme `e` on channel `ch`, wrapped to
 /// `width`: title, then when/how long/channel/genre, then the description.
@@ -111,8 +142,16 @@ pub fn details_text(e: &crate::provider::Event, ch: &crate::provider::Channel, i
     use crate::plugins::guide::{day_hhmm, hhmm};
     let mins = (e.end - e.start) / 60;
     let length = if mins >= 60 { format!("{}h{:02}", mins / 60, mins % 60) } else { format!("{mins} min") };
+    let (info, tags) = match info {
+        Some(Some(i)) => {
+            let (text, tags) = split_tags(i);
+            (Some(Some(text)), tags)
+        }
+        other => (other, Vec::new()),
+    };
     let mut meta = vec![format!("{}–{} ({length})", day_hhmm(e.start, offset), hhmm(e.end, offset)), ch.label()];
     meta.extend(e.genre_name().map(str::to_string));
+    meta.extend(tags.into_iter().map(str::to_string));
     let mut out = vec![(e.title.clone(), Seg::Title), (meta.join(" · "), Seg::Time), (String::new(), Seg::Gap)];
     match info {
         Some(Some(info)) => {
@@ -287,6 +326,13 @@ pub fn guide_shown<'a>(rows: &'a [GuideRow], tab: GuideTab, filter: &str, t: i64
     rows.iter().filter(|r| tab.holds(&r.channel) && guide_matches(r, filter, t)).collect()
 }
 
+/// Where the highlight goes on switching to a tab showing `ids`: it stays
+/// on channel `at` if it's there, else the channel that's on, else the
+/// first.
+pub fn guide_tab_pick(ids: &[u32], at: u32, current: Option<u32>) -> u32 {
+    [Some(at), current].into_iter().flatten().find(|c| ids.contains(c)).or(ids.first().copied()).unwrap_or(at)
+}
+
 /// Where a movement key takes the highlight among `ids` (shown channel ids),
 /// from channel `at` (if it's not shown, the first one).
 pub fn guide_move(ids: &[u32], at: u32, code: KeyCode) -> u32 {
@@ -326,6 +372,7 @@ impl App {
         self.guide_later = 0;
         self.guide_view = self.guide_start();
         self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
+        self.guide_loading = true;
         let _ = actions.send(Action::LoadGuide);
         // the details panel's descriptions take the TV a while the first time
         let _ = actions.send(Action::PrefetchInfo);
@@ -364,7 +411,6 @@ impl App {
     /// Keys in the guide: typing filters, ↑/↓/page keys/home/end move, ←/→
     /// go earlier/later in time, Tab switches tabs, Enter watches, Esc closes.
     pub(super) fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Sender<Action>) {
-        let mut tab = tab;
         // keys for the details panel while it has the keyboard
         if self.details == Details::Focused {
             match code {
@@ -403,7 +449,10 @@ impl App {
                 self.toggle_favourite(at, actions);
                 return;
             }
-            KeyCode::Tab => tab = tab.next(),
+            KeyCode::Tab => {
+                self.guide_tab(tab.next(), at);
+                return;
+            }
             KeyCode::Right => self.guide_later = (self.guide_later + 1).min(GUIDE_AHEAD / GUIDE_STEP),
             KeyCode::Left => self.guide_later = self.guide_later.saturating_sub(1).max(0),
             KeyCode::Backspace => {
@@ -415,6 +464,14 @@ impl App {
         let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
         // keep the highlight on its channel while it's shown; else the first
         self.overlay = Overlay::Guide { tab, at: guide_move(&ids, at, code) };
+    }
+
+    /// Switch the guide to `tab`, the highlight moving to a channel it shows.
+    pub(super) fn guide_tab(&mut self, tab: GuideTab, at: u32) {
+        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
+        let current = self.guide.as_ref().and_then(|g| g.as_ref().ok()).and_then(|g| g.current);
+        self.details_scroll = 0;
+        self.overlay = Overlay::Guide { tab, at: guide_tab_pick(&ids, at, current) };
     }
 
     /// Star or unstar channel `id`: the star changes now, and the guide is
@@ -445,9 +502,11 @@ impl App {
         let mut text: Vec<Line> = Vec::new();
         let mut ids: Vec<Option<u32>> = Vec::new();
         let mut tabs: Vec<(GuideTab, String)> = Vec::new();
+        // "12 of 191", top right
+        let mut counter = String::new();
         // (text row, x within the box, width, what clicking does) for the details panel
         let mut details_hits: Vec<(usize, u16, u16, DetailsClick)> = Vec::new();
-        let total = usize::from(area.width.saturating_sub(8)).clamp(50, 140);
+        let total = usize::from(area.width.saturating_sub(6)).clamp(50, 140);
         // the timeline grid, right of the channel names
         let ch_w = 24;
         let grid_w = total.saturating_sub(ch_w + 4).max(10);
@@ -510,9 +569,36 @@ impl App {
                 text.push(Line::from(head));
                 ids.push(None);
                 let shown = guide_shown(&g.rows, tab, &self.prompt, t);
-                // the details panel takes its rows from the list
-                let panel_h = if self.details == Details::Closed { 1 } else { DETAILS_ROWS + 1 };
-                let room = usize::from(area.height.saturating_sub(11)).saturating_sub(panel_h + 1).max(3);
+                let sel = shown.iter().position(|r| r.channel.id == at).unwrap_or(0);
+                // the details panel: the highlighted channel's programme at the guide's time
+                let picked = shown.get(sel).and_then(|r| {
+                    let (on, after) = r.at(t);
+                    on.or(after).map(|e| (e.clone(), r.channel.clone()))
+                });
+                let key = picked.as_ref().map(|(e, ch)| (ch.id, e.start));
+                if key != self.details_of {
+                    self.details_of = key;
+                    self.details_scroll = 0;
+                }
+                // its lines, and whether the description is still being read
+                let details = picked.as_ref().map(|(e, ch)| {
+                    let key = (ch.id, e.start);
+                    let info = match (e.info.as_deref(), self.infos.get(&key)) {
+                        (Some(i), _) => Some(Some(i)),
+                        (None, Some(i)) => Some(i.as_deref()),
+                        (None, None) => {
+                            if self.infos_asked.insert(key) {
+                                self.want_info = Some(key);
+                            }
+                            None
+                        }
+                    };
+                    (details_text(e, ch, info, total.saturating_sub(2), off), info.is_none())
+                });
+                // as tall as what it says, within limits; it takes its rows from the list
+                let rows = details.as_ref().map_or(DETAILS_MIN, |(all, _)| all.len().clamp(DETAILS_MIN, DETAILS_ROWS));
+                let panel_h = if self.details == Details::Closed { 1 } else { rows + 1 };
+                let room = usize::from(area.height.saturating_sub(8)).saturating_sub(panel_h + 1).max(3);
                 if shown.is_empty() {
                     let why = match (tab, self.prompt.is_empty()) {
                         (GuideTab::Favourites, true) => "no favourites yet: add channels to a favourites list on the TV".to_string(),
@@ -522,7 +608,6 @@ impl App {
                     text.push(Line::from(why).italic());
                     ids.push(None);
                 }
-                let sel = shown.iter().position(|r| r.channel.id == at).unwrap_or(0);
                 // sub-headers from the country's lineup (Entertainment, HD, ...)
                 let groups: Vec<Option<&str>> = shown.iter().map(|r| g.lineup.map(|l| l.group(r.channel.order().0))).collect();
                 for item in guide_items(&groups, sel, room) {
@@ -564,20 +649,10 @@ impl App {
                     text.push(Line::default());
                     ids.push(None);
                 }
-                // the details panel: the highlighted channel's programme at the guide's time
-                let picked = shown.get(sel).and_then(|r| {
-                    let (on, after) = r.at(t);
-                    on.or(after).map(|e| (e.clone(), r.channel.clone()))
-                });
-                let key = picked.as_ref().map(|(e, ch)| (ch.id, e.start));
-                if key != self.details_of {
-                    self.details_of = key;
-                    self.details_scroll = 0;
-                }
                 let panel_top = text.len();
                 let focused = self.details == Details::Focused;
                 let bar_style = if focused { Style::new().fg(Color::Black).bg(Color::Magenta).bold() } else { Style::new().fg(Color::Magenta) };
-                match (self.details, &picked) {
+                match (self.details, &details) {
                     (Details::Closed, _) => {
                         let what = picked.as_ref().map_or(String::new(), |(e, _)| format!(": {}", e.title));
                         text.push(Line::from(vec![Span::styled("▸ details", bar_style), Span::styled(format!("{what}   (shift+tab or click to open)"), dim)]));
@@ -587,26 +662,14 @@ impl App {
                         text.push(Line::from(vec![Span::styled("▾ details", bar_style), Span::styled("  nothing on then", dim)]));
                         details_hits.push((panel_top, 0, total as u16, DetailsClick::Hide));
                         // the same height as with something in it
-                        for k in 0..DETAILS_ROWS {
+                        for k in 0..rows {
                             text.push(Line::default());
                             details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
                         }
                     }
-                    (_, Some((e, ch))) => {
-                        let key = (ch.id, e.start);
-                        let info = match (e.info.as_deref(), self.infos.get(&key)) {
-                            (Some(i), _) => Some(Some(i)),
-                            (None, Some(i)) => Some(i.as_deref()),
-                            (None, None) => {
-                                if self.infos_asked.insert(key) {
-                                    self.want_info = Some(key);
-                                }
-                                None
-                            }
-                        };
-                        let all = details_text(e, ch, info, total.saturating_sub(2), off);
-                        self.details_scroll = self.details_scroll.min(all.len().saturating_sub(DETAILS_ROWS));
-                        let more = if info.is_none() {
+                    (_, Some((all, reading))) => {
+                        self.details_scroll = self.details_scroll.min(all.len().saturating_sub(rows));
+                        let more = if *reading {
                             "  reading descriptions from the TV...".to_string()
                         } else if all.len() > DETAILS_ROWS {
                             format!("  {}-{} of {} lines", self.details_scroll + 1, (self.details_scroll + DETAILS_ROWS).min(all.len()), all.len())
@@ -626,7 +689,7 @@ impl App {
                         let fx = (head.chars().count() + 1) as u16;
                         details_hits.push((panel_top, fx, focus_b.chars().count() as u16, if focused { DetailsClick::Unfocus } else { DetailsClick::Focus }));
                         details_hits.push((panel_top, fx + focus_b.chars().count() as u16 + 1, hide_b.len() as u16, DetailsClick::Hide));
-                        for (k, (line, seg)) in all.iter().skip(self.details_scroll).take(DETAILS_ROWS).enumerate() {
+                        for (k, (line, seg)) in all.iter().skip(self.details_scroll).take(rows).enumerate() {
                             text.push(match seg {
                                 Seg::Title => Line::from(format!(" {line}")).bold(),
                                 Seg::Time => Line::from(format!(" {line}")).fg(Color::DarkGray),
@@ -634,7 +697,7 @@ impl App {
                             });
                             details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
                         }
-                        for k in all.len().saturating_sub(self.details_scroll)..DETAILS_ROWS {
+                        for k in all.len().saturating_sub(self.details_scroll)..rows {
                             text.push(Line::default());
                             details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
                         }
@@ -644,17 +707,16 @@ impl App {
                     ids.push(None);
                 }
                 text.push(Line::default());
-                let more = if shown.len() > room { format!("  ({} of {})", sel + 1, shown.len()) } else { String::new() };
-                let keys = if focused {
-                    "details: ↑/↓ pgup/pgdn scroll  esc/shift+tab back to the guide  h hide".to_string()
-                } else {
-                    format!("↑/↓ choose  ←/→ half an hour  tab switch  ⏎/click watch  * favourite  shift+tab details  esc{more}")
-                };
+                if !shown.is_empty() {
+                    counter = format!(" {} of {} ", sel + 1, shown.len());
+                }
+                let keys = if focused { GUIDE_KEYS_DETAILS } else { GUIDE_KEYS };
                 text.push(Line::from(keys).fg(Color::DarkGray));
-                format!(" guide: {} ", g.place.as_deref().unwrap_or(g.provider))
+                let refreshing = if self.guide_loading { " (refreshing…)" } else { "" };
+                format!(" guide: {}{refreshing} ", g.place.as_deref().unwrap_or(g.provider))
             }
         };
-        let r = popup(f, &title, text, Color::Magenta);
+        let r = popup_titled(f, &title, &counter, text, Color::Magenta);
         self.hits.push((r, Hit::Popup));
         for (row, id) in ids.into_iter().enumerate() {
             if let Some(id) = id {
