@@ -229,7 +229,10 @@ module in `src/plugins/` exporting `commands()`, registered in
     tveee launch --quiet iplayer
     tveee apps --all      # offline alias list
 
-Environment: `TVEEE_PLUGINS`, `TV_IP` (default 192.168.1.19).
+Environment: `TVEEE_PLUGINS`, `TV_IP` (default 192.168.1.19), and
+`TVEEE_LOG=<file>`: a debug log of what tveee does (adb and HTTPS calls with
+their timings, and failures the ui otherwise only shows briefly, or not at
+all).
 
 These can also go in a `.env` file in the current directory, or in
 `~/.config/tveee/env` for every directory (see `.env.example`). Settings

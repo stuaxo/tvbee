@@ -8,6 +8,7 @@ mod lineups;
 mod https;
 mod keys;
 mod labels;
+mod log;
 mod mdns;
 mod menu;
 mod more;

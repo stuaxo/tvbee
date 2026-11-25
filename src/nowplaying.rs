@@ -192,7 +192,14 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
 /// if there is one. Anything amiss there: `a` as it was.
 pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: Option<Activity>) -> (Option<Activity>, Option<crate::provider::Playing>) {
     // can't say, or broke: what the media session said
-    let Some(p) = player.playing(tv).handled() else { return (a, None) };
+    let p = match player.playing(tv) {
+        crate::provider::Outcome::Handled(p) => p,
+        crate::provider::Outcome::Fallback => return (a, None),
+        crate::provider::Outcome::Failed(e) => {
+            crate::tlog!("{pkg}: its player failed, using the media session: {e}");
+            return (a, None);
+        }
+    };
     (Some(merge_playing(pkg, a, p.clone())), Some(p))
 }
 

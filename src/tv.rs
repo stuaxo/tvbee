@@ -64,6 +64,16 @@ fn clean(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).replace('\r', "")
 }
 
+/// An adb command for the log: shortened, and raw key writes summarised.
+fn loggable(args: &[&str]) -> String {
+    let all = args.join(" ");
+    let all = if all.contains("print -n '\\x") { "shell (raw key events)".to_string() } else { all };
+    match all.char_indices().nth(160) {
+        Some((i, _)) => format!("{}...", &all[..i]),
+        None => all,
+    }
+}
+
 /// Turn a failed adb run into an error carrying what adb (or the device) said.
 fn check(args: &[&str], out: Output) -> Result<Output> {
     if out.status.success() {
@@ -97,13 +107,21 @@ impl Tv {
     }
 
     fn run(&self, args: &[&str]) -> Result<Output> {
+        let started = std::time::Instant::now();
         let out = Proc::new(adb_program())
             .arg("-s")
             .arg(self.serial())
             .args(args)
             .output()
             .map_err(adb_err)?;
-        check(args, out)
+        let result = check(args, out);
+        crate::tlog!(
+            "adb {}: {}ms{}",
+            loggable(args),
+            started.elapsed().as_millis(),
+            result.as_ref().err().map(|e| format!(" FAILED: {e}")).unwrap_or_default()
+        );
+        result
     }
 
     /// `adb connect`; fails if adb can't run or the TV can't be reached.
@@ -117,6 +135,7 @@ impl Tv {
             Ok(())
         } else {
             let why = stdout.trim();
+            crate::tlog!("adb connect {}: FAILED: {why}", self.ip);
             failed(format!("can't connect to {}{}", self.ip, if why.is_empty() { String::new() } else { format!(": {why}") }))
         }
     }

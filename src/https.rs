@@ -73,7 +73,19 @@ const RETRY_FOR: std::time::Duration = std::time::Duration::from_secs(10);
 pub fn request(r: &Request) -> Result<(u16, String)> {
     let start = std::time::Instant::now();
     loop {
-        match request_once(r) {
+        let reply = request_once(r);
+        crate::tlog!(
+            "{} {}: {}ms, {}",
+            if r.body.is_some() { "POST" } else { "GET" },
+            r.url,
+            start.elapsed().as_millis(),
+            match &reply {
+                Ok((status, _)) => format!("HTTP {status}"),
+                Err(Refused(e)) => format!("refused: {e}"),
+                Err(Other(e)) => format!("FAILED: {e}"),
+            }
+        );
+        match reply {
             Err(Refused(_)) if r.retry && start.elapsed() < RETRY_FOR => std::thread::sleep(std::time::Duration::from_millis(700)),
             Err(Refused(e)) | Err(Other(e)) => return Err(e),
             Ok(reply) => return Ok(reply),

@@ -218,6 +218,11 @@ fn remote_input(code: KeyCode, mods: KeyModifiers) -> Input {
     }
 }
 
+/// A thread with a name (shown in the debug log, `TVEEE_LOG`).
+fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
+    let _ = std::thread::Builder::new().name(name.to_string()).spawn(f);
+}
+
 /// Which lane an action goes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lane {
@@ -2072,6 +2077,7 @@ impl App {
             }
             Msg::Note(n) => self.note = n,
             Msg::Failed(e) => {
+                crate::tlog!("failed: {e}");
                 // the action didn't happen: show what's really on
                 self.settling = None;
                 self.error = Some(e);
@@ -2088,7 +2094,12 @@ impl App {
 
                 }
             }
-            Msg::PreviewNote(n) => self.preview_note = n,
+            Msg::PreviewNote(n) => {
+                if !n.is_empty() && n != self.preview_note {
+                    crate::tlog!("preview: {n}");
+                }
+                self.preview_note = n;
+            }
             Msg::AskPin => {
                 self.prompt.clear();
                 self.overlay = Overlay::Pin;
@@ -3929,20 +3940,20 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let (wake_tx, wake_rx) = mpsc::channel();
     let lanes = vec![(Lane::Keys, key_tx), (Lane::Act, do_tx), (Lane::Read, read_tx.clone()), (Lane::Idle, idle_tx)];
     let sh = Arc::clone(&shared);
-    std::thread::spawn(move || route(&act_rx, &sh, &lanes));
+    spawn_named("route", move || route(&act_rx, &sh, &lanes));
     let (key_msgs, key_tv) = (msg_tx.clone(), shared.tv());
-    std::thread::spawn(move || send_keys(key_tv, &key_rx, &key_msgs));
+    spawn_named("keys", move || send_keys(key_tv, &key_rx, &key_msgs));
     let actor = Actor { tv: shared.tv(), shared: Arc::clone(&shared), menu: c.menu.clone(), wake: wake_tx, reads: read_tx, pairing: None };
     let actor_msgs = msg_tx.clone();
-    std::thread::spawn(move || actor.run(&do_rx, actor_msgs));
+    spawn_named("actions", move || actor.run(&do_rx, actor_msgs));
     let (read_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
-    std::thread::spawn(move || reads(&sh, &read_rx, &read_msgs));
+    spawn_named("reads", move || reads(&sh, &read_rx, &read_msgs));
     let (idle_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
-    std::thread::spawn(move || background(&sh, &idle_rx, idle_msgs));
+    spawn_named("background", move || background(&sh, &idle_rx, idle_msgs));
     let (preview_msgs, sh) = (msg_tx.clone(), Arc::clone(&shared));
-    std::thread::spawn(move || preview_lane(&sh, &preview_msgs));
+    spawn_named("preview", move || preview_lane(&sh, &preview_msgs));
     let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None };
-    std::thread::spawn(move || refresher.run(&wake_rx, msg_tx));
+    spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
     let _ = act_tx.send(Action::Refresh);
     let mut app = App {
         ip: c.tv.ip.clone(),
