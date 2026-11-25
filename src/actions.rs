@@ -51,6 +51,23 @@ pub enum Run {
     Terminal(Terminal),
 }
 
+impl Run {
+    /// Run it from the command line: what a [`Run::Do`] action says goes to
+    /// stdout (when it says anything).
+    pub fn call(self, c: &Ctx, args: &[String]) -> Result<()> {
+        match self {
+            Run::Terminal(f) => f(c, args),
+            Run::Do(f) => {
+                let out = f(&Cx { tv: &c.tv }, args)?;
+                if !out.text.is_empty() {
+                    println!("{}", out.text);
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// What an action needs from an interactive front end before it can run.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Params {
@@ -148,12 +165,23 @@ impl ActionDescriptor {
     /// Its command, if the command line has one.
     pub fn command(&self) -> Option<Command> {
         let c = self.cli?;
-        let run = match self.run {
-            Run::Do(f) => crate::registry::Run::Action(f),
-            Run::Terminal(f) => crate::registry::Run::Cli(f),
-        };
-        Some(Command { category: self.category, name: c.name, usage: c.usage, desc: c.desc, long: c.long, aliases: c.aliases, run })
+        Some(Command { category: self.category, name: c.name, usage: c.usage, desc: c.desc, long: c.long, aliases: c.aliases, run: self.run })
     }
+}
+
+/// The action with this id.
+pub fn find<'a>(actions: &'a [ActionDescriptor], id: &str) -> Option<&'a ActionDescriptor> {
+    actions.iter().find(|a| a.id == id)
+}
+
+/// The action id closest to a mistyped `id`, if one is close enough.
+pub fn suggest(actions: &[ActionDescriptor], id: &str) -> Option<&'static str> {
+    actions
+        .iter()
+        .map(|a| (crate::registry::distance(id, a.id), a.id))
+        .filter(|(d, n)| crate::registry::close_enough(id, n, *d))
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, n)| n)
 }
 
 #[cfg(test)]

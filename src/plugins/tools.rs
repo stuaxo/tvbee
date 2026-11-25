@@ -101,6 +101,36 @@ fn commands_list(c: &Ctx, _: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// `tveee do [<id> [args...]]`: run any action by id, or list them.
+fn do_action(c: &Ctx, args: &[String]) -> Result<()> {
+    let Some(id) = args.first() else {
+        let mut all: Vec<_> = c.actions.iter().collect();
+        all.sort_by_key(|a| a.id);
+        let width = all.iter().map(|a| a.id.len()).max().unwrap_or(0);
+        for a in all {
+            let more = if a.params != crate::actions::Params::None { "..." } else { "" };
+            println!("{:<width$}  {}{more}", a.id, a.title);
+        }
+        return Ok(());
+    };
+    match crate::actions::find(&c.actions, id) {
+        Some(a) => a.run.call(c, &args[1..]),
+        None => {
+            // one of a plugin's that isn't enabled?
+            let all = crate::plugins::all();
+            if let Some((p, s)) = all.iter().zip(&c.plugins).find(|(p, _)| (p.actions)().iter().any(|a| a.id == id)) {
+                return failed(format!(
+                    "do: '{id}' is in the '{}' plugin, which is not enabled for this TV ({}); see 'tveee plugins'",
+                    p.name,
+                    s.source.label()
+                ));
+            }
+            let hint = crate::actions::suggest(&c.actions, id).map_or(String::new(), |s| format!(" - did you mean '{s}'?"));
+            usage(format!("do: no action '{id}'{hint} (see 'tveee do')"))
+        }
+    }
+}
+
 fn completion(_: &Ctx, _: &[String]) -> Result<()> {
     print!("{COMPLETION}");
     Ok(())
@@ -158,6 +188,13 @@ pub fn actions() -> Vec<ActionDescriptor> {
         ActionDescriptor::terminal("tools.plugins", CAT, "list plugins and whether they are enabled", plugins_cmd).cli("plugins", "[--refresh]", "list plugins and whether they are enabled").long(
             "Vendor plugins are enabled by detection, cached per TV in ~/.cache/tveee.\n  --refresh  re-probe the TV now (contacts it) and update the cache\nTVEEE_PLUGINS=philips,-other forces plugins on or off.",
         ),
+        ActionDescriptor::terminal("tools.do", CAT, "run an action by id", do_action)
+            .cli("do", "[<id> [args...]]", "run any action by its id (list them with no id)")
+            .long(
+                "Everything tveee can do has an id, including what only the ui menu offers\n\
+                 (e.g. 'tveee do kodi.subtitles.off'). With no id, lists them; '...' marks\n\
+                 those that take text.",
+            ),
         ActionDescriptor::terminal("tools.commands", CAT, "list all command names and aliases", commands_list).cli("commands", "", "list all command names and aliases"),
         ActionDescriptor::terminal("tools.completion", CAT, "print a bash/zsh completion script", completion).cli("completion", "", "print a bash/zsh completion script"),
         ActionDescriptor::terminal("tools.help", CAT, "show this help, or help for one command", help).cli("help", "[command]", "show this help, or help for one command"),

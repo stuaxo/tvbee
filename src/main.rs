@@ -35,7 +35,9 @@ pub struct Ctx {
     pub tv: Tv,
     /// Commands of the enabled plugins only.
     pub commands: Vec<Command>,
-    /// Actions with a menu key, of the enabled plugins, in plugin order.
+    /// Actions of the enabled plugins, in plugin order.
+    pub actions: Vec<actions::ActionDescriptor>,
+    /// Those with a menu key.
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub menu: Vec<actions::ActionDescriptor>,
     pub plugins: Vec<PluginState>,
@@ -73,13 +75,14 @@ fn main() {
     plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
     provider::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.providers)()).collect());
     pairing::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.pairings)()).collect());
-    let menu: Vec<actions::ActionDescriptor> = all
+    let actions: Vec<actions::ActionDescriptor> = all
         .iter()
         .zip(&states)
         .filter(|(_, s)| s.enabled)
-        .flat_map(|(p, _)| p.menu())
+        .flat_map(|(p, _)| (p.actions)())
         .collect();
-    let ctx = Ctx { tv, commands, menu, plugins: states };
+    let menu = actions.iter().filter(|a| a.key.is_some()).copied().collect();
+    let ctx = Ctx { tv, commands, actions, menu, plugins: states };
 
     // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {
@@ -166,7 +169,7 @@ mod tests {
     #[test]
     fn menu_keys_are_unique() {
         let mut seen = HashSet::new();
-        for m in plugins::all().iter().flat_map(|p| p.menu()) {
+        for m in plugins::all().iter().flat_map(|p| (p.actions)()).filter(|a| a.key.is_some()) {
             assert!(seen.insert(m.key), "duplicate menu key: {:?}", m.key);
         }
     }

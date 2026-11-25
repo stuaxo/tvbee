@@ -5,29 +5,7 @@ use crate::error::Result;
 use crate::Ctx;
 use std::collections::BTreeMap;
 
-/// What runs a command: one that does its own printing, or an action
-/// (`crate::actions`) whose output the command line prints.
-#[derive(Clone, Copy)]
-pub enum Run {
-    Cli(fn(&Ctx, &[String]) -> Result<()>),
-    Action(crate::actions::Do),
-}
-
-impl Run {
-    /// Run it; an action's output goes to stdout (when it says anything).
-    pub fn call(self, c: &Ctx, args: &[String]) -> Result<()> {
-        match self {
-            Run::Cli(f) => f(c, args),
-            Run::Action(f) => {
-                let out = f(&crate::actions::Cx { tv: &c.tv }, args)?;
-                if !out.text.is_empty() {
-                    println!("{}", out.text);
-                }
-                Ok(())
-            }
-        }
-    }
-}
+pub use crate::actions::Run;
 
 pub struct Command {
     pub category: &'static str,
@@ -47,7 +25,7 @@ impl Command {
         desc: &'static str,
         run: fn(&Ctx, &[String]) -> Result<()>,
     ) -> Self {
-        Command { category, name, usage, desc, long: "", aliases: &[], run: Run::Cli(run) }
+        Command { category, name, usage, desc, long: "", aliases: &[], run: Run::Terminal(run) }
     }
 
     pub fn long(mut self, long: &'static str) -> Self {

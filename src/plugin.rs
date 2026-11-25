@@ -84,11 +84,6 @@ impl Plugin {
         (self.actions)().iter().filter_map(ActionDescriptor::command).collect()
     }
 
-    /// Its actions with a key, for the ui menu.
-    pub fn menu(&self) -> Vec<ActionDescriptor> {
-        (self.actions)().into_iter().filter(|a| a.key.is_some()).collect()
-    }
-
     /// Command names and aliases this plugin provides.
     pub fn command_names(&self) -> Vec<&'static str> {
         self.commands()
@@ -235,6 +230,10 @@ pub fn needs_probe(plugins: &[Plugin], sub: &str, args: &[String]) -> bool {
     if detect().any(|p| p.command_names().contains(&sub)) {
         return true;
     }
+    // `do <id>` with one of their actions
+    if sub == "do" && args.first().is_some_and(|id| detect().any(|p| (p.actions)().iter().any(|a| a.id == id))) {
+        return true;
+    }
     let offline = OFFLINE.contains(&sub) || (sub == "apps" && args.iter().any(|a| a == "--all"));
     !offline && detect().any(|p| !(p.apps)().is_empty())
 }
@@ -284,6 +283,8 @@ mod tests {
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let quiet = [Plugin::detect("v", "", yes, vcmds)];
         assert!(needs_probe(&quiet, "vendorcmd", &[]));
+        assert!(needs_probe(&quiet, "do", &a(&["v.vendorcmd"])));
+        assert!(!needs_probe(&quiet, "do", &a(&["power.sleep"])));
         assert!(!needs_probe(&quiet, "launch", &a(&["x"])));
         let with_apps = [Plugin::detect("v", "", yes, vcmds).with_apps(some_apps)];
         assert!(needs_probe(&with_apps, "launch", &a(&["x"])));
