@@ -79,15 +79,15 @@ pub enum Action {
     Jump(f64),
     Volume(i32),
     Mute,
-    /// The Ambilight panel opened (true) or closed: the refresh reads it while open.
-    AmbilightPanel(bool),
+    /// A panel (`crate::panel`, by id) opened (true) or closed: the refresh
+    /// reads it while it's open.
+    WatchPanel(&'static str, bool),
     /// The preview panel opened or closed: pictures are made while it's open.
     PreviewPanel(bool),
     /// Ask the TV to pair (it shows a PIN), then finish with the PIN typed.
-    PairStart,
+    /// (A pairing, by id: `crate::pairing`.)
+    PairStart(&'static str),
     PairFinish(String),
-    /// Change the Ambilight (from its dialog).
-    AmbilightChange(crate::plugins::ambilight::Change),
     /// Mute or unmute, the ui knowing which it is now (true: muted): one key,
     /// without reading the audio state first.
     MuteKnown(bool),
@@ -133,8 +133,8 @@ pub struct Snapshot {
     pub standby: bool,
     /// For the system panel.
     pub system: info::System,
-    /// For the Ambilight panel, while it's open.
-    pub ambilight: Option<crate::plugins::ambilight::Panel>,
+    /// The open panels, as they are now.
+    pub panels: Vec<(&'static str, crate::panel::View)>,
     /// "player" or "player, guessed": what kind of app is in front.
     pub kind: Option<String>,
     pub power: Option<String>,
@@ -164,8 +164,8 @@ pub enum Msg {
     Guide(std::result::Result<Guide, String>),
     /// A programme's description (channel, start).
     Info((u32, i64), std::result::Result<Option<String>, String>),
-    /// Whether the TV has Ambilight tveee can control.
-    Ambilight(bool),
+    /// The panels this TV has (`crate::panel`), by id.
+    Panels(Vec<&'static str>),
     /// Pairing: the TV is showing a PIN; ask for it.
     AskPin,
     /// A picture for the preview panel.

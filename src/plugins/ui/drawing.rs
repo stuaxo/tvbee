@@ -206,7 +206,7 @@ impl App {
         let area = outer.inner(f.area());
         f.render_widget(outer, f.area());
 
-        let bs = buttons(self.mode, self.st.snap.as_ref().is_some_and(|s| s.exact), self.st.ambilight);
+        let bs = buttons(self.mode, self.st.snap.as_ref().is_some_and(|s| s.exact), self.panel_id().is_some());
         let places = flow(&bs, area.width);
         let rows = places.iter().map(|(r, _)| r + 1).max().unwrap_or(1);
         let [body, _, footer, status] = Layout::vertical([
@@ -233,7 +233,7 @@ impl App {
         } else {
             body
         };
-        let body = if self.ambi_open && self.st.ambilight {
+        let body = if self.ambi_open && self.panel_id().is_some() {
             let want = self.ambilight_height();
             let h = want.min(body.height.saturating_sub(4));
             let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);

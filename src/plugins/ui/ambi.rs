@@ -1,41 +1,58 @@
-//! The Ambilight panel and dialog.
+//! The panel (`crate::panel`: the Ambilight, on TVs with one) and its dialog.
 
 use super::*;
+use crate::panel::{Row, Run, View};
+
+/// A row whose options each ask for something (the lights: a colour):
+/// moving along it picks nothing.
+fn asks(r: &Row) -> bool {
+    !r.options.is_empty() && r.options.iter().all(|o| matches!(o.run, Run::Ask { .. }))
+}
 
 impl App {
-    /// The Ambilight dialog's rows, from the last reading (none until there is one).
-    pub(super) fn ambi_rows(&self) -> Vec<crate::plugins::ambilight::Row> {
-        match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
-            Some(crate::plugins::ambilight::Panel::Shown { state, lights }) => crate::plugins::ambilight::rows(state, lights),
+    /// The panel `l` shows: the first this TV has.
+    pub(super) fn panel_id(&self) -> Option<&'static str> {
+        self.st.panels.first().copied()
+    }
+
+    /// Its heading ("ambilight").
+    pub(super) fn panel_title(&self) -> &'static str {
+        self.panel_id().and_then(crate::panel::by_id).map_or("panel", |p| p.title)
+    }
+
+    /// What it shows, as of the last refresh (None until read).
+    pub(super) fn panel_view(&self) -> Option<&View> {
+        let id = self.panel_id()?;
+        self.st.snap.as_ref()?.panels.iter().find(|(p, _)| *p == id).map(|(_, v)| v)
+    }
+
+    /// The dialog's rows, from the last reading (none until there is one).
+    pub(super) fn ambi_rows(&self) -> Vec<Row> {
+        match self.panel_view() {
+            Some(View::Shown(s)) => s.rows.clone(),
             _ => Vec::new(),
         }
     }
 
-    pub(super) fn ambi_lights(&self) -> Vec<crate::plugins::ambilight::Light> {
-        match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
-            Some(crate::plugins::ambilight::Panel::Shown { lights, .. }) => lights.clone(),
-            _ => Vec::new(),
-        }
-    }
-
-    /// Pick option `col` of row `row` in the Ambilight dialog: make its
-    /// change, or (a light) ask for a colour.
+    /// Pick option `col` of row `row` in the dialog: run it, or ask for
+    /// what it needs (a light: its colour).
     pub(super) fn ambi_pick(&mut self, row: usize, col: usize, actions: &Handle) {
         let rows = self.ambi_rows();
-        let Some(r) = rows.get(row) else { return };
-        if r.name == "lights" {
-            self.prompt.clear();
-            self.overlay = Overlay::AmbiColour { col };
-            return;
-        }
-        self.overlay = Overlay::Ambilight { row, col };
-        if let Some((label, Some(change))) = r.options.get(col) {
-            self.note = format!("ambilight: {label}...");
-            let _ = actions.send(Action::AmbilightChange(change.clone()));
+        let Some(choice) = rows.get(row).and_then(|r| r.options.get(col)) else { return };
+        match &choice.run {
+            Run::Ask { .. } => {
+                self.prompt.clear();
+                self.overlay = Overlay::AmbiColour { row, col };
+            }
+            Run::Act { id, args } => {
+                self.overlay = Overlay::Ambilight { row, col };
+                self.note = format!("{}: {}...", self.panel_title(), choice.label);
+                let _ = actions.dispatch(id, args.clone());
+            }
         }
     }
 
-    /// Keys in the Ambilight dialog: ↑/↓ rows, ←/→ change at once, ⏎ picks.
+    /// Keys in the dialog: ↑/↓ rows, ←/→ change at once, ⏎ picks.
     pub(super) fn ambi_key(&mut self, row: usize, col: usize, code: KeyCode, actions: &Handle) {
         let rows = self.ambi_rows();
         if matches!(code, KeyCode::Esc | KeyCode::Char('L') | KeyCode::Char('q')) || rows.is_empty() {
@@ -52,7 +69,7 @@ impl App {
             KeyCode::Down => self.overlay = to_row((row + 1).min(rows.len() - 1)),
             KeyCode::Left | KeyCode::Right => {
                 let c = if code == KeyCode::Left { col.min(n - 1).saturating_sub(1) } else { (col + 1).min(n - 1) };
-                if rows[row].name == "lights" {
+                if asks(&rows[row]) {
                     self.overlay = Overlay::Ambilight { row, col: c };
                 } else if c != col.min(n - 1) || rows[row].current != Some(c) {
                     self.ambi_pick(row, c, actions);
@@ -63,43 +80,54 @@ impl App {
         }
     }
 
-    /// The Ambilight panel's lines: state, or what's needed.
+    /// Keys while typing what an option asked for (a light's colour): ⏎ runs
+    /// it, Esc goes back to the dialog.
+    pub(super) fn ambi_ask_key(&mut self, row: usize, col: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
+        match code {
+            KeyCode::Esc => self.overlay = Overlay::Ambilight { row, col },
+            KeyCode::Enter if !self.prompt.trim().is_empty() => {
+                let rows = self.ambi_rows();
+                if let Some(Run::Ask { id, args, .. }) = rows.get(row).and_then(|r| r.options.get(col)).map(|o| &o.run) {
+                    let mut args = args.clone();
+                    args.push(self.prompt.trim().to_string());
+                    let _ = actions.dispatch(id, args);
+                    self.note = format!("{}: setting it...", self.panel_title());
+                }
+                self.overlay = Overlay::Ambilight { row, col };
+            }
+            KeyCode::Backspace => {
+                self.prompt.pop();
+            }
+            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.prompt.push(c),
+            _ => {}
+        }
+    }
+
+    /// The panel's lines: what it shows, or what's needed.
     pub(super) fn ambilight_lines(&self) -> Vec<(Line<'static>, Option<Hit>)> {
-        use crate::plugins::ambilight::Panel;
         let dim = Style::new().fg(Color::DarkGray);
-        match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
-            None => vec![(Line::from("reading the Ambilight...").italic(), None)],
-            Some(Panel::Missing) => vec![(Line::from("no Ambilight here that tveee can control"), None)],
-            Some(Panel::NeedsPairing) => vec![
-                (Line::from("tveee isn't paired with the TV yet, which Ambilight needs."), None),
+        match self.panel_view() {
+            None => vec![(Line::from(format!("reading the {}...", self.panel_title())).italic(), None)],
+            Some(View::Missing(why)) => vec![(Line::from(why.clone()), None)],
+            Some(View::NeedsPairing { why, .. }) => vec![
+                (Line::from(why.clone()), None),
                 (
                     Line::from(vec![Span::styled(" P ", Style::new().fg(Color::Black).bg(Color::Yellow)), Span::raw(" pair now: the TV shows a PIN to type in")]),
                     Some(Hit::Input(Input::Pair)),
                 ),
             ],
-            Some(Panel::Failed(e)) => vec![(Line::from(format!("! {e}")).fg(Color::Red), None)],
-            Some(Panel::Shown { state, lights }) => {
+            Some(View::Failed(e)) => vec![(Line::from(format!("! {e}")).fg(Color::Red), None)],
+            Some(View::Shown(s)) => {
                 let open = Some(Hit::Input(Input::AmbilightDialog));
-                let mut out: Vec<(Line<'static>, Option<Hit>)> = state
-                    .lines()
+                let mut out: Vec<(Line<'static>, Option<Hit>)> = s
+                    .info
                     .iter()
-                    .filter(|l| !l.starts_with("lights:"))
-                    .map(|l| {
-                        let (k, v) = l.split_once(':').unwrap_or((l, ""));
-                        (Line::from(vec![Span::styled(format!("{k:<9}"), dim), Span::raw(v.trim().to_string())]), open.clone())
-                    })
+                    .map(|(k, v)| (Line::from(vec![Span::styled(format!("{k:<9}"), dim), Span::raw(v.clone())]), open.clone()))
                     .collect();
-                // a block of each light's colour, a row per side
-                let mut sides: Vec<&str> = Vec::new();
-                for l in lights {
-                    if !sides.contains(&l.side.as_str()) {
-                        sides.push(&l.side);
-                    }
-                }
-                for side in sides {
-                    let mut spans = vec![Span::styled(format!("{side:<9}"), dim)];
-                    for l in lights.iter().filter(|l| l.side == side) {
-                        let (r, g, b) = l.rgb;
+                // a block of each colour, a row per swatch row (a side's lights)
+                for (label, colours) in &s.swatches {
+                    let mut spans = vec![Span::styled(format!("{label:<9}"), dim)];
+                    for &(r, g, b) in colours {
                         spans.push(Span::styled("      ", Style::new().bg(Color::Rgb(r, g, b))));
                         spans.push(Span::raw(" "));
                     }
@@ -114,9 +142,11 @@ impl App {
         u16::try_from(self.ambilight_lines().len()).unwrap_or(1) + 2
     }
 
-    /// The Ambilight panel: power, mode, style, Hue, and each light's colour now.
+    /// The panel: what it shows now (the Ambilight: power, mode, style, Hue,
+    /// and each light's colour).
     pub(super) fn draw_ambilight(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let block = Block::bordered().title(" ambilight - L (or click) changes it, l hides ").border_style(Style::new().fg(Color::DarkGray));
+        let title = format!(" {} - L (or click) changes it, l hides ", self.panel_title());
+        let block = Block::bordered().title(title).border_style(Style::new().fg(Color::DarkGray));
         let inner = block.inner(area);
         f.render_widget(block, area);
         for (i, (line, hit)) in self.ambilight_lines().into_iter().enumerate() {
@@ -137,37 +167,33 @@ impl App {
         // rows come and go (outside control has no settings row): the
         // lights row is last, so a row past the end is it
         let row = row.min(rows.len().saturating_sub(1));
-        let lights = self.ambi_lights();
         let mut text: Vec<Line> = Vec::new();
         // (line, x offset in it, width, row, option)
         let mut spots: Vec<(usize, usize, usize, usize, usize)> = Vec::new();
         if rows.is_empty() {
-            text.push(Line::from(match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
-                Some(crate::plugins::ambilight::Panel::NeedsPairing) => "tveee isn't paired with the TV yet: P pairs",
-                Some(crate::plugins::ambilight::Panel::Failed(_)) => "couldn't read the Ambilight (see the panel)",
-                _ => "reading the Ambilight...",
+            text.push(Line::from(match self.panel_view() {
+                Some(View::NeedsPairing { .. }) => "tveee isn't paired with the TV yet: P pairs".to_string(),
+                Some(View::Failed(_)) => format!("couldn't read the {} (see the panel)", self.panel_title()),
+                _ => format!("reading the {}...", self.panel_title()),
             }));
         }
         for (ri, r) in rows.iter().enumerate() {
             let mut spans = vec![Span::styled(format!("{:<9}", r.name), Style::new().fg(Color::DarkGray))];
             let mut x = 9;
-            for (ci, (label, _)) in r.options.iter().enumerate() {
+            for (ci, choice) in r.options.iter().enumerate() {
                 let mut st = Style::new();
                 if r.current == Some(ci) {
                     st = st.fg(Color::Green).bold();
                 }
                 // a light shows its colour
-                if r.name == "lights" && ci > 0 {
-                    if let Some(l) = lights.get(ci - 1) {
-                        let (rr, g, b) = l.rgb;
-                        let dark = u32::from(rr) * 3 + u32::from(g) * 6 + u32::from(b) < 1280;
-                        st = st.bg(Color::Rgb(rr, g, b)).fg(if dark { Color::White } else { Color::Black });
-                    }
+                if let Some((rr, g, b)) = choice.colour {
+                    let dark = u32::from(rr) * 3 + u32::from(g) * 6 + u32::from(b) < 1280;
+                    st = st.bg(Color::Rgb(rr, g, b)).fg(if dark { Color::White } else { Color::Black });
                 }
                 if ri == row && ci == col.min(r.options.len().saturating_sub(1)) {
                     st = st.reversed();
                 }
-                let shown = format!(" {label} ");
+                let shown = format!(" {} ", choice.label);
                 spots.push((text.len(), x, shown.chars().count(), ri, ci));
                 x += shown.chars().count() + 1;
                 spans.push(Span::styled(shown, st));
@@ -178,7 +204,7 @@ impl App {
         text.push(Line::default());
         text.push(Line::from("↑/↓ row  ←/→ change (at once)  ⏎ on a light: its colour  esc closes").fg(Color::DarkGray));
         text.push(Line::from("green: what the TV is doing now").fg(Color::DarkGray));
-        let r = popup(f, " ambilight ", text, Color::Yellow);
+        let r = popup(f, &format!(" {} ", self.panel_title()), text, Color::Yellow);
         self.hits.push((r, Hit::Popup));
         for (line, x, w, ri, ci) in spots {
             let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
@@ -187,22 +213,24 @@ impl App {
         }
     }
 
-    pub(super) fn draw_ambi_colour(&mut self, f: &mut Frame, col: usize) {
-        let which = match col.checked_sub(1).and_then(|i| self.ambi_lights().get(i).cloned()) {
-            Some(l) => format!("{} {}", l.side, l.n),
-            None => "every light".into(),
+    /// Asking for what option `col` of row `row` needs (a light's colour).
+    pub(super) fn draw_ambi_colour(&mut self, f: &mut Frame, row: usize, col: usize) {
+        let rows = self.ambi_rows();
+        let (prompt, hint) = match rows.get(row).and_then(|r| r.options.get(col)).map(|o| &o.run) {
+            Some(Run::Ask { prompt, hint, .. }) => (prompt.clone(), *hint),
+            _ => ("Colour:".to_string(), ""),
         };
         let text = vec![
-            Line::from(format!("Colour for {which}:")),
+            Line::from(prompt),
             Line::from(vec![
                 Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray)),
                 Span::styled(" ".repeat(24usize.saturating_sub(self.prompt.chars().count() + 1)), Style::new().bg(Color::DarkGray)),
             ]),
-            Line::from("red, warm, #ff8800 or 255,136,0 (the TV hands the lights over)").fg(Color::DarkGray),
+            Line::from(hint).fg(Color::DarkGray),
             Line::default(),
             Line::from("⏎ set   esc back").fg(Color::DarkGray),
         ];
-        let r = popup(f, " ambilight colour ", text, Color::Yellow);
+        let r = popup(f, &format!(" {} colour ", self.panel_title()), text, Color::Yellow);
         self.hits.push((r, Hit::Popup));
     }
 }

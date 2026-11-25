@@ -21,6 +21,7 @@ mod plugin;
 #[cfg(feature = "engine")]
 mod preview;
 mod pairing;
+mod panel;
 mod plugins;
 mod provider;
 mod registry;
@@ -82,6 +83,7 @@ fn main() {
     plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
     provider::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.providers)()).collect());
     pairing::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.pairings)()).collect());
+    panel::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.panels)()).collect());
     nowplaying::install_namers(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.namers)()).collect());
     let actions: Vec<actions::ActionDescriptor> = all
         .iter()

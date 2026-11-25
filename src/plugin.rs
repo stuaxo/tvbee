@@ -33,6 +33,8 @@ pub struct Plugin {
     pub providers: fn() -> Vec<&'static dyn crate::provider::Provider>,
     /// Services on the TV this plugin can pair with (JointSpace, ...).
     pub pairings: fn() -> Vec<&'static dyn crate::pairing::Pairing>,
+    /// Panels it offers front ends (the Ambilight).
+    pub panels: fn() -> Vec<crate::panel::Spec>,
     /// Ways it can tell which app a host package is showing.
     pub namers: fn() -> Vec<crate::nowplaying::Namer>,
     /// Its part of `tveee diagnose` (while it's enabled).
@@ -65,7 +67,7 @@ fn no_apps() -> Vec<App> {
 
 impl Plugin {
     pub fn builtin(name: &'static str, desc: &'static str, actions: fn() -> Vec<ActionDescriptor>) -> Self {
-        Plugin { name, desc, enable: Enable::Always, actions, apps: no_apps, providers: no_providers, pairings: no_pairings, namers: Vec::new, diagnose: no_findings }
+        Plugin { name, desc, enable: Enable::Always, actions, apps: no_apps, providers: no_providers, pairings: no_pairings, panels: Vec::new, namers: Vec::new, diagnose: no_findings }
     }
 
     pub fn detect(
@@ -74,7 +76,7 @@ impl Plugin {
         detect: fn(&Tv) -> Result<bool>,
         actions: fn() -> Vec<ActionDescriptor>,
     ) -> Self {
-        Plugin { name, desc, enable: Enable::Detect(detect), actions, apps: no_apps, providers: no_providers, pairings: no_pairings, namers: Vec::new, diagnose: no_findings }
+        Plugin { name, desc, enable: Enable::Detect(detect), actions, apps: no_apps, providers: no_providers, pairings: no_pairings, panels: Vec::new, namers: Vec::new, diagnose: no_findings }
     }
 
     /// Register these providers while the plugin is enabled.
@@ -86,6 +88,12 @@ impl Plugin {
     /// Register these pairings while the plugin is enabled.
     pub fn with_pairings(mut self, pairings: fn() -> Vec<&'static dyn crate::pairing::Pairing>) -> Self {
         self.pairings = pairings;
+        self
+    }
+
+    /// Offer these panels while the plugin is enabled.
+    pub fn with_panels(mut self, panels: fn() -> Vec<crate::panel::Spec>) -> Self {
+        self.panels = panels;
         self
     }
 

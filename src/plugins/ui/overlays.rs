@@ -12,7 +12,7 @@ pub enum Overlay {
     /// Changing the Ambilight: the highlighted row and option.
     Ambilight { row: usize, col: usize },
     /// Typing a colour for option `col` of the dialog's lights row (0: all).
-    AmbiColour { col: usize },
+    AmbiColour { row: usize, col: usize },
     Help,
     /// The "more" menu, with the highlighted item.
     Menu(usize),
@@ -151,7 +151,7 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         // handled where it's typed (the PIN is `App::prompt`)
         Overlay::Pin => (Overlay::Pin, None),
         Overlay::Ambilight { row, col } => (Overlay::Ambilight { row, col }, None),
-        Overlay::AmbiColour { col } => (Overlay::AmbiColour { col }, None),
+        Overlay::AmbiColour { row, col } => (Overlay::AmbiColour { row, col }, None),
     }
 }
 
@@ -252,7 +252,7 @@ impl App {
             Overlay::Search(at) => self.draw_search(f, at),
             Overlay::Prompt(item) => self.draw_prompt(f, item),
             Overlay::Ambilight { row, col } => self.draw_ambi_dialog(f, row, col),
-            Overlay::AmbiColour { col } => self.draw_ambi_colour(f, col),
+            Overlay::AmbiColour { row, col } => self.draw_ambi_colour(f, row, col),
             Overlay::Pin => self.draw_pin(f),
             Overlay::Confirm { item, yes } => self.draw_confirm(f, item, yes),
         }

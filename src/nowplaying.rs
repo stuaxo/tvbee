@@ -208,6 +208,7 @@ fn namer(pkg: &str) -> Option<&'static Namer> {
 }
 
 /// Whether [`named`] can say more about `pkg` (it costs an adb call).
+#[cfg_attr(not(feature = "engine"), allow(dead_code))]
 pub fn has_namer(pkg: &str) -> bool {
     namer(pkg).is_some()
 }

@@ -174,6 +174,9 @@ impl crate::pairing::Pairing for JointSpace {
             Err(e) => format!("check failed: {e}"),
         })
     }
+    fn start(&self, tv: &Tv) -> Option<Result<crate::pairing::Finish>> {
+        Some(pair_start(tv).map(|s| Box::new(move |tv: &Tv, pin: &str| pair_finish(tv, &s, pin)) as crate::pairing::Finish))
+    }
 }
 
 pub fn pairings() -> Vec<&'static dyn crate::pairing::Pairing> {

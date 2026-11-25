@@ -49,7 +49,8 @@ pub fn all() -> Vec<Plugin> {
         .with_apps(philips::apps)
         .with_providers(philips::providers)
         .with_pairings(philips::pairings)
-        .with_namers(philips::namers),
+        .with_namers(philips::namers)
+        .with_panels(ambilight::panels),
         Plugin::detect("kodi", "Kodi: what it's playing, exact seeking, artwork, places (its remote control)", kodi::detect, kodi::actions)
             .with_providers(kodi::providers)
             .with_pairings(kodi::pairings)

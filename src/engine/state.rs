@@ -32,8 +32,8 @@ pub struct TvState {
     /// Apps with a process, and those of them Android keeps running.
     pub running: BTreeSet<String>,
     pub fixed: BTreeSet<String>,
-    /// The TV has an Ambilight tveee can control.
-    pub ambilight: bool,
+    /// The panels this TV has (`crate::panel`), by id.
+    pub panels: Vec<&'static str>,
     /// The guide, or why there isn't one; None until read.
     pub guide: Option<Arc<std::result::Result<Guide, String>>>,
     /// The guide is being read afresh (the last copy is still here).
@@ -59,7 +59,7 @@ impl TvState {
             searchable: None,
             running: BTreeSet::new(),
             fixed: BTreeSet::new(),
-            ambilight: false,
+            panels: Vec::new(),
             guide: None,
             guide_loading: false,
             infos: Arc::default(),
@@ -94,7 +94,7 @@ pub enum Change {
     Apps,
     Searchable,
     Running,
-    Ambilight,
+    Panels,
     Guide,
     Info,
 }
@@ -217,9 +217,9 @@ pub(crate) fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastS
                 update(&mut |st| (st.running, st.fixed) = (running.clone(), fixed.clone()));
                 CoreEvent::Changed(Change::Running)
             }
-            Msg::Ambilight(has) => {
-                update(&mut |st| st.ambilight = has);
-                CoreEvent::Changed(Change::Ambilight)
+            Msg::Panels(ids) => {
+                update(&mut |st| st.panels = ids.clone());
+                CoreEvent::Changed(Change::Panels)
             }
             Msg::Info(key, info) => {
                 let info = info.unwrap_or_else(|e| Some(format!("(couldn't read the description: {e})")));

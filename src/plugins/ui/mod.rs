@@ -293,28 +293,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     app.open_search(pkg);
                 } else if let Overlay::Ambilight { row, col } = app.overlay {
                     app.ambi_key(row, col, k.code, actions);
-                } else if let Overlay::AmbiColour { col } = app.overlay {
-                    let lights_row = app.ambi_rows().iter().position(|r| r.name == "lights").unwrap_or(0);
-                    match k.code {
-                        KeyCode::Esc => app.overlay = Overlay::Ambilight { row: lights_row, col },
-                        KeyCode::Enter => match crate::plugins::ambilight::parse_colour(&app.prompt) {
-                            Some(rgb) => {
-                                let change = match col.checked_sub(1).and_then(|i| app.ambi_lights().get(i).cloned()) {
-                                    Some(l) => crate::plugins::ambilight::Change::One(l.side, l.n, rgb),
-                                    None => crate::plugins::ambilight::Change::All(rgb),
-                                };
-                                let _ = actions.send(Action::AmbilightChange(change));
-                                app.note = "ambilight: setting the colour...".into();
-                                app.overlay = Overlay::Ambilight { row: lights_row, col };
-                            }
-                            None => app.note = format!("'{}' isn't a colour tveee knows (red, #ff8800, 255,136,0)", app.prompt),
-                        },
-                        KeyCode::Backspace => {
-                            app.prompt.pop();
-                        }
-                        KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => app.prompt.push(c),
-                        _ => {}
-                    }
+                } else if let Overlay::AmbiColour { row, col } = app.overlay {
+                    app.ambi_ask_key(row, col, k.code, k.modifiers, actions);
                 } else if let Overlay::Pin = app.overlay {
                     match k.code {
                         KeyCode::Esc => {
@@ -590,12 +570,14 @@ impl App {
             }
             Input::ToggleHelp => self.overlay = Overlay::Help,
             Input::ToggleInfo => self.info = !self.info,
-            Input::ToggleAmbilight if !self.st.ambilight => {
+            Input::ToggleAmbilight if self.panel_id().is_none() => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
             Input::ToggleAmbilight => {
                 self.ambi_open = !self.ambi_open;
-                let _ = actions.send(Action::AmbilightPanel(self.ambi_open));
+                if let Some(id) = self.panel_id() {
+                    let _ = actions.send(Action::WatchPanel(id, self.ambi_open));
+                }
             }
             Input::TogglePreview => {
                 self.preview_open = !self.preview_open;
@@ -605,22 +587,26 @@ impl App {
                 }
                 let _ = actions.send(Action::PreviewPanel(self.preview_open));
             }
-            Input::AmbilightDialog if !self.st.ambilight => {
+            Input::AmbilightDialog if self.panel_id().is_none() => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
             Input::AmbilightDialog => {
                 // the panel's reads feed the dialog
-                if !self.ambi_open {
+                if let (false, Some(id)) = (self.ambi_open, self.panel_id()) {
                     self.ambi_open = true;
-                    let _ = actions.send(Action::AmbilightPanel(true));
+                    let _ = actions.send(Action::WatchPanel(id, true));
                 }
                 let col = self.ambi_rows().first().and_then(|r| r.current).unwrap_or(0);
                 self.overlay = Overlay::Ambilight { row: 0, col };
             }
-            Input::Pair => {
-                self.note = "asking the TV to pair...".into();
-                let _ = actions.send(Action::PairStart);
-            }
+            // the pairing the panel says it needs
+            Input::Pair => match self.panel_view() {
+                Some(&crate::panel::View::NeedsPairing { pairing, .. }) => {
+                    self.note = "asking the TV to pair...".into();
+                    let _ = actions.send(Action::PairStart(pairing));
+                }
+                _ => self.note = "nothing here needs pairing (open the panel with l to see)".into(),
+            },
             Input::OpenSearch => self.open_search(None),
             Input::OpenGuide => self.open_guide(None, actions),
             Input::OpenOptions => self.overlay = Overlay::Options(0),
@@ -789,10 +775,7 @@ impl App {
             (Overlay::Ambilight { .. }, Some(Hit::Popup)) => {}
             (Overlay::Ambilight { .. }, _) => self.overlay = Overlay::None,
             (Overlay::AmbiColour { .. }, Some(Hit::Popup)) => {}
-            (Overlay::AmbiColour { col }, _) => {
-                let row = self.ambi_rows().iter().position(|r| r.name == "lights").unwrap_or(0);
-                self.overlay = Overlay::Ambilight { row, col };
-            }
+            (Overlay::AmbiColour { row, col }, _) => self.overlay = Overlay::Ambilight { row, col },
             // the PIN box: a click outside it cancels
             (Overlay::Pin, Some(Hit::Popup)) => {}
             (Overlay::Pin, _) => {

@@ -24,7 +24,7 @@ pub enum Lane {
 pub fn lane(a: &Action) -> Lane {
     match a {
         Action::Key(_) | Action::Text(_) => Lane::Keys,
-        Action::LoadGuide | Action::CheckRunning | Action::AmbilightPanel(_) | Action::PreviewPanel(_) => Lane::Read,
+        Action::LoadGuide | Action::CheckRunning | Action::WatchPanel(..) | Action::PreviewPanel(_) => Lane::Read,
         Action::PrefetchInfo => Lane::Idle,
         _ => Lane::Act,
     }
@@ -35,8 +35,13 @@ pub fn lane(a: &Action) -> Lane {
 pub(crate) fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender<Action>)]) {
     for a in actions {
         // not work for anyone: what the refresh should read
-        if let Action::AmbilightPanel(on) = a {
-            shared.ambilight.store(on, Ordering::Relaxed);
+        if let Action::WatchPanel(id, on) = a {
+            let mut open = lock(&shared.panels);
+            if on {
+                open.insert(id);
+            } else {
+                open.remove(id);
+            }
             continue;
         }
         if let Action::PreviewPanel(on) = a {
@@ -137,8 +142,8 @@ pub(crate) struct Shared {
     pub(crate) channel_stale: AtomicBool,
     /// The first refresh has been shown (background work waits for it).
     pub(crate) shown: AtomicBool,
-    /// The Ambilight panel is open: the refresh reads the lights too.
-    pub(crate) ambilight: AtomicBool,
+    /// The panels open: the refresh reads them too.
+    pub(crate) panels: std::sync::Mutex<std::collections::BTreeSet<&'static str>>,
     /// The preview panel is open: its lane makes pictures.
     pub(crate) preview: AtomicBool,
     /// A picture of what an app's player is playing, for the preview.
@@ -172,7 +177,7 @@ impl Shared {
             input_at: std::sync::Mutex::new(Instant::now()),
             channel_stale: AtomicBool::new(true),
             shown: AtomicBool::new(false),
-            ambilight: AtomicBool::new(false),
+            panels: Default::default(),
             preview: AtomicBool::new(false),
             art: Default::default(),
 
@@ -320,9 +325,9 @@ impl Refresher {
 
     pub(crate) fn snapshot(&mut self) -> Result<Snapshot> {
         let tv = &self.tv;
-        let watch_lights = self.shared.ambilight.load(Ordering::Relaxed);
-        let (power, window, media_dump, audio, system, ambilight) = std::thread::scope(|sc| {
-            let l = sc.spawn(move || watch_lights.then(|| crate::plugins::ambilight::panel(tv)));
+        let open: Vec<&'static crate::panel::Spec> = lock(&self.shared.panels).iter().filter_map(|id| crate::panel::by_id(id)).collect();
+        let (power, window, media_dump, audio, system, panels) = std::thread::scope(|sc| {
+            let l = sc.spawn(move || open.iter().map(|p| (p.id, (p.read)(tv))).collect::<Vec<_>>());
             let p = sc.spawn(|| tv.shell(&["dumpsys", "power"]));
             let w = sc.spawn(|| tv.window_dump());
             let m = sc.spawn(|| tv.shell(&["dumpsys", "media_session"]));
@@ -331,7 +336,7 @@ impl Refresher {
             let j = |h: std::thread::ScopedJoinHandle<'_, Result<String>>| h.join().unwrap_or_else(|_| Ok(String::new()));
             // the system figures only feed the optional panel
             let y = y.join().ok().and_then(|r| r.ok()).unwrap_or_default();
-            (j(p), j(w), j(m), a, y, l.join().ok().flatten())
+            (j(p), j(w), j(m), a, y, l.join().unwrap_or_default())
         });
         let (power, mut window, audio) = (power?, window?, audio?);
         if !window.contains("mCurrentFocus") {
@@ -401,7 +406,7 @@ impl Refresher {
             power: power.lines().find_map(|l| l.trim().strip_prefix("mWakefulness=")).map(str::to_string),
             focus: info::focus_window(&window),
             system,
-            ambilight,
+            panels,
         })
     }
 }
@@ -417,8 +422,8 @@ pub(crate) struct Actor {
     pub(crate) wake: Sender<()>,
     /// The read lane (to update the running apps after launching, closing).
     pub(crate) reads: Sender<Action>,
-    /// A pairing under way: the TV is showing a PIN.
-    pub(crate) pairing: Option<crate::plugins::philips::PairStart>,
+    /// A pairing under way (its id, and how to finish): the TV is showing a PIN.
+    pub(crate) pairing: Option<(&'static str, crate::pairing::Finish)>,
 }
 
 impl Actor {
@@ -569,19 +574,22 @@ impl Actor {
             }
             Action::Refresh => "refreshed".into(),
             // other lanes' actions don't come here
-            Action::AmbilightChange(change) => crate::plugins::ambilight::apply(&self.tv, &change)?,
-            Action::PairStart => {
-                self.pairing = Some(crate::plugins::philips::pair_start(&self.tv)?);
+            Action::PairStart(id) => {
+                let finish = match crate::pairing::by_id(id).and_then(|p| p.start(&self.tv)) {
+                    Some(started) => started?,
+                    None => return Err(crate::error::Error::Failed(format!("can't pair with {id} from here (try 'tveee pair {id}')"))),
+                };
+                self.pairing = Some((id, finish));
                 let _ = tx.send(Msg::AskPin);
                 "the TV is showing a PIN: type it in".into()
             }
             Action::PairFinish(pin) => {
-                let Some(started) = self.pairing.take() else { return Err(crate::error::Error::Failed("pairing: start again (P)".into())) };
-                let saved = crate::plugins::philips::pair_finish(&self.tv, &started, &pin)?;
-                crate::pairing::save("jointspace", &self.tv.ip, &saved)?;
+                let Some((id, finish)) = self.pairing.take() else { return Err(crate::error::Error::Failed("pairing: start again (P)".into())) };
+                let saved = finish(&self.tv, &pin)?;
+                crate::pairing::save(id, &self.tv.ip, &saved)?;
                 "paired with the TV".into()
             }
-            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo | Action::AmbilightPanel(_) | Action::PreviewPanel(_) => String::new(),
+            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo | Action::WatchPanel(..) | Action::PreviewPanel(_) => String::new(),
         })
     }
 }
@@ -617,8 +625,9 @@ pub(crate) fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg
 /// asked to.
 pub(crate) fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
     let tv = shared.tv();
-    // whether there's an Ambilight panel to offer (one quick, public read)
-    if tx.send(Msg::Ambilight(crate::plugins::ambilight::has_ambilight(&tv))).is_err() {
+    // the panels there are to offer (Ambilight: one quick, public read)
+    let panels = crate::panel::all().iter().filter(|p| (p.available)(&tv)).map(|p| p.id).collect();
+    if tx.send(Msg::Panels(panels)).is_err() {
         return;
     }
     // the launcher's apps (unless opening the launcher got them first), then

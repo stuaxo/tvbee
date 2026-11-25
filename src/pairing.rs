@@ -42,6 +42,10 @@ impl Saved {
     }
 }
 
+/// Finishing a pairing a front end started, with what the user typed (the
+/// PIN the TV shows); returns what to save.
+pub type Finish = Box<dyn FnOnce(&Tv, &str) -> Result<Saved> + Send>;
+
 /// A service tveee can pair with.
 pub trait Pairing: Sync {
     /// Short id: `tveee pair <id>`.
@@ -57,6 +61,11 @@ pub trait Pairing: Sync {
     /// list it as missing; the plugin's own check says if it's needed.
     fn optional(&self) -> bool {
         false
+    }
+    /// For front ends: start pairing (the TV shows a PIN), to finish with
+    /// what the user types. None: it can't be done that way.
+    fn start(&self, _tv: &Tv) -> Option<Result<Finish>> {
+        None
     }
     /// After saving: a quick read showing it works, as a line to print.
     fn check(&self, _tv: &Tv, _saved: &Saved) -> Option<String> {
