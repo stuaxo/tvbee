@@ -407,6 +407,16 @@ pub fn capabilities(p: &dyn Provider) -> Vec<&'static str> {
 
 static REGISTRY: std::sync::OnceLock<Vec<&'static dyn Provider>> = std::sync::OnceLock::new();
 
+/// Before `install` (main installs first): none; in tests, every plugin's.
+#[cfg(not(test))]
+fn not_installed() -> Vec<&'static dyn Provider> {
+    Vec::new()
+}
+#[cfg(test)]
+fn not_installed() -> Vec<&'static dyn Provider> {
+    crate::plugins::all().iter().flat_map(|p| (p.providers)()).collect()
+}
+
 /// Set the providers of the enabled plugins. Call once, early (main does).
 pub fn install(providers: Vec<&'static dyn Provider>) {
     let _ = REGISTRY.set(providers);
@@ -414,7 +424,7 @@ pub fn install(providers: Vec<&'static dyn Provider>) {
 
 /// Every provider. Without [`install`] (tests) that's every plugin's.
 pub fn all() -> &'static [&'static dyn Provider] {
-    REGISTRY.get_or_init(|| crate::plugins::all().iter().flat_map(|p| (p.providers)()).collect())
+    REGISTRY.get_or_init(not_installed)
 }
 
 /// The provider hosted by `pkg`, if any.

@@ -66,6 +66,16 @@ pub trait Pairing: Sync {
 
 static REGISTRY: std::sync::OnceLock<Vec<&'static dyn Pairing>> = std::sync::OnceLock::new();
 
+/// Before `install` (main installs first): none; in tests, every plugin's.
+#[cfg(not(test))]
+fn not_installed() -> Vec<&'static dyn Pairing> {
+    Vec::new()
+}
+#[cfg(test)]
+fn not_installed() -> Vec<&'static dyn Pairing> {
+    crate::plugins::all().iter().flat_map(|p| (p.pairings)()).collect()
+}
+
 /// Set the pairings of the enabled plugins (main does).
 pub fn install(pairings: Vec<&'static dyn Pairing>) {
     let _ = REGISTRY.set(pairings);
@@ -73,7 +83,7 @@ pub fn install(pairings: Vec<&'static dyn Pairing>) {
 
 /// Every pairing. Without [`install`] (tests) that's every plugin's.
 pub fn all() -> &'static [&'static dyn Pairing] {
-    REGISTRY.get_or_init(|| crate::plugins::all().iter().flat_map(|p| (p.pairings)()).collect())
+    REGISTRY.get_or_init(not_installed)
 }
 
 pub fn by_id(id: &str) -> Option<&'static dyn Pairing> {

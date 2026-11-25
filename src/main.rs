@@ -44,6 +44,8 @@ pub struct Ctx {
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub menu: Vec<actions::ActionDescriptor>,
     pub plugins: Vec<PluginState>,
+    /// Every plugin, enabled or not (`plugins --refresh` probes them all).
+    pub all: fn() -> Vec<plugin::Plugin>,
     /// The enabled plugins' parts of `tveee diagnose`.
     pub diagnoses: Vec<fn(&Tv) -> Vec<plugin::Finding>>,
 }
@@ -89,7 +91,7 @@ fn main() {
         .collect();
     let menu = actions.iter().filter(|a| a.key.is_some()).copied().collect();
     let diagnoses = all.iter().zip(&states).filter(|(_, s)| s.enabled).map(|(p, _)| p.diagnose).collect();
-    let ctx = Ctx { tv, commands, actions, menu, plugins: states, diagnoses };
+    let ctx = Ctx { tv, commands, actions, menu, plugins: states, all: plugins::all, diagnoses };
 
     // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {

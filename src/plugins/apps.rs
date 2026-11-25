@@ -111,6 +111,17 @@ pub const CORE: &[App] = &[
 
 static REGISTRY: std::sync::OnceLock<Vec<App>> = std::sync::OnceLock::new();
 
+/// Plugins' apps before `install` (main installs first): none; in tests,
+/// every plugin's.
+#[cfg(not(test))]
+fn not_installed() -> Vec<App> {
+    Vec::new()
+}
+#[cfg(test)]
+fn not_installed() -> Vec<App> {
+    crate::plugins::all().iter().flat_map(|p| (p.apps)()).collect()
+}
+
 /// The core apps with plugins' apps (`extra`) placed after `home`, so they
 /// list near the top.
 pub fn registry(extra: Vec<App>) -> Vec<App> {
@@ -128,7 +139,7 @@ pub fn install(plugin_apps: Vec<App>) {
 
 /// Every app tveee knows. Without [`install`] (tests) that's every plugin's.
 pub fn all() -> &'static [App] {
-    REGISTRY.get_or_init(|| registry(crate::plugins::all().iter().flat_map(|p| (p.apps)()).collect()))
+    REGISTRY.get_or_init(|| registry(not_installed()))
 }
 
 /// "the home screen" -> "Home screen": app names are written for sentences.
