@@ -53,6 +53,11 @@ pub trait Pairing: Sync {
     fn how(&self) -> &'static str;
     /// Do the pairing (talking to the user as needed); returns what to save.
     fn pair(&self, tv: &Tv) -> Result<Saved>;
+    /// Only needed sometimes (Kodi: with a password): `diagnose` doesn't
+    /// list it as missing; the plugin's own check says if it's needed.
+    fn optional(&self) -> bool {
+        false
+    }
     /// After saving: a quick read showing it works, as a line to print.
     fn check(&self, _tv: &Tv, _saved: &Saved) -> Option<String> {
         None

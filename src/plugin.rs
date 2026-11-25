@@ -33,6 +33,20 @@ pub struct Plugin {
     pub providers: fn() -> Vec<&'static dyn crate::provider::Provider>,
     /// Services on the TV this plugin can pair with (JointSpace, ...).
     pub pairings: fn() -> Vec<&'static dyn crate::pairing::Pairing>,
+    /// Its part of `tveee diagnose` (while it's enabled).
+    pub diagnose: fn(&Tv) -> Vec<Finding>,
+}
+
+/// A line of `tveee diagnose`: ok (Some(true)), a problem (Some(false)), or
+/// just so (None); what it's about, and the detail.
+pub struct Finding {
+    pub ok: Option<bool>,
+    pub what: &'static str,
+    pub detail: String,
+}
+
+fn no_findings(_: &Tv) -> Vec<Finding> {
+    Vec::new()
 }
 
 fn no_pairings() -> Vec<&'static dyn crate::pairing::Pairing> {
@@ -49,7 +63,7 @@ fn no_apps() -> Vec<App> {
 
 impl Plugin {
     pub fn builtin(name: &'static str, desc: &'static str, actions: fn() -> Vec<ActionDescriptor>) -> Self {
-        Plugin { name, desc, enable: Enable::Always, actions, apps: no_apps, providers: no_providers, pairings: no_pairings }
+        Plugin { name, desc, enable: Enable::Always, actions, apps: no_apps, providers: no_providers, pairings: no_pairings, diagnose: no_findings }
     }
 
     pub fn detect(
@@ -58,7 +72,7 @@ impl Plugin {
         detect: fn(&Tv) -> Result<bool>,
         actions: fn() -> Vec<ActionDescriptor>,
     ) -> Self {
-        Plugin { name, desc, enable: Enable::Detect(detect), actions, apps: no_apps, providers: no_providers, pairings: no_pairings }
+        Plugin { name, desc, enable: Enable::Detect(detect), actions, apps: no_apps, providers: no_providers, pairings: no_pairings, diagnose: no_findings }
     }
 
     /// Register these providers while the plugin is enabled.
@@ -70,6 +84,12 @@ impl Plugin {
     /// Register these pairings while the plugin is enabled.
     pub fn with_pairings(mut self, pairings: fn() -> Vec<&'static dyn crate::pairing::Pairing>) -> Self {
         self.pairings = pairings;
+        self
+    }
+
+    /// Add this to `tveee diagnose` while the plugin is enabled.
+    pub fn with_diagnose(mut self, diagnose: fn(&Tv) -> Vec<Finding>) -> Self {
+        self.diagnose = diagnose;
         self
     }
 

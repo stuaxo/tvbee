@@ -133,6 +133,16 @@ pub fn ping(tv: &Tv) -> bool {
     call(tv, "JSONRPC.Ping", "{}").is_ok_and(|r| r == "pong")
 }
 
+/// `tveee diagnose`: is its remote control on?
+pub fn diagnose(tv: &Tv) -> Vec<crate::plugin::Finding> {
+    let (ok, detail) = if ping(tv) {
+        (Some(true), "its remote control answers (position, exact seeking, artwork, places)")
+    } else {
+        (None, "installed, but its remote control doesn't answer (Kodi not running, or off: Settings > Services > Control > Allow remote control via HTTP; with a password, 'tveee pair kodi')")
+    };
+    vec![crate::plugin::Finding { ok, what: "kodi", detail: detail.into() }]
+}
+
 /// Wait for Kodi's API to answer (Kodi starting), up to `secs`.
 fn wait_ready(tv: &Tv, secs: u64) -> Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
@@ -406,7 +416,7 @@ impl crate::provider::Player for Kodi {
     fn picture(&self, tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {
         let art = match art.strip_prefix(FRAME).and_then(|a| a.split_once('\n')) {
             Some((path, artwork)) => {
-                if let Some(jpeg) = crate::plugins::youtube::frame_of(std::path::Path::new(path), at.unwrap_or(0.0)) {
+                if let Some(jpeg) = crate::frames::frame_of(std::path::Path::new(path), at.unwrap_or(0.0)) {
                     return Outcome::Handled(jpeg);
                 }
                 if artwork.is_empty() {
@@ -799,6 +809,10 @@ fn ask(prompt: &str, default: &str) -> Result<String> {
 impl crate::pairing::Pairing for KodiLogin {
     fn id(&self) -> &'static str {
         PAIRING
+    }
+    // only with a password: its diagnose check says when
+    fn optional(&self) -> bool {
+        true
     }
     fn name(&self) -> &'static str {
         "Kodi's remote control (JSON-RPC)"

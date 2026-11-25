@@ -167,9 +167,7 @@ impl crate::provider::Player for YouTube {
     }
 }
 
-fn program(name: &str) -> Option<PathBuf> {
-    crate::tv::search_path(name, std::env::var_os("PATH").as_deref())
-}
+use crate::frames::{ffmpeg_jpeg, frame_of, program};
 
 /// Where small copies of videos and storyboard sheets are kept.
 fn previews_dir() -> Option<PathBuf> {
@@ -290,29 +288,6 @@ pub fn local_copy(id: &str) -> Result<PathBuf> {
         Some(p) => Ok(p),
         None => failed(format!("preview: yt-dlp couldn't fetch the video{}", if done { "" } else { " (it failed)" })),
     }
-}
-
-/// `ffmpeg` over `input` with filter `vf`, one frame out as JPEG.
-fn ffmpeg_jpeg(seek: Option<f64>, input: &std::path::Path, vf: &str) -> Option<Vec<u8>> {
-    let mut cmd = std::process::Command::new(program("ffmpeg")?);
-    cmd.args(["-loglevel", "error"]);
-    if let Some(s) = seek {
-        cmd.args(["-ss", &format!("{:.2}", s.max(0.0))]);
-    }
-    let out = cmd
-        .arg("-i")
-        .arg(input)
-        .args(["-frames:v", "1", "-vf", vf, "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    (!out.stdout.is_empty()).then_some(out.stdout)
-}
-
-/// The frame at `secs` into a video file, as JPEG.
-pub fn frame_of(file: &std::path::Path, secs: f64) -> Option<Vec<u8>> {
-    ffmpeg_jpeg(Some(secs), file, "scale=320:-2")
 }
 
 /// A video's storyboard: sheets of `cols` x `rows` frames, each `width` x

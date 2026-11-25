@@ -51,7 +51,8 @@ pub fn all() -> Vec<Plugin> {
         .with_pairings(philips::pairings),
         Plugin::detect("kodi", "Kodi: what it's playing, exact seeking, artwork, places (its remote control)", kodi::detect, kodi::actions)
             .with_providers(kodi::providers)
-            .with_pairings(kodi::pairings),
+            .with_pairings(kodi::pairings)
+            .with_diagnose(kodi::diagnose),
         Plugin::detect("youtube", "the YouTube app: what's on, search, looking inside it", youtube::detect, youtube::actions)
             .with_apps(youtube::apps)
             .with_providers(youtube::providers),

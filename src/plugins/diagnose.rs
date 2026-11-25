@@ -296,8 +296,8 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
         None => "the built-in default; set TV_IP in .env or ~/.config/tveee/env (try 'tveee findtv')".to_string(),
     };
     report(Some(true), "TV_IP", &format!("{ip} ({from})"));
-    // (Kodi's login is only needed with a password: checked below)
-    for p in crate::pairing::all().iter().filter(|p| p.id() != "kodi") {
+    // (optional ones, like Kodi's login, are the plugins' own checks below)
+    for p in crate::pairing::all().iter().filter(|p| !p.optional()) {
         match crate::pairing::load(p.id(), &ip) {
             Some(_) => report(Some(true), p.id(), &format!("paired with {} ({})", p.name(), p.unlocks())),
             None => report(None, p.id(), &format!("not paired: 'tveee pair {}' for {}", p.id(), p.unlocks())),
@@ -366,17 +366,9 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
     if !plugins.is_empty() {
         report(None, "plugins", &format!("{} (see 'tveee plugins')", plugins.join(", ")));
     }
-    // Kodi installed: is its remote control on?
-    if c.plugins.iter().any(|p| p.name == "kodi" && p.enabled) {
-        if super::kodi::ping(&c.tv) {
-            report(Some(true), "kodi", "its remote control answers (position, exact seeking, artwork, places)");
-        } else {
-            report(
-                None,
-                "kodi",
-                "installed, but its remote control doesn't answer (Kodi not running, or off: Settings > Services > Control > Allow remote control via HTTP; with a password, 'tveee pair kodi')",
-            );
-        }
+    // the enabled plugins' own checks (Kodi: is its remote control on?)
+    for f in c.diagnoses.iter().flat_map(|d| d(&c.tv)) {
+        report(f.ok, f.what, &f.detail);
     }
     report(None, "ui", if cfg!(feature = "ui") { "built in ('tveee ui')" } else { "not in this build (cargo install --features ui)" });
 
