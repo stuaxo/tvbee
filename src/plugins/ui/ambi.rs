@@ -5,14 +5,14 @@ use super::*;
 impl App {
     /// The Ambilight dialog's rows, from the last reading (none until there is one).
     pub(super) fn ambi_rows(&self) -> Vec<crate::plugins::ambilight::Row> {
-        match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+        match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
             Some(crate::plugins::ambilight::Panel::Shown { state, lights }) => crate::plugins::ambilight::rows(state, lights),
             _ => Vec::new(),
         }
     }
 
     pub(super) fn ambi_lights(&self) -> Vec<crate::plugins::ambilight::Light> {
-        match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+        match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
             Some(crate::plugins::ambilight::Panel::Shown { lights, .. }) => lights.clone(),
             _ => Vec::new(),
         }
@@ -20,7 +20,7 @@ impl App {
 
     /// Pick option `col` of row `row` in the Ambilight dialog: make its
     /// change, or (a light) ask for a colour.
-    pub(super) fn ambi_pick(&mut self, row: usize, col: usize, actions: &Sender<Action>) {
+    pub(super) fn ambi_pick(&mut self, row: usize, col: usize, actions: &Handle) {
         let rows = self.ambi_rows();
         let Some(r) = rows.get(row) else { return };
         if r.name == "lights" {
@@ -36,7 +36,7 @@ impl App {
     }
 
     /// Keys in the Ambilight dialog: ↑/↓ rows, ←/→ change at once, ⏎ picks.
-    pub(super) fn ambi_key(&mut self, row: usize, col: usize, code: KeyCode, actions: &Sender<Action>) {
+    pub(super) fn ambi_key(&mut self, row: usize, col: usize, code: KeyCode, actions: &Handle) {
         let rows = self.ambi_rows();
         if matches!(code, KeyCode::Esc | KeyCode::Char('L') | KeyCode::Char('q')) || rows.is_empty() {
             if !rows.is_empty() || code == KeyCode::Esc {
@@ -67,7 +67,7 @@ impl App {
     pub(super) fn ambilight_lines(&self) -> Vec<(Line<'static>, Option<Hit>)> {
         use crate::plugins::ambilight::Panel;
         let dim = Style::new().fg(Color::DarkGray);
-        match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+        match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
             None => vec![(Line::from("reading the Ambilight...").italic(), None)],
             Some(Panel::Missing) => vec![(Line::from("no Ambilight here that tveee can control"), None)],
             Some(Panel::NeedsPairing) => vec![
@@ -142,7 +142,7 @@ impl App {
         // (line, x offset in it, width, row, option)
         let mut spots: Vec<(usize, usize, usize, usize, usize)> = Vec::new();
         if rows.is_empty() {
-            text.push(Line::from(match self.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
+            text.push(Line::from(match self.st.snap.as_ref().and_then(|s| s.ambilight.as_ref()) {
                 Some(crate::plugins::ambilight::Panel::NeedsPairing) => "tveee isn't paired with the TV yet: P pairs",
                 Some(crate::plugins::ambilight::Panel::Failed(_)) => "couldn't read the Ambilight (see the panel)",
                 _ => "reading the Ambilight...",

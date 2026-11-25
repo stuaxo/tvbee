@@ -10,7 +10,7 @@ use crate::plugins::apps::{self, Kind};
 use crate::plugins::media::MediaInfo;
 use crate::tv::Tv;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Activity {
     /// e.g. "Watching YouTube"
     pub what: String,

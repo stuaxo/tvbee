@@ -102,14 +102,14 @@ pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Over
 
 impl App {
     /// Carry out choice `at` of the actions pop-up for launcher row `sel`.
-    pub(super) fn run_choice(&mut self, tab: AppTab, sel: usize, at: usize, actions: &Sender<Action>) {
-        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+    pub(super) fn run_choice(&mut self, tab: AppTab, sel: usize, at: usize, actions: &Handle) {
+        let rows = tab_list(self.st.apps_list(), tab);
         let Some(e) = rows.get(sel) else {
             self.overlay = Overlay::None;
             return;
         };
-        let running = self.running.contains(&e.package);
-        let Some(choice) = app_choices(e, running, self.fixed.contains(&e.package)).get(at).copied() else { return };
+        let running = self.st.running.contains(&e.package);
+        let Some(choice) = app_choices(e, running, self.st.fixed.contains(&e.package)).get(at).copied() else { return };
         match choice_action(choice, e) {
             // done: back to the list, with what's running brought up to date
             (Some(a), _) => {
@@ -123,9 +123,9 @@ impl App {
     }
 
     /// Keys in the actions pop-up.
-    pub(super) fn choice_key(&mut self, tab: AppTab, sel: usize, at: usize, code: KeyCode, actions: &Sender<Action>) {
-        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
-        let n = rows.get(sel).map_or(1, |e| app_choices(e, self.running.contains(&e.package), self.fixed.contains(&e.package)).len());
+    pub(super) fn choice_key(&mut self, tab: AppTab, sel: usize, at: usize, code: KeyCode, actions: &Handle) {
+        let rows = tab_list(self.st.apps_list(), tab);
+        let n = rows.get(sel).map_or(1, |e| app_choices(e, self.st.running.contains(&e.package), self.st.fixed.contains(&e.package)).len());
         match code {
             KeyCode::Up => self.overlay = Overlay::AppActions { tab, sel, at: (at + n - 1) % n },
             KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::AppActions { tab, sel, at: (at + 1) % n },
@@ -137,8 +137,8 @@ impl App {
 
     /// The launcher pop-up; `behind` another pop-up it's dimmed and inert.
     pub(super) fn draw_apps(&mut self, f: &mut Frame, tab: AppTab, sel: usize, behind: bool) {
-        let pkg = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
-        let all = self.apps.as_deref().unwrap_or_default();
+        let pkg = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
+        let all = self.st.apps_list();
         let list = tab_list(all, tab);
         let show_pkgs = crate::options::get(crate::options::SHOW_PACKAGES);
         // the tab labels, with counts
@@ -165,7 +165,7 @@ impl App {
         );
         // (line, the entry it shows); section headings show none
         let mut rows: Vec<(Line, Option<usize>)> = Vec::new();
-        if self.apps.is_none() {
+        if self.st.apps.is_none() {
             rows.push((Line::from("looking for installed apps...").italic(), None));
         } else if list.is_empty() {
             rows.push((Line::from("none on this TV").italic(), None));
@@ -180,7 +180,7 @@ impl App {
             }
             let on = if Some(e.package.as_str()) == pkg.as_deref() { "  (on now)" } else { "" };
             let extra = e.alias.or(e.tag).unwrap_or("");
-            let dot = match (self.running.contains(&e.package) && e.target != "home", self.fixed.contains(&e.package)) {
+            let dot = match (self.st.running.contains(&e.package) && e.target != "home", self.st.fixed.contains(&e.package)) {
                 (true, true) => "⊘",
                 (true, false) => "●",
                 _ => " ",
@@ -239,10 +239,10 @@ impl App {
     pub(super) fn draw_app_actions(&mut self, f: &mut Frame, tab: AppTab, sel: usize, at: usize) {
         // the list stays behind it, dimmed
         self.draw_apps(f, tab, sel, true);
-        let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+        let rows = tab_list(self.st.apps_list(), tab);
         let Some(e) = rows.get(sel) else { return };
-        let running = self.running.contains(&e.package);
-        let fixed = self.fixed.contains(&e.package);
+        let running = self.st.running.contains(&e.package);
+        let fixed = self.st.fixed.contains(&e.package);
         let choices = app_choices(e, running, fixed);
         let mut text: Vec<Line> = vec![
             Line::from(format!(

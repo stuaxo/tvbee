@@ -302,18 +302,18 @@ pub fn guide_move(ids: &[u32], at: u32, code: KeyCode) -> u32 {
 impl App {
     /// The guide's rows, once fetched.
     pub(super) fn guide_rows(&self) -> &[GuideRow] {
-        self.guide.as_ref().and_then(|g| g.as_ref().ok()).map_or(&[][..], |g| &g.rows[..])
+        self.st.guide_ok().map_or(&[][..], |g| &g.rows[..])
     }
 
     /// Open the guide on `channel`, else the channel that's on. It's
     /// fetched afresh each time (what's on moves on); the last copy shows
     /// meanwhile.
-    pub(super) fn open_guide(&mut self, channel: Option<u32>, actions: &Sender<Action>) {
+    pub(super) fn open_guide(&mut self, channel: Option<u32>, actions: &Handle) {
         if live_provider().is_none() {
             self.note = "no live TV guide on this TV".into();
             return;
         }
-        let on_now = self.snap.as_ref().and_then(|s| s.activity.as_ref()).and_then(|a| a.field("channel")).and_then(|f| match f.open {
+        let on_now = self.st.snap.as_ref().and_then(|s| s.activity.as_ref()).and_then(|a| a.field("channel")).and_then(|f| match f.open {
             Some(nowplaying::Open::Guide { channel }) => channel,
             None => None,
         });
@@ -321,7 +321,6 @@ impl App {
         self.guide_later = 0;
         self.guide_view = self.guide_start();
         self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
-        self.guide_loading = true;
         let _ = actions.send(Action::LoadGuide);
         // the details panel's descriptions take the TV a while the first time
         let _ = actions.send(Action::PrefetchInfo);
@@ -359,7 +358,7 @@ impl App {
 
     /// Keys in the guide: typing filters, ↑/↓/page keys/home/end move, ←/→
     /// go earlier/later in time, Tab switches tabs, Enter watches, Esc closes.
-    pub(super) fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Sender<Action>) {
+    pub(super) fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         // keys for the details panel while it has the keyboard
         if self.details == Details::Focused {
             match code {
@@ -418,24 +417,23 @@ impl App {
     /// Switch the guide to `tab`, the highlight moving to a channel it shows.
     pub(super) fn guide_tab(&mut self, tab: GuideTab, at: u32) {
         let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
-        let current = self.guide.as_ref().and_then(|g| g.as_ref().ok()).and_then(|g| g.current);
+        let current = self.st.guide_ok().and_then(|g| g.current);
         self.details_scroll = 0;
         self.overlay = Overlay::Guide { tab, at: guide_tab_pick(&ids, at, current) };
     }
 
     /// Star or unstar channel `id`: the star changes now, and the guide is
     /// read back from the TV once it's done (so a refusal puts it back).
-    pub(super) fn toggle_favourite(&mut self, id: u32, actions: &Sender<Action>) {
-        let Some(Ok(g)) = self.guide.as_mut() else { return };
-        let Some(row) = g.rows.iter_mut().find(|r| r.channel.id == id) else { return };
-        row.channel.favourite = !row.channel.favourite;
-        let (ch, on) = (row.channel.clone(), row.channel.favourite);
+    pub(super) fn toggle_favourite(&mut self, id: u32, actions: &Handle) {
+        // the engine stars it at once (see `Handle::send`)
+        let Some(row) = self.guide_rows().iter().find(|r| r.channel.id == id) else { return };
+        let (ch, on) = (row.channel.clone(), !row.channel.favourite);
         self.note = format!("{} {}...", if on { "adding to favourites:" } else { "removing from favourites:" }, ch.label());
         let _ = actions.send(Action::Favourite(ch, on));
     }
 
     /// Switch to channel `id` and close the guide.
-    pub(super) fn watch_channel(&mut self, id: u32, actions: &Sender<Action>) {
+    pub(super) fn watch_channel(&mut self, id: u32, actions: &Handle) {
         let ch = self.guide_rows().iter().find(|r| r.channel.id == id).map(|r| r.channel.clone());
         self.overlay = Overlay::None;
         if let Some(ch) = ch {
@@ -465,7 +463,7 @@ impl App {
             self.guide_slid = Instant::now() - Duration::from_millis(10);
         }
         self.slide(spc);
-        let title = match &self.guide {
+        let title = match self.st.guide.as_deref() {
             None => {
                 text.push(Line::from("reading the guide (the first time takes a few seconds)...").italic());
                 " guide ".to_string()
@@ -532,7 +530,7 @@ impl App {
                 // its lines, and whether the description is still being read
                 let details = picked.as_ref().map(|(e, ch)| {
                     let key = (ch.id, e.start);
-                    let info = match (e.info.as_deref(), self.infos.get(&key)) {
+                    let info = match (e.info.as_deref(), self.st.infos.get(&key)) {
                         (Some(i), _) => Some(Some(i)),
                         (None, Some(i)) => Some(i.as_deref()),
                         (None, None) => {
@@ -661,7 +659,7 @@ impl App {
                 }
                 let keys = if focused { GUIDE_KEYS_DETAILS } else { GUIDE_KEYS };
                 text.push(Line::from(keys).fg(Color::DarkGray));
-                let refreshing = if self.guide_loading { " (refreshing…)" } else { "" };
+                let refreshing = if self.st.guide_loading { " (refreshing…)" } else { "" };
                 format!(" guide: {}{refreshing} ", g.place.as_deref().unwrap_or(g.provider))
             }
         };

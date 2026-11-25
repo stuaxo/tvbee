@@ -18,7 +18,8 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod keymap;
@@ -55,20 +56,13 @@ pub fn volume_shown(now: Option<Vol>, last: Option<(Vol, Duration)>) -> (Option<
     }
 }
 
-/// How long the last known volume is shown as current when a refresh can't
-/// read it; after that it's greyed.
-const VOLUME_STALE: Duration = Duration::from_secs(10);
 struct App {
     ip: String,
-    snap: Option<Snapshot>,
-    /// `snap` is what was last seen in an earlier run, not read yet.
-    seeded: bool,
-    /// What was last kept for the next run (kept again when it changes).
-    kept: Option<LastSeen>,
-    /// When `snap` was taken, to move the progress bar along between refreshes.
-    at: Instant,
+    /// The engine: where requests go, and what it knows (`st`).
+    engine: Handle,
+    /// The engine's state, as of this frame.
+    st: Arc<TvState>,
     note: String,
-    error: Option<String>,
     mode: Mode,
     overlay: Overlay,
     menu: Vec<ActionDescriptor>,
@@ -76,29 +70,16 @@ struct App {
     hits: Vec<(ratatui::layout::Rect, Hit)>,
     /// Show the system panel (memory, storage, ...).
     info: bool,
-    /// Memory used (MB) at each refresh, oldest first, for the graph.
-    mem_history: Vec<u64>,
-    /// Installed apps for the launcher; None until the worker has looked.
-    apps: Option<Vec<Entry>>,
     /// The launcher tab used last.
     apps_tab: AppTab,
     /// What has been typed into the open prompt.
     prompt: String,
-    /// Packages with a running process (for the launcher).
-    running: std::collections::BTreeSet<String>,
-    /// Running apps that can't be closed (Android keeps them running).
-    fixed: std::collections::BTreeSet<String>,
-    /// Apps with a proper search; None until the worker has looked.
-    searchable: Option<Vec<search::Searchable>>,
     /// The search box's app choices, made when it opens.
     search_targets: Vec<SearchTarget>,
     /// An action still settling: its label stands in for the what line.
     settling: Option<Settling>,
     /// Off (`--no-settle`): show every state the TV reports, as it comes.
     settle: bool,
-    /// The last volume the TV reported (level, max), and when: shown while a
-    /// refresh can't read it, greyed once it's [`VOLUME_STALE`] old.
-    last_volume: Option<((u32, u32), Instant)>,
     /// The preview panel: open or not, its picture (ready to draw), where it
     /// came from, and what it's doing.
     preview_open: bool,
@@ -107,13 +88,8 @@ struct App {
     preview_note: String,
     /// How this terminal shows pictures (asked once at the start).
     picker: Option<ratatui_image::picker::Picker>,
-    /// The TV has Ambilight tveee can control; and whether its panel is open.
-    ambi_supported: bool,
+    /// Whether the Ambilight panel is open.
     ambi_open: bool,
-    /// The guide pop-up's rows; None until fetched.
-    guide: Option<std::result::Result<Guide, String>>,
-    /// The guide is being read afresh (the last copy shows meanwhile).
-    guide_loading: bool,
     /// How many GUIDE_STEPs ahead of now the guide shows.
     guide_later: i64,
     /// Where the grid's left edge is drawn now (Unix seconds); it slides
@@ -127,9 +103,7 @@ struct App {
     /// The programme the details are for (channel, start), to start each
     /// one from the top.
     details_of: Option<(u32, i64)>,
-    /// Descriptions fetched so far (None: the guide has none), by (channel, start).
-    infos: std::collections::HashMap<(u32, i64), Option<String>>,
-    /// Descriptions asked for and not back yet; `want_info` is the next to ask for.
+    /// Descriptions asked for; `want_info` is the next to ask for.
     infos_asked: std::collections::HashSet<(u32, i64)>,
     want_info: Option<(u32, i64)>,
 }
@@ -261,7 +235,7 @@ impl Drop for MouseCapture {
     }
 }
 
-fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action>, msgs: &Receiver<Msg>) -> std::io::Result<()> {
+fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreEvent>) -> std::io::Result<()> {
     use ratatui::crossterm::event::{MouseButton, MouseEventKind};
     // redraw when something changed (a key, news from the TV), and at least
     // every TICK so the progress bar moves
@@ -269,10 +243,13 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
     let mut drawn: Option<Instant> = None;
     let mut dirty = true;
     loop {
-        for m in msgs.try_iter() {
-            app.handle(m);
+        let actions = &app.engine.clone();
+        for e in events.try_iter() {
+            app.handle(e);
             dirty = true;
         }
+        // what was asked for may have changed it at once (a star, loading)
+        app.st = app.engine.state();
         if dirty || app.animating() || drawn.is_none_or(|d| d.elapsed() >= TICK) {
             term.draw(|f| app.draw(f))?;
             drawn = Some(Instant::now());
@@ -311,7 +288,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
                     };
                 } else if let (Overlay::Apps { tab, sel }, KeyCode::Char('/')) = (app.overlay, k.code) {
                     // search the highlighted app
-                    let rows = tab_list(app.apps.as_deref().unwrap_or_default(), tab);
+                    let rows = tab_list(app.st.apps_list(), tab);
                     let pkg = rows.get(sel).map(|e| e.package.clone());
                     app.open_search(pkg);
                 } else if let Overlay::Ambilight { row, col } = app.overlay {
@@ -361,7 +338,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, actions: &Sender<Action
                     app.prompt = text;
                     app.apply_overlay(next, action, actions);
                 } else if let Overlay::Apps { tab, sel } = app.overlay {
-                    let rows = tab_list(app.apps.as_deref().unwrap_or_default(), tab);
+                    let rows = tab_list(app.st.apps_list(), tab);
                     let (next, action) = apps_key(tab, sel, k.code, &rows);
                     app.apply_overlay(next, action, actions);
                 } else if app.overlay != Overlay::None {
@@ -418,48 +395,33 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         return crate::error::usage("ui needs a terminal");
     }
     let engine = Engine::start(&c.tv.ip, c.menu.clone());
-    let seen = last::load(&c.tv.ip);
     let mut app = App {
         ip: c.tv.ip.clone(),
-        snap: seen.as_ref().map(last::seed),
-        seeded: seen.is_some(),
-        kept: seen.clone(),
-        at: Instant::now(),
+        st: engine.handle.state(),
+        engine: engine.handle.clone(),
         note: String::new(),
-        error: None,
         mode: Mode::Player,
         overlay: Overlay::None,
         menu: c.menu.clone(),
         hits: Vec::new(),
         info: false,
-        mem_history: Vec::new(),
-        apps: None,
         apps_tab: AppTab::Known,
         prompt: String::new(),
-        running: std::collections::BTreeSet::new(),
-        fixed: std::collections::BTreeSet::new(),
-        searchable: None,
         search_targets: Vec::new(),
         settling: None,
         settle,
-        ambi_supported: false,
         ambi_open: false,
-        // greyed: it's from before
-        last_volume: seen.as_ref().and_then(|l| Some((l.volume?, Instant::now().checked_sub(VOLUME_STALE * 2)?))),
         preview_open: false,
         preview: None,
         preview_source: "",
         preview_note: String::new(),
         picker: None,
-        guide: None,
-        guide_loading: false,
         guide_later: 0,
         guide_view: 0,
         guide_slid: Instant::now(),
         details: Details::Closed,
         details_scroll: 0,
         details_of: None,
-        infos: std::collections::HashMap::new(),
         infos_asked: std::collections::HashSet::new(),
         want_info: None,
     };
@@ -477,7 +439,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let result = ratatui::run(|term| {
         let _mouse = mouse.then(MouseCapture::on);
         let _paste = BracketedPaste::on();
-        event_loop(term, &mut app, &engine.actions, &engine.msgs)
+        event_loop(term, &mut app, &engine.events)
     });
     engine.stop();
     Ok(result?)
@@ -526,85 +488,49 @@ pub fn actions() -> Vec<ActionDescriptor> {
 }
 
 impl App {
-    fn handle(&mut self, m: Msg) {
-        match m {
-            Msg::Snap(s, at) => {
-                if let Some(m) = s.system.mem {
-                    self.mem_history.push(m.used() / 1024);
-                    if self.mem_history.len() > MEM_HISTORY {
-                        self.mem_history.remove(0);
+    fn handle(&mut self, e: CoreEvent) {
+        match e {
+            CoreEvent::Changed(change) => {
+                self.st = self.engine.state();
+                match change {
+                    // while an action settles the latest snapshot is only
+                    // shown once the action has got there
+                    Change::Snapshot => {
+                        let snap = self.st.snap.as_ref();
+                        let headline = snap.and_then(|s| s.activity.as_ref()).map(Activity::headline);
+                        if let Some(st) = &mut self.settling {
+                            st.observe(snap.and_then(front_pkg).as_deref(), headline.as_deref(), Instant::now());
+                        }
                     }
-                }
-                // the latest snapshot is always kept; while an action
-                // settles it's only shown once the action has got there
-                let headline = s.activity.as_ref().map(Activity::headline);
-                if let Some(st) = &mut self.settling {
-                    st.observe(front_pkg(&s).as_deref(), headline.as_deref(), Instant::now());
-                }
-                if let Some(v) = s.volume {
-                    self.last_volume = Some((v, Instant::now()));
-                }
-                // kept for the next run's first frame, when what's on changes
-                if let Some(l) = last::of(&s) {
-                    let same = self.kept.as_ref().is_some_and(|k| (&k.what, &k.title, k.volume) == (&l.what, &l.title, l.volume));
-                    if !same {
-                        last::save(&self.ip, &l);
-                        self.kept = Some(l);
+                    // nothing picked yet: start on the channel that's on
+                    Change::Guide => {
+                        if let (Overlay::Guide { tab, at: 0 }, Some(g)) = (self.overlay, self.st.guide_ok()) {
+                            let first = g.rows.first().map_or(0, |r| r.channel.id);
+                            self.overlay = Overlay::Guide { tab, at: g.current.unwrap_or(first) };
+                        }
                     }
+                    _ => {}
                 }
-                (self.snap, self.at, self.error, self.seeded) = (Some(*s), at, None, false);
             }
-            Msg::Note(n) => self.note = n,
-            Msg::Failed(e) => {
-                crate::tlog!("failed: {e}");
-                // the action didn't happen: show what's really on
-                self.settling = None;
-                self.error = Some(e);
-            }
-            Msg::Apps(list) => self.apps = Some(list),
-            Msg::Searchable(list) => self.searchable = Some(list),
-            Msg::Running(set, fixed) => (self.running, self.fixed) = (set, fixed),
-            Msg::Ambilight(has) => self.ambi_supported = has,
-            Msg::Preview(p) => {
+            CoreEvent::Note(n) => self.note = n,
+            // the action didn't happen: show what's really on
+            CoreEvent::Failed => self.settling = None,
+            CoreEvent::Preview(p) => {
                 let picker = self.picker.get_or_insert_with(ratatui_image::picker::Picker::halfblocks);
                 if let Some(img) = image::RgbImage::from_raw(p.width, p.height, p.rgb) {
                     self.preview = Some(picker.new_resize_protocol(image::DynamicImage::ImageRgb8(img)));
                     self.preview_source = p.source;
-
                 }
             }
-            Msg::PreviewNote(n) => {
+            CoreEvent::PreviewNote(n) => {
                 if !n.is_empty() && n != self.preview_note {
                     crate::tlog!("preview: {n}");
                 }
                 self.preview_note = n;
             }
-            Msg::AskPin => {
+            CoreEvent::AskPin => {
                 self.prompt.clear();
                 self.overlay = Overlay::Pin;
-            }
-            Msg::Info(key, info) => {
-                self.infos_asked.remove(&key);
-                let info = info.unwrap_or_else(|e| Some(format!("(couldn't read the description: {e})")));
-                self.infos.insert(key, info);
-            }
-            Msg::Guide(g) => {
-                if let Some(news) = g.as_ref().ok().and_then(|g| g.news.clone()) {
-                    self.note = news;
-                }
-                // nothing picked yet: start on the channel that's on
-                if let (Overlay::Guide { tab, at: 0 }, Ok(g)) = (self.overlay, &g) {
-                    let first = g.rows.first().map_or(0, |r| r.channel.id);
-                    self.overlay = Overlay::Guide { tab, at: g.current.unwrap_or(first) };
-                }
-                self.guide = Some(g);
-                self.guide_loading = false;
-            }
-            Msg::Seeked(pos, at) => {
-                if let Some(p) = self.snap.as_mut().and_then(|s| s.activity.as_mut()).and_then(|a| a.progress.as_mut()) {
-                    p.position = pos;
-                    self.at = at;
-                }
             }
         }
     }
@@ -615,12 +541,12 @@ impl App {
         if !self.settle {
             return;
         }
-        let snap = self.snap.as_ref();
+        let snap = self.st.snap.as_ref();
         // home screens on the way: the ones tveee knows, and those on the TV
         let mut passing: Vec<String> = self
-            .apps
+            .st
+            .apps_list()
             .iter()
-            .flatten()
             .filter(|e| e.section == SECTIONS[0] || apps::passes_through(&e.package))
             .map(|e| e.package.clone())
             .collect();
@@ -644,14 +570,14 @@ impl App {
     }
 
     /// Run what a clicked field opens.
-    fn open(&mut self, o: nowplaying::Open, actions: &Sender<Action>) {
+    fn open(&mut self, o: nowplaying::Open, actions: &Handle) {
         match o {
             nowplaying::Open::Guide { channel } => self.open_guide(channel, actions),
         }
     }
 
     /// Act on a key or button. Returns true to quit.
-    fn apply(&mut self, input: Input, actions: &Sender<Action>) -> bool {
+    fn apply(&mut self, input: Input, actions: &Handle) -> bool {
         match input {
             Input::Quit => return true,
             Input::ToggleMode => {
@@ -663,7 +589,7 @@ impl App {
             }
             Input::ToggleHelp => self.overlay = Overlay::Help,
             Input::ToggleInfo => self.info = !self.info,
-            Input::ToggleAmbilight if !self.ambi_supported => {
+            Input::ToggleAmbilight if !self.st.ambilight => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
             Input::ToggleAmbilight => {
@@ -678,7 +604,7 @@ impl App {
                 }
                 let _ = actions.send(Action::PreviewPanel(self.preview_open));
             }
-            Input::AmbilightDialog if !self.ambi_supported => {
+            Input::AmbilightDialog if !self.st.ambilight => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
             Input::AmbilightDialog => {
@@ -699,23 +625,23 @@ impl App {
             Input::OpenOptions => self.overlay = Overlay::Options(0),
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
-                let standby = self.snap.as_ref().is_some_and(|s| s.standby);
+                let standby = self.st.snap.as_ref().is_some_and(|s| s.standby);
                 let wake = self.menu.iter().position(|m| m.id == "power.wake").filter(|_| standby);
                 self.overlay = Overlay::Menu(wake.unwrap_or(0));
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
             Input::OpenApps => {
                 // start on the app that's in front, if it's in the list
-                let pkg = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f));
+                let pkg = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f));
                 let tab = self.apps_tab;
-                let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+                let rows = tab_list(self.st.apps_list(), tab);
                 let now = rows.iter().position(|a| Some(a.package.as_str()) == pkg);
                 self.overlay = Overlay::Apps { tab, sel: now.unwrap_or(0) };
                 let _ = actions.send(Action::CheckRunning);
             }
             // the last refresh knows whether it's muted: just press the key
             Input::Do(Action::Mute) => {
-                let known = self.snap.as_ref().and_then(|s| s.muted);
+                let known = self.st.snap.as_ref().and_then(|s| s.muted);
                 let _ = actions.send(known.map_or(Action::Mute, Action::MuteKnown));
             }
             Input::Do(a) => {
@@ -727,7 +653,7 @@ impl App {
     }
 
     /// Move to the overlay `next`, running `action` if there is one.
-    fn apply_overlay(&mut self, next: Overlay, action: Option<Action>, actions: &Sender<Action>) {
+    fn apply_overlay(&mut self, next: Overlay, action: Option<Action>, actions: &Handle) {
         let was = self.overlay;
         self.overlay = next;
         if matches!(next, Overlay::Prompt(_)) && !matches!(was, Overlay::Prompt(_)) {
@@ -757,7 +683,7 @@ impl App {
             (_, _, Some(Action::Launch(target))) => {
                 // already running: resume it rather than start it again
                 let pkg = apps::pkg_of(&target).to_string();
-                if self.running.contains(&pkg) && target != "home" {
+                if self.st.running.contains(&pkg) && target != "home" {
                     self.note = format!("bringing {} to the front...", app_name(&pkg));
                     self.settle(self.note.clone(), Some(pkg));
                     let _ = actions.send(Action::Front(target));
@@ -795,7 +721,7 @@ impl App {
     }
 
     /// A left click at (x, y). Returns true to quit.
-    fn click(&mut self, x: u16, y: u16, actions: &Sender<Action>) -> bool {
+    fn click(&mut self, x: u16, y: u16, actions: &Handle) -> bool {
         let hit = self.hit_at(x, y);
         match (self.overlay, hit) {
             (Overlay::Menu(_), Some(Hit::MenuItem(i))) => {
@@ -834,7 +760,7 @@ impl App {
             // clicking outside closes it
             (Overlay::Guide { .. }, _) => self.overlay = Overlay::None,
             (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) => {
-                let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+                let rows = tab_list(self.st.apps_list(), tab);
                 let target = rows.get(i).map(|e| e.target.clone());
                 if let Some(target) = target {
                     self.apply_overlay(Overlay::None, Some(Action::Launch(target)), actions);
@@ -854,7 +780,7 @@ impl App {
                 let _ = actions.send(Action::Jump(bar_fraction(x, x0, width)));
             }
             (Overlay::None, Some(Hit::Volume { x0, width })) => {
-                if let Some((v, max)) = self.snap.as_ref().and_then(|s| s.volume) {
+                if let Some((v, max)) = self.st.snap.as_ref().and_then(|s| s.volume) {
                     let target = (bar_fraction(x, x0, width) * f64::from(max)).round() as i32;
                     let _ = actions.send(Action::Volume(target - v as i32));
                 }
@@ -879,7 +805,7 @@ impl App {
     }
 
     /// Mouse wheel: volume, or the menu highlight while the menu is open.
-    fn scroll(&mut self, up: bool, actions: &Sender<Action>) {
+    fn scroll(&mut self, up: bool, actions: &Handle) {
         match self.overlay {
             Overlay::Menu(_) => {
                 let code = if up { KeyCode::Up } else { KeyCode::Down };
@@ -887,7 +813,7 @@ impl App {
                 self.apply_overlay(next, action, actions);
             }
             Overlay::Apps { tab, sel } => {
-                let rows = tab_list(self.apps.as_deref().unwrap_or_default(), tab);
+                let rows = tab_list(self.st.apps_list(), tab);
                 let (next, _) = apps_key(tab, sel, if up { KeyCode::Up } else { KeyCode::Down }, &rows);
                 self.overlay = next;
             }

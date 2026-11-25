@@ -228,9 +228,9 @@ impl App {
 
     /// Open the search box on `pkg` (or the app in front).
     pub(super) fn open_search(&mut self, pkg: Option<String>) {
-        let front = self.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
+        let front = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
         let first = pkg.or(front);
-        self.search_targets = search_targets(first.as_deref(), self.searchable.as_deref().unwrap_or_default());
+        self.search_targets = search_targets(first.as_deref(), self.st.searchable_list());
         self.prompt.clear();
         self.overlay = Overlay::Search(0);
     }
@@ -314,7 +314,7 @@ impl App {
             ]),
             Line::default(),
         ];
-        if self.searchable.is_none() {
+        if self.st.searchable.is_none() {
             text.push(Line::from("(still checking which apps can search...)").italic());
         }
         text.push(Line::from("⏎ search   esc cancel   paste works   ctrl-u clears").fg(Color::DarkGray));

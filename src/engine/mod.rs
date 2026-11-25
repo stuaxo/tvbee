@@ -26,12 +26,14 @@ mod guide;
 mod lanes;
 pub mod last;
 mod preview;
+mod state;
 
 pub use self::apps_rows::*;
 pub use self::guide::*;
 pub use self::lanes::*;
 pub use self::last::LastSeen;
 pub(crate) use self::preview::*;
+pub use self::state::*;
 
 pub const KEY_BACK: u32 = 4;
 pub const KEY_HOME: u32 = 3;
@@ -120,7 +122,7 @@ pub enum Action {
     Refresh,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Snapshot {
     pub activity: Option<Activity>,
     pub volume: Option<(u32, u32)>,
@@ -174,16 +176,17 @@ pub enum Msg {
 
 /// The engine's threads, running for one TV.
 pub struct Engine {
-    /// Send it what the user asks for.
-    pub actions: Sender<Action>,
-    /// What it has to say: snapshots, notes, data, pictures.
-    pub msgs: Receiver<Msg>,
+    /// Send what the user asks for, read the state.
+    pub handle: Handle,
+    /// What it has to say: changes, notes, pictures.
+    pub events: Receiver<CoreEvent>,
     stop: Arc<AtomicBool>,
 }
 
 impl Engine {
     /// Start the lanes for the TV at `ip`; `menu` is what `Action::Menu(i)`
-    /// indexes into. Reads what's on at once.
+    /// indexes into. Reads what's on at once; meanwhile the state is what
+    /// was seen last run.
     pub fn start(ip: &str, menu: Vec<ActionDescriptor>) -> Engine {
         let (act_tx, act_rx) = mpsc::channel();
         let (msg_tx, msg_rx) = mpsc::channel();
@@ -217,17 +220,23 @@ impl Engine {
         let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None, last_window: String::new() };
         spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
         let _ = act_tx.send(Action::Refresh);
-        Engine { actions: act_tx, msgs: msg_rx, stop }
+        // the keeper: what the lanes find, into the state
+        let seen = last::load(ip);
+        let state = Arc::new(std::sync::Mutex::new(Arc::new(TvState::seeded(seen.as_ref()))));
+        let (event_tx, event_rx) = mpsc::channel();
+        let (st, ip) = (Arc::clone(&state), ip.to_string());
+        spawn_named("keeper", move || keep(&ip, &st, seen, &msg_rx, &event_tx));
+        Engine { handle: Handle::new(act_tx, state), events: event_rx, stop }
     }
 
     /// Stop the lanes and give them a moment to remove their port forwards
     /// (one may be mid-refresh); don't wait forever on a TV slow to answer.
     pub fn stop(self) {
         self.stop.store(true, Ordering::Relaxed);
-        drop(self.actions);
+        drop(self.handle);
         let deadline = Instant::now() + Duration::from_secs(3);
         while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-            if let Err(RecvTimeoutError::Disconnected) = self.msgs.recv_timeout(left) {
+            if let Err(RecvTimeoutError::Disconnected) = self.events.recv_timeout(left) {
                 break;
             }
         }
