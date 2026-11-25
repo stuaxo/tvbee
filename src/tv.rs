@@ -98,6 +98,26 @@ pub fn not_connected(stderr: &str) -> bool {
         || stderr.contains("no devices/emulators found")
 }
 
+/// How long `adb connect` gets.
+pub const CONNECT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Run `cmd` (stdout and stderr captured; it should say little), killing it
+/// if it isn't done within `limit`: then None.
+pub fn output_within(mut cmd: Proc, limit: std::time::Duration) -> io::Result<Option<Output>> {
+    use std::process::Stdio;
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let started = std::time::Instant::now();
+    while child.try_wait()?.is_none() {
+        if started.elapsed() >= limit {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    child.wait_with_output().map(Some)
+}
+
 /// `adb connect` reports most failures on stdout with exit status 0.
 pub fn connect_ok(stdout: &str) -> bool {
     stdout.contains("connected to")
@@ -139,11 +159,15 @@ impl Tv {
     /// `adb connect`; fails if adb can't run or the TV can't be reached.
     /// Other calls connect when they need to, so this is only for checking
     /// the TV can be reached.
+    /// Gives up after [`CONNECT_WAIT`]: adb waits minutes for an address
+    /// that doesn't answer (a TV that's off).
     pub fn connect(&self) -> Result<()> {
-        let out = Proc::new(adb_program())
-            .args(["connect", &self.ip])
-            .output()
-            .map_err(adb_err)?;
+        let mut cmd = Proc::new(adb_program());
+        cmd.args(["connect", &self.ip]);
+        let Some(out) = output_within(cmd, CONNECT_WAIT).map_err(adb_err)? else {
+            crate::tlog!("adb connect {}: FAILED: no answer in {}s", self.ip, CONNECT_WAIT.as_secs());
+            return failed(format!("can't connect to {}: no answer in {}s (is the TV on?)", self.ip, CONNECT_WAIT.as_secs()));
+        };
         let stdout = clean(&out.stdout);
         if out.status.success() && connect_ok(&stdout) {
             Ok(())
@@ -338,6 +362,20 @@ mod tests {
         assert!(connect_ok("already connected to 192.168.1.19:5555\n"));
         assert!(!connect_ok("failed to connect to '192.0.2.1:5555': Connection refused\n"));
         assert!(!connect_ok("cannot connect to 192.0.2.1:5555: No route to host\n"));
+    }
+
+    #[test]
+    fn output_within_a_limit() {
+        let cmd = |prog: &str, arg: &str| {
+            let mut c = Proc::new(prog);
+            c.arg(arg);
+            c
+        };
+        let quick = output_within(cmd("echo", "hi"), std::time::Duration::from_secs(5)).unwrap().unwrap();
+        assert_eq!(String::from_utf8_lossy(&quick.stdout), "hi\n");
+        let started = std::time::Instant::now();
+        let slow = output_within(cmd("sleep", "5"), std::time::Duration::from_millis(200)).unwrap();
+        assert!(slow.is_none() && started.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]
