@@ -130,30 +130,26 @@ pub struct Light {
 /// The lights in a `/6/ambilight/processed` (or `measured`, `cached`) reply:
 /// `{"layer1":{"left":{"0":{"r":35,"g":40,"b":44},...},...}}`.
 pub fn parse_lights(json: &str) -> Vec<Light> {
+    const SIDES: [&str; 4] = ["left", "top", "right", "bottom"];
+    let Some(v) = crate::http::json(json) else { return Vec::new() };
+    let Some(layers) = v.as_object() else { return Vec::new() };
     let mut out = Vec::new();
-    // walk the keys in order: a "layerN" opens a layer, a side name a side,
-    // a number a light (whose r, g, b follow)
-    let (mut layer, mut side) = (0, String::new());
-    let mut rest = json;
-    while let Some(q) = rest.find('"') {
-        let after = &rest[q + 1..];
-        let Some(end) = after.find('"') else { break };
-        let key = &after[..end];
-        rest = &after[end + 1..];
-        if let Some(n) = key.strip_prefix("layer").and_then(|n| n.parse().ok()) {
-            layer = n;
-        } else if ["left", "top", "right", "bottom"].contains(&key) {
-            side = key.to_string();
-        } else if let Ok(n) = key.parse::<u32>() {
-            let Some(close) = rest.find('}') else { break };
-            let obj = &rest[..close];
-            let c = |k: &str| crate::http::number_field(obj, k).map(|v| v.clamp(0.0, 255.0) as u8);
-            if let (Some(r), Some(g), Some(b)) = (c("r"), c("g"), c("b")) {
-                out.push(Light { layer, side: side.clone(), n, rgb: (r, g, b) });
+    for (name, sides) in layers {
+        let Some(layer) = name.strip_prefix("layer").and_then(|n| n.parse().ok()) else { continue };
+        for (side, lights) in sides.as_object().into_iter().flatten() {
+            if !SIDES.contains(&side.as_str()) {
+                continue;
             }
-            rest = &rest[close..];
+            for (n, rgb) in lights.as_object().into_iter().flatten() {
+                let c = |k: &str| crate::http::number(rgb, k).map(|v| v.clamp(0.0, 255.0) as u8);
+                if let (Ok(n), Some(r), Some(g), Some(b)) = (n.parse(), c("r"), c("g"), c("b")) {
+                    out.push(Light { layer, side: side.clone(), n, rgb: (r, g, b) });
+                }
+            }
         }
     }
+    // the TV's order: layer, then round the screen, then along each side
+    out.sort_by_key(|l| (l.layer, SIDES.iter().position(|s| *s == l.side), l.n));
     out
 }
 
@@ -289,20 +285,21 @@ pub fn state(tv: &Tv) -> Result<State> {
     });
     // power is the one every Ambilight TV has: its error is the one to show
     let power = power?;
-    let field = |json: &Result<String>, k: &str| json.as_ref().ok().and_then(|j| crate::http::string_field(j, k));
+    let field = |json: &Result<String>, k: &str| json.as_ref().ok().and_then(|j| crate::http::text(&crate::http::json(j)?, k));
     let on = |v: Option<String>| v.map(|p| p.eq_ignore_ascii_case("on"));
+    let layout = layout.ok().and_then(|l| crate::http::json(&l));
     let sides = layout
         .as_ref()
         .map(|l| {
             ["left", "top", "right", "bottom"]
                 .iter()
-                .map(|k| (k.to_string(), crate::http::number_field(l, k).unwrap_or(0.0) as u32))
+                .map(|k| (k.to_string(), crate::http::number(l, k).unwrap_or(0.0) as u32))
                 .filter(|(_, n)| *n > 0)
                 .collect()
         })
         .unwrap_or_default();
     Ok(State {
-        power: on(crate::http::string_field(&power, "power")).unwrap_or(false),
+        power: on(crate::http::json(&power).and_then(|v| crate::http::text(&v, "power"))).unwrap_or(false),
         mode: field(&mode, "current"),
         style: field(&config, "styleName"),
         setting: field(&config, "menuSetting"),
@@ -484,7 +481,7 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
             set_style(tv, "FOLLOW_COLOR", Some(s), Some(label))?;
             format!("ambilight: {label}")
         }
-        ["mode"] => crate::http::string_field(&get(tv, "/6/ambilight/mode")?, "current").unwrap_or_default(),
+        ["mode"] => crate::http::json(&get(tv, "/6/ambilight/mode")?).and_then(|v| crate::http::text(&v, "current")).unwrap_or_default(),
         ["mode", m] => {
             if !MODES.iter().any(|(n, _)| n == m) {
                 return usage(format!("ambilight mode: one of {}", MODES.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")));
@@ -560,7 +557,7 @@ pub fn menu() -> Vec<crate::menu::MenuItem> {
     use crate::menu::MenuItem;
     vec![
         MenuItem::new(WHAT, 'A', "ambilight on/off", item(|tv| {
-            let on = crate::http::string_field(&get(tv, "/6/ambilight/power")?, "power").is_some_and(|p| p.eq_ignore_ascii_case("on"));
+            let on = crate::http::json(&get(tv, "/6/ambilight/power")?).and_then(|v| crate::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
             set_power(tv, !on)
         })),
         MenuItem::new(WHAT, 'v', "ambilight: follow the video", item(|tv| {

@@ -28,88 +28,21 @@ pub fn detect(tv: &Tv) -> Result<bool> {
 
 // --- JSON bits ---------------------------------------------------------------
 
-/// The raw JSON value after the first `"key":` in `json` (an object, array,
-/// string, number, ...).
-pub fn value_of<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let pat = format!("\"{key}\"");
-    let mut from = 0;
-    loop {
-        let at = from + json[from..].find(&pat)?;
-        let rest = json[at + pat.len()..].trim_start();
-        if let Some(v) = rest.strip_prefix(':') {
-            let v = v.trim_start();
-            let start = json.len() - v.len();
-            return Some(&json[start..start + value_len(v)?]);
-        }
-        from = at + pat.len();
-    }
+use serde_json::Value;
+
+/// A non-empty string at `key`.
+fn str_of(v: &Value, key: &str) -> Option<String> {
+    v.get(key)?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-/// The length of the JSON value `v` starts with.
-fn value_len(v: &str) -> Option<usize> {
-    let b = v.as_bytes();
-    match b.first()? {
-        b'{' | b'[' => {
-            let (mut depth, mut in_str, mut esc) = (0i32, false, false);
-            for (i, c) in b.iter().enumerate() {
-                if in_str {
-                    match (esc, c) {
-                        (true, _) => esc = false,
-                        (false, b'\\') => esc = true,
-                        (false, b'"') => in_str = false,
-                        _ => {}
-                    }
-                    continue;
-                }
-                match c {
-                    b'"' => in_str = true,
-                    b'{' | b'[' => depth += 1,
-                    b'}' | b']' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            return Some(i + 1);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            None
-        }
-        b'"' => {
-            let mut esc = false;
-            for (i, c) in b.iter().enumerate().skip(1) {
-                match (esc, c) {
-                    (true, _) => esc = false,
-                    (false, b'\\') => esc = true,
-                    (false, b'"') => return Some(i + 1),
-                    _ => {}
-                }
-            }
-            None
-        }
-        _ => Some(v.find([',', '}', ']']).unwrap_or(v.len())),
-    }
-}
-
-/// The first string in a JSON list (`["a", "b"]`).
-fn first_string(list: &str) -> Option<String> {
-    let start = list.find('"')?;
-    let len = value_len(&list[start..])?;
-    crate::http::json_string(&list[start..start + len]).filter(|s| !s.is_empty())
-}
-
-fn str_of(json: &str, key: &str) -> Option<String> {
-    crate::http::json_string(value_of(json, key)?).filter(|s| !s.is_empty())
-}
-
-fn num_of(json: &str, key: &str) -> Option<f64> {
-    value_of(json, key)?.trim().parse().ok()
+fn num_of(v: &Value, key: &str) -> Option<f64> {
+    v.get(key)?.as_f64()
 }
 
 /// Kodi's time object (`{"hours":0,"minutes":3,"seconds":20,"milliseconds":5}`) in seconds.
-pub fn seconds(time: &str) -> Option<f64> {
+pub fn seconds(time: &Value) -> Option<f64> {
     let n = |k| num_of(time, k).unwrap_or(0.0);
-    value_of(time, "seconds")?;
+    time.get("seconds")?;
     Some(n("hours") * 3600.0 + n("minutes") * 60.0 + n("seconds") + n("milliseconds") / 1000.0)
 }
 
@@ -177,27 +110,28 @@ fn post(tv: &Tv, login: &(u16, String, String), body: &str) -> Result<String> {
 }
 
 /// Call `method` with `params` (a JSON object); returns its `result`.
-pub fn call(tv: &Tv, method: &str, params: &str) -> Result<String> {
+pub fn call(tv: &Tv, method: &str, params: &str) -> Result<Value> {
     let body = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"{method}","params":{params}}}"#);
     let reply = post(tv, &login(tv), &body)?;
     result_of(&reply, method)
 }
 
 /// The `result` of a JSON-RPC reply, or its error.
-pub fn result_of(reply: &str, method: &str) -> Result<String> {
-    if let Some(e) = value_of(reply, "error") {
+pub fn result_of(reply: &str, method: &str) -> Result<Value> {
+    let Ok(mut v) = serde_json::from_str::<Value>(reply) else { return failed(format!("Kodi: {method}: not JSON: {}", reply.trim())) };
+    if let Some(e) = v.get("error") {
         let msg = str_of(e, "message").unwrap_or_else(|| e.to_string());
         return failed(format!("Kodi: {method}: {msg}"));
     }
-    match value_of(reply, "result") {
-        Some(r) => Ok(r.to_string()),
+    match v.get_mut("result") {
+        Some(r) => Ok(r.take()),
         None => failed(format!("Kodi: {method}: no result")),
     }
 }
 
 /// Whether Kodi's API answers now.
 pub fn ping(tv: &Tv) -> bool {
-    call(tv, "JSONRPC.Ping", "{}").is_ok_and(|r| r.contains("pong"))
+    call(tv, "JSONRPC.Ping", "{}").is_ok_and(|r| r == "pong")
 }
 
 /// Wait for Kodi's API to answer (Kodi starting), up to `secs`.
@@ -215,41 +149,46 @@ fn wait_ready(tv: &Tv, secs: u64) -> Result<()> {
 /// Kodi's active player: (id, "video" | "audio" | "picture").
 fn player_id(tv: &Tv) -> Result<Option<(u32, String)>> {
     let r = call(tv, "Player.GetActivePlayers", "{}")?;
-    Ok(num_of(&r, "playerid").map(|id| (id as u32, str_of(&r, "type").unwrap_or_default())))
+    let first = r.get(0);
+    Ok(first.and_then(|p| num_of(p, "playerid")).map(|id| (id as u32, first.and_then(|p| str_of(p, "type")).unwrap_or_default())))
 }
 
 const ITEM_FIELDS: &str = r#"["title","showtitle","season","episode","artist","album","year","file","art","thumbnail","fanart","streamdetails"]"#;
 const PLAYER_FIELDS: &str = r#"["time","totaltime","speed","currentaudiostream","currentsubtitle","subtitleenabled"]"#;
 
 /// What's playing, from Player.GetItem's and Player.GetProperties' results.
-pub fn parse_playing(item: &str, props: &str) -> Playing {
-    let item = value_of(item, "item").unwrap_or(item);
+pub fn parse_playing(item: &Value, props: &Value) -> Playing {
+    let item = item.get("item").unwrap_or(item);
     let title = str_of(item, "title").or_else(|| str_of(item, "label"));
     let num = |k| num_of(item, k).filter(|n| *n >= 0.0).map(|n| n as u32);
     let subtitle = match (str_of(item, "showtitle"), num("season"), num("episode")) {
         (Some(show), Some(s), Some(e)) => Some(format!("{show} S{s:02}E{e:02}")),
         (Some(show), _, _) => Some(show),
-        _ => value_of(item, "artist").and_then(first_string).or_else(|| num("year").filter(|y| *y > 0).map(|y| y.to_string())),
+        _ => item
+            .get("artist")
+            .and_then(|a| a.get(0)?.as_str().filter(|a| !a.is_empty()).map(str::to_string))
+            .or_else(|| num("year").filter(|y| *y > 0).map(|y| y.to_string())),
     };
-    let time = value_of(props, "time").and_then(seconds);
-    let total = value_of(props, "totaltime").and_then(seconds).filter(|t| *t > 0.0);
+    let time = props.get("time").and_then(seconds);
+    let total = props.get("totaltime").and_then(seconds).filter(|t| *t > 0.0);
     let paused = num_of(props, "speed").is_some_and(|s| s == 0.0);
     let progress = time.map(|position| Progress { position, duration: total, paused });
     // a picture: fanart or a poster/thumb
-    let art = value_of(item, "art").and_then(|a| ["fanart", "poster", "thumb"].iter().find_map(|k| str_of(a, k))).or_else(|| str_of(item, "fanart")).or_else(|| str_of(item, "thumbnail"));
+    let art = item
+        .get("art")
+        .and_then(|a| ["fanart", "poster", "thumb"].iter().find_map(|k| str_of(a, k)))
+        .or_else(|| str_of(item, "fanart"))
+        .or_else(|| str_of(item, "thumbnail"));
     let mut extra = Vec::new();
-    if let Some(sd) = value_of(item, "streamdetails") {
-        let first = |k| value_of(sd, k).and_then(|list| crate::http::objects(list).first().map(|o| o.to_string()));
-        if let Some(v) = first("video") {
-            let h = num_of(&v, "height").unwrap_or(0.0) as u32;
-            let codec = str_of(&v, "codec").unwrap_or_default().to_uppercase();
-            if h > 0 {
-                extra.push(("video", format!("{h}p {codec}").trim().to_string()));
-            }
+    if let Some(v) = item.pointer("/streamdetails/video/0") {
+        let h = num_of(v, "height").unwrap_or(0.0) as u32;
+        let codec = str_of(v, "codec").unwrap_or_default().to_uppercase();
+        if h > 0 {
+            extra.push(("video", format!("{h}p {codec}").trim().to_string()));
         }
     }
     let track = |k: &str| {
-        let t = value_of(props, k)?;
+        let t = props.get(k)?;
         let name = str_of(t, "name").or_else(|| str_of(t, "language"))?;
         let codec = str_of(t, "codec").map(|c| format!(" {}", c.to_uppercase())).unwrap_or_default();
         Some(format!("{name}{codec}"))
@@ -257,7 +196,7 @@ pub fn parse_playing(item: &str, props: &str) -> Playing {
     if let Some(a) = track("currentaudiostream") {
         extra.push(("audio", a));
     }
-    let subs_on = value_of(props, "subtitleenabled").is_some_and(|v| v.trim() == "true");
+    let subs_on = props.get("subtitleenabled").and_then(Value::as_bool).unwrap_or(false);
     if let Some(s) = track("currentsubtitle").filter(|_| subs_on) {
         extra.push(("subtitles", s));
     }
@@ -270,7 +209,7 @@ fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>)>> {
     let Some((id, _)) = player_id(tv)? else { return Ok(None) };
     let item = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{ITEM_FIELDS}}}"#))?;
     let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":{PLAYER_FIELDS}}}"#))?;
-    let file = value_of(&item, "item").and_then(|i| str_of(i, "file"));
+    let file = item.get("item").and_then(|i| str_of(i, "file"));
     Ok(Some((parse_playing(&item, &props), file)))
 }
 
@@ -394,7 +333,7 @@ impl crate::provider::Player for Kodi {
             // nothing playing: keys won't do better, but they can't hurt
             let Some((id, _)) = p else { return Err(Error::Unavailable("Kodi isn't playing anything".into())) };
             let r = call(tv, "Player.Seek", &format!(r#"{{"playerid":{id},"value":{}}}"#, seek_value(to)))?;
-            value_of(&r, "time").and_then(seconds).map_or_else(|| failed("Kodi didn't say where it seeked to"), Ok)
+            r.get("time").and_then(seconds).map_or_else(|| failed("Kodi didn't say where it seeked to"), Ok)
         });
         seeked.into()
     }
@@ -415,7 +354,7 @@ impl Kodi {
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     fn art_bytes(&self, tv: &Tv, art: &str) -> Result<Vec<u8>> {
         let r = call(tv, "Files.PrepareDownload", &format!(r#"{{"path":{}}}"#, quote(art)))?;
-        let Some(path) = value_of(&r, "details").and_then(|d| str_of(d, "path")) else { return failed("Kodi didn't offer the picture") };
+        let Some(path) = r.get("details").and_then(|d| str_of(d, "path")) else { return failed("Kodi didn't offer the picture") };
         let (port, user, pass) = login(tv);
         let url = format!("http://{}:{port}/{}", tv.ip, path.trim_start_matches('/'));
         let mut cmd = std::process::Command::new("curl");
@@ -514,9 +453,13 @@ mod tests {
     const ITEM: &str = r#"{"item":{"art":{"fanart":"image://smb%3a%2f%2fnas%2ffanart.jpg/","poster":"image://p.jpg/"},"episode":4,"fanart":"","file":"smb://nas/tv/Taskmaster/S03E04.mkv","id":7,"label":"S03E04","season":3,"showtitle":"Taskmaster","streamdetails":{"audio":[{"channels":6,"codec":"ac3","language":"eng"}],"subtitle":[{"language":"eng"}],"video":[{"aspect":1.78,"codec":"h264","duration":2700,"height":1080,"width":1920}]},"thumbnail":"","title":"A Very Nuanced Character","type":"episode","year":2016}}"#;
     const PROPS: &str = r#"{"currentaudiostream":{"bitrate":0,"channels":6,"codec":"ac3","index":0,"language":"eng","name":"English"},"currentsubtitle":{"index":0,"language":"eng","name":"English"},"speed":1,"subtitleenabled":false,"time":{"hours":0,"milliseconds":500,"minutes":3,"seconds":20},"totaltime":{"hours":0,"milliseconds":0,"minutes":45,"seconds":0}}"#;
 
+    fn json(s: &str) -> Value {
+        serde_json::from_str(s).unwrap()
+    }
+
     #[test]
     fn reads_what_is_playing() {
-        let p = parse_playing(ITEM, PROPS);
+        let p = parse_playing(&json(ITEM), &json(PROPS));
         assert_eq!(p.title.as_deref(), Some("A Very Nuanced Character"));
         assert_eq!(p.subtitle.as_deref(), Some("Taskmaster S03E04"));
         let pr = p.progress.unwrap();
@@ -526,25 +469,23 @@ mod tests {
         // paused, subtitles on, a film
         let props = PROPS.replace(r#""speed":1"#, r#""speed":0"#).replace(r#""subtitleenabled":false"#, r#""subtitleenabled":true"#);
         let film = r#"{"item":{"title":"Heat","year":1995,"art":{},"file":"/sdcard/heat.mkv","season":-1,"episode":-1,"showtitle":""}}"#;
-        let p = parse_playing(film, &props);
+        let p = parse_playing(&json(film), &json(&props));
         assert_eq!((p.subtitle.as_deref(), p.progress.unwrap().paused, p.art), (Some("1995"), true, None));
         assert!(p.extra.iter().any(|(k, v)| *k == "subtitles" && v == "English"));
     }
 
     #[test]
-    fn json_values() {
-        let j = r#"{"result":{"a":"x\"}","b":[1,{"c":2}],"n":-3.5},"id":1}"#;
-        assert_eq!(value_of(j, "b"), Some(r#"[1,{"c":2}]"#));
-        assert_eq!(value_of(j, "a"), Some(r#""x\"}""#));
-        assert_eq!(num_of(j, "n"), Some(-3.5));
-        assert_eq!(result_of(j, "m").unwrap(), r#"{"a":"x\"}","b":[1,{"c":2}],"n":-3.5}"#);
+    fn replies() {
+        let ok = r#"{"result":{"a":"x\"}","n":-3.5},"id":1}"#;
+        assert_eq!(result_of(ok, "m").unwrap(), json(r#"{"a":"x\"}","n":-3.5}"#));
         let err = r#"{"error":{"code":-32601,"message":"Method not found."},"id":1}"#;
         assert!(result_of(err, "X.Y").unwrap_err().to_string().contains("Method not found"));
+        assert!(result_of("<html>", "X.Y").is_err());
     }
 
     #[test]
     fn times_and_seeks() {
-        assert_eq!(seconds(r#"{"hours":1,"milliseconds":250,"minutes":2,"seconds":3}"#), Some(3723.25));
+        assert_eq!(seconds(&json(r#"{"hours":1,"milliseconds":250,"minutes":2,"seconds":3}"#)), Some(3723.25));
         assert_eq!(time_json(3723.25), r#"{"hours":1,"minutes":2,"seconds":3,"milliseconds":250}"#);
         assert_eq!(seek_value(SeekTo::By(-10.0)), r#"{"seconds":-10}"#);
         assert_eq!(seek_value(SeekTo::Fraction(0.4)), r#"{"percentage":40.000}"#);

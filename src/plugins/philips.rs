@@ -104,8 +104,9 @@ pub fn pair_start(tv: &Tv) -> Result<PairStart> {
     let ask = format!(r#"{{"scope":["read","write","control"],"device":{}}}"#, device_json(&id));
     let (status, reply) =
         crate::https::request(&crate::https::Request { url: &https_url(&tv.ip, "/6/pair/request"), body: Some(&ask), digest: None, basic: None, retry: true, timeout_secs: 15 })?;
-    let key = crate::http::string_field(&reply, "auth_key");
-    let timestamp = crate::http::number_field(&reply, "timestamp").map(|t| t as i64);
+    let v = crate::http::json(&reply).unwrap_or_default();
+    let key = crate::http::text(&v, "auth_key");
+    let timestamp = crate::http::number(&v, "timestamp").map(|t| t as i64);
     let (Some(key), Some(timestamp)) = (key, timestamp) else {
         return failed(format!("pair: the TV didn't start pairing (HTTP {status}): {}", reply.trim()));
     };
@@ -127,7 +128,7 @@ pub fn pair_finish(tv: &Tv, s: &PairStart, pin: &str) -> Result<crate::pairing::
         digest: Some((&s.id, &s.key)),
         basic: None, retry: true, timeout_secs: 15,
     })?;
-    let ok = status == 200 && crate::http::string_field(&reply, "error_id").is_none_or(|e| e == "SUCCESS");
+    let ok = status == 200 && crate::http::json(&reply).and_then(|v| crate::http::text(&v, "error_id")).is_none_or(|e| e == "SUCCESS");
     if !ok {
         return failed(format!("pair: the TV refused (HTTP {status}): {}", reply.trim()));
     }
@@ -458,21 +459,21 @@ impl crate::provider::Guide for Freeview {
 /// only (not the apps' "channels" or analogue inputs). The ccid is what the
 /// broadcast guide calls `presetid`.
 pub fn parse_channel_list(json: &str) -> Vec<crate::provider::Channel> {
-    let Some(i) = json.find("\"Channel\"") else { return Vec::new() };
-    let list = &json[i..];
-    let Some(open) = list.find('[') else { return Vec::new() };
-    let mut out: Vec<crate::provider::Channel> = crate::http::objects(&list[open..])
-        .into_iter()
-        .filter(|o| crate::http::string_field(o, "type").is_some_and(|t| t.starts_with("DVB")))
+    use crate::http::{number, text};
+    let Some(v) = crate::http::json(json) else { return Vec::new() };
+    let Some(list) = crate::http::find(&v, "Channel").and_then(|l| l.as_array()) else { return Vec::new() };
+    let mut out: Vec<crate::provider::Channel> = list
+        .iter()
+        .filter(|o| text(o, "type").is_some_and(|t| t.starts_with("DVB")))
         .filter_map(|o| {
             Some(crate::provider::Channel {
-                id: crate::http::number_field(o, "ccid")? as u32,
-                number: crate::http::string_field(o, "preset"),
-                name: crate::http::string_field(o, "name").map(|n| clean(&n)),
-                radio: crate::http::string_field(o, "serviceType").is_some_and(|t| t.contains("radio") || t == "audio"),
+                id: number(o, "ccid")? as u32,
+                number: text(o, "preset"),
+                name: text(o, "name").map(|n| clean(&n)),
+                radio: text(o, "serviceType").is_some_and(|t| t.contains("radio") || t == "audio"),
                 favourite: false,
-                delivery: crate::http::string_field(o, "type").map(|t| crate::provider::Delivery::parse(&t)),
-                dvb: match (crate::http::number_field(o, "onid"), crate::http::number_field(o, "tsid"), crate::http::number_field(o, "sid")) {
+                delivery: text(o, "type").map(|t| crate::provider::Delivery::parse(&t)),
+                dvb: match (number(o, "onid"), number(o, "tsid"), number(o, "sid")) {
                     (Some(on), Some(ts), Some(s)) => Some((on as u16, ts as u16, s as u16)),
                     _ => None,
                 },
@@ -486,18 +487,20 @@ pub fn parse_channel_list(json: &str) -> Vec<crate::provider::Channel> {
 /// The channel in a `/6/activities/tv` reply:
 /// `{"channel":{"ccid":143,"preset":"18","name":"More 4"},"channelList":{...}}`.
 pub fn parse_current(json: &str) -> Option<crate::provider::Channel> {
-    let ch = crate::http::objects(json.split_once("\"channel\"")?.1).into_iter().next()?;
+    let v = crate::http::json(json)?;
+    let ch = v.get("channel")?;
     Some(crate::provider::Channel {
-        id: crate::http::number_field(ch, "ccid")? as u32,
-        number: crate::http::string_field(ch, "preset"),
-        name: crate::http::string_field(ch, "name"),
+        id: crate::http::number(ch, "ccid")? as u32,
+        number: crate::http::text(ch, "preset"),
+        name: crate::http::text(ch, "name"),
         ..Default::default()
     })
 }
 
 /// The country the TV was set up for, from a `channelLists/all` reply.
 pub fn parse_list_country(json: &str) -> Option<String> {
-    crate::http::string_field(json, "installCountry").filter(|c| !c.is_empty())
+    let v = crate::http::json(json)?;
+    crate::http::find(&v, "installCountry")?.as_str().filter(|c| !c.is_empty()).map(str::to_string)
 }
 
 /// The network the last channel list read showed, per TV.
@@ -532,21 +535,21 @@ fn paired_ok(tv: &Tv, path: &str, what: &str) -> Result<String> {
 /// anything in them: the modifiable ones ("Favourites 1".."8") whose version
 /// isn't "0" (never edited).
 pub fn used_favourite_lists(json: &str) -> Vec<String> {
-    let Some(i) = json.find("\"favoriteLists\"") else { return Vec::new() };
-    let list = &json[i..];
-    let Some(open) = list.find('[') else { return Vec::new() };
-    crate::http::objects(&list[open..])
-        .into_iter()
-        .filter(|o| o.replace(' ', "").contains("\"modifiable\":true"))
-        .filter(|o| crate::http::string_field(o, "version").is_none_or(|v| v != "0"))
-        .filter_map(|o| crate::http::string_field(o, "id"))
+    let Some(v) = crate::http::json(json) else { return Vec::new() };
+    let Some(lists) = crate::http::find(&v, "favoriteLists").and_then(|l| l.as_array()) else { return Vec::new() };
+    lists
+        .iter()
+        .filter(|o| o.get("modifiable").and_then(serde_json::Value::as_bool).unwrap_or(false))
+        .filter(|o| crate::http::text(o, "version").is_none_or(|v| v != "0"))
+        .filter_map(|o| crate::http::text(o, "id"))
         .collect()
 }
 
 /// The ccids in a favourite list reply: `{"channels":[{"ccid":159,"preset":"1"},...]}`.
 pub fn favourite_ccids(json: &str) -> Vec<u32> {
-    let Some(i) = json.find("\"channels\"") else { return Vec::new() };
-    crate::http::objects(&json[i..]).into_iter().filter_map(|o| crate::http::number_field(o, "ccid")).map(|c| c as u32).collect()
+    let Some(v) = crate::http::json(json) else { return Vec::new() };
+    let Some(list) = crate::http::find(&v, "channels").and_then(|l| l.as_array()) else { return Vec::new() };
+    list.iter().filter_map(|o| crate::http::number(o, "ccid")).map(|c| c as u32).collect()
 }
 
 /// The user's favourite lists that have anything in them, with their channels.
@@ -642,8 +645,8 @@ impl crate::provider::Channels for Freeview {
     fn tune(&self, cx: &crate::provider::Cx, channel: &crate::provider::Channel) -> Result<String> {
         // the channel list the TV is using, as it reports it
         let now = paired_ok(cx.tv, "/6/activities/tv", "switching channel")?;
-        let list = now.split_once("\"channelList\"").and_then(|(_, rest)| crate::http::objects(rest).into_iter().next()).unwrap_or(r#"{"id":"allter"}"#);
-        let body = tune_body(channel, list);
+        let list = crate::http::json(&now).and_then(|v| v.get("channelList").map(ToString::to_string)).unwrap_or_else(|| r#"{"id":"allter"}"#.into());
+        let body = tune_body(channel, &list);
         match js_post(cx.tv, "/6/activities/tv", &body, "switching channel")? {
             (200, _) => Ok(format!("switching to {}", channel.label())),
             (code, reply) => failed(format!("watch: the TV refused (HTTP {code}): {}", reply.trim())),

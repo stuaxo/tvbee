@@ -113,7 +113,7 @@ impl Conn {
         sockets(&unix).into_iter().find_map(|sock| {
             let fwd = tv.forward_abstract(&sock).ok()?;
             let (status, v) = http::get("127.0.0.1", fwd.port, "/json/version").ok()?;
-            let theirs = http::string_field(&v, "Android-Package").is_some_and(|p| p != pkg);
+            let theirs = http::json(&v).and_then(|v| http::text(&v, "Android-Package")).is_some_and(|p| p != pkg);
             (status == 200 && !theirs).then(|| Conn { pkg: pkg.to_string(), fwd })
         })
     }
@@ -124,12 +124,15 @@ impl Conn {
         if status != 200 {
             return failed(format!("devtools: HTTP {status} for /json"));
         }
-        Ok(http::objects(&list)
+        let list = http::json(&list).unwrap_or_default();
+        Ok(list
+            .as_array()
             .into_iter()
-            .filter(|o| http::string_field(o, "type").is_none_or(|t| t == "page"))
+            .flatten()
+            .filter(|o| http::text(o, "type").is_none_or(|t| t == "page"))
             .filter_map(|o| {
-                let url = http::string_field(o, "url")?;
-                Some((url, http::string_field(o, "webSocketDebuggerUrl").and_then(|w| ws_path(&w))))
+                let url = http::text(o, "url")?;
+                Some((url, http::text(o, "webSocketDebuggerUrl").and_then(|w| ws_path(&w))))
             })
             .collect())
     }
@@ -281,10 +284,14 @@ pub fn evaluate(port: u16, path: &str, expr: &str) -> Result<String> {
         if op == 8 {
             break;
         }
-        let text = String::from_utf8_lossy(&data);
-        if text.contains("\"id\":1") {
-            return http::string_field(&text, "value")
-                .ok_or_else(|| Error::Failed("devtools: no value in reply".into()));
+        let Some(reply) = http::json(&String::from_utf8_lossy(&data)) else { continue };
+        if reply.get("id").and_then(serde_json::Value::as_u64) == Some(1) {
+            // {"id":1,"result":{"result":{"type":"string","value":"..."}}}
+            return match reply.pointer("/result/result/value") {
+                Some(serde_json::Value::String(s)) => Ok(s.clone()),
+                Some(serde_json::Value::Null) | None => Err(Error::Failed("devtools: no value in reply".into())),
+                Some(other) => Ok(other.to_string()),
+            };
         }
     }
     failed("devtools: no reply")
@@ -304,18 +311,17 @@ focused:f?{tag:f.tagName.toLowerCase(),text:txt(f)}:null,items})})()";
 /// [`PAGE_EXPR`]'s answer as lines: the route, the title, then the items
 /// (> marks the focused one).
 pub fn page_lines(raw: &str) -> Vec<String> {
-    let field = |k: &str| http::string_field(raw, k).unwrap_or_default();
+    let v = http::json(raw).unwrap_or_default();
+    let field = |k: &str| http::text(&v, k).unwrap_or_default();
     let mut out = vec![format!("route:   {}", field("route")), format!("title:   {}", field("title"))];
-    // the items are objects inside the "items" array
-    let items = raw.find("\"items\":[").map_or("", |i| &raw[i + 9..]);
-    let objs = http::objects(items);
-    if objs.is_empty() {
+    let items = v.get("items").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+    if items.is_empty() {
         out.push("  (nothing focusable is visible: is the app in front?)".into());
     }
-    for o in &objs {
-        let tag = http::string_field(o, "tag").unwrap_or_default();
-        let text = http::string_field(o, "text").unwrap_or_default();
-        let focused = o.contains("\"focused\":true");
+    for o in &items {
+        let tag = http::text(o, "tag").unwrap_or_default();
+        let text = http::text(o, "text").unwrap_or_default();
+        let focused = o.get("focused").and_then(serde_json::Value::as_bool).unwrap_or(false);
         out.push(format!("  {} {tag:<32} {text}", if focused { ">" } else { " " }));
     }
     out
@@ -330,12 +336,11 @@ mod tests {
         let lines = page_lines(r##"{"route":"#/","title":"YouTube on TV","items":[{"tag":"a","text":"A","focused":true},{"tag":"b","text":"B","focused":false}]}"##);
         assert_eq!(lines[0], "route:   #/");
         assert!(lines[2].starts_with("  > a") && lines[3].starts_with("    b"), "{lines:?}");
+        // the focused element is reported too: the items are what's listed
         let raw = r##"{"route":"#/","title":"YouTube on TV","focused":{"tag":"ytlr-tile-renderer","text":"A"},"items":[{"tag":"ytlr-tile-renderer","text":"A","focused":true},{"tag":"ytlr-button","text":"B","focused":false}]}"##;
-        let items = raw.find("\"items\":[").map_or("", |i| &raw[i + 9..]);
-        let objs = crate::http::objects(items);
-        assert_eq!(objs.len(), 2);
-        assert_eq!(crate::http::string_field(objs[1], "text").as_deref(), Some("B"));
-        assert!(objs[0].contains("\"focused\":true"));
+        let lines = page_lines(raw);
+        assert_eq!(lines.len(), 4);
+        assert!(lines[3].contains("ytlr-button") && lines[3].ends_with(" B"));
     }
 
 

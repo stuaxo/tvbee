@@ -73,90 +73,32 @@ pub fn dechunk(body: &str) -> String {
     out
 }
 
-/// Top-level objects of a JSON array (or the single object), as slices.
-/// Enough for flat API replies; doesn't validate.
-pub fn objects(json: &str) -> Vec<&str> {
-    let (mut out, mut depth, mut start, mut in_str, mut esc) = (Vec::new(), 0, 0, false, false);
-    for (i, ch) in json.char_indices() {
-        if in_str {
-            match (esc, ch) {
-                (true, _) => esc = false,
-                (false, '\\') => esc = true,
-                (false, '"') => in_str = false,
-                _ => {}
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_str = true,
-            '{' => {
-                if depth == 0 {
-                    start = i;
-                }
-                depth += 1;
-            }
-            '}' if depth > 0 => {
-                depth -= 1;
-                if depth == 0 {
-                    out.push(&json[start..=i]);
-                }
-            }
-            _ => {}
-        }
+/// A JSON reply, read.
+pub fn json(text: &str) -> Option<serde_json::Value> {
+    serde_json::from_str(text).ok()
+}
+
+/// The first value at `key`, at any depth (depth-first): TV APIs nest the
+/// same things differently from one firmware to the next.
+pub fn find<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    match v {
+        serde_json::Value::Object(m) => m.get(key).or_else(|| m.values().find_map(|x| find(x, key))),
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find(x, key)),
+        _ => None,
     }
-    out
 }
 
-/// The string value of `"key": "..."` in a flat JSON object, unescaped.
-pub fn string_field(obj: &str, key: &str) -> Option<String> {
-    let pat = format!("\"{key}\"");
-    let mut from = 0;
-    while let Some(i) = obj[from..].find(&pat) {
-        let after = obj[from + i + pat.len()..].trim_start();
-        from += i + pat.len();
-        let Some(val) = after.strip_prefix(':') else { continue };
-        let val = val.trim_start().strip_prefix('"')?;
-        return unescape(val);
+/// The string at `key` (in this object).
+pub fn text(v: &serde_json::Value, key: &str) -> Option<String> {
+    v.get(key)?.as_str().map(str::to_string)
+}
+
+/// The number at `key` (in this object): a JSON number, or a string of one.
+pub fn number(v: &serde_json::Value, key: &str) -> Option<f64> {
+    match v.get(key)? {
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        n => n.as_f64(),
     }
-    None
-}
-
-/// A JSON string literal (with its quotes) -> the string.
-pub fn json_string(lit: &str) -> Option<String> {
-    unescape(lit.trim().strip_prefix('"')?)
-}
-
-/// The number value of `"key": 12.5` in a flat JSON object.
-pub fn number_field(obj: &str, key: &str) -> Option<f64> {
-    let pat = format!("\"{key}\"");
-    let i = obj.find(&pat)?;
-    let rest = obj[i + pat.len()..].trim_start().strip_prefix(':')?.trim_start();
-    let end = rest.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | 'e' | 'E' | '+'))).unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
-
-/// Read a JSON string body (after the opening quote) up to its closing quote.
-fn unescape(s: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => return Some(out),
-            '\\' => match chars.next()? {
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                'r' => out.push('\r'),
-                'b' | 'f' => {}
-                'u' => {
-                    let hex: String = chars.by_ref().take(4).collect();
-                    out.push(u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32).unwrap_or('\u{fffd}'));
-                }
-                other => out.push(other),
-            },
-            c => out.push(c),
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -183,25 +125,13 @@ mod tests {
     }
 
     #[test]
-    fn reads_values() {
-        assert_eq!(json_string("\"Everyone\\u2019s\"").as_deref(), Some("Everyone’s"));
-        assert_eq!(json_string("NA"), None);
-        let o = r#"{"start_time": 54.0, "title": "x", "end_time": 69}"#;
-        assert_eq!(number_field(o, "start_time"), Some(54.0));
-        assert_eq!(number_field(o, "end_time"), Some(69.0));
-        assert_eq!(number_field(o, "nope"), None);
-    }
-
-    #[test]
-    fn reads_flat_json() {
-        let j = r#"[ { "title": "A \"quoted\" {title}", "url": "https://x/tv#/watch?v=1" },
-                     { "title": "café", "type": "page" } ]"#;
-        let objs = objects(j);
-        assert_eq!(objs.len(), 2);
-        assert_eq!(string_field(objs[0], "title").unwrap(), "A \"quoted\" {title}");
-        assert_eq!(string_field(objs[0], "url").unwrap(), "https://x/tv#/watch?v=1");
-        assert_eq!(string_field(objs[1], "title").unwrap(), "café");
-        assert_eq!(string_field(objs[1], "url"), None);
-        assert_eq!(objects(r#"{"a":"b"}"#).len(), 1);
+    fn reads_json() {
+        let v = json(r#"{"a":{"b":[{"ccid":"12","name":"x \"y\""}]},"n":3}"#).unwrap();
+        let ch = &find(&v, "b").unwrap()[0];
+        // numbers as numbers, or as strings
+        assert_eq!((number(ch, "ccid"), number(&v, "n")), (Some(12.0), Some(3.0)));
+        assert_eq!(text(ch, "name").as_deref(), Some("x \"y\""));
+        assert_eq!((text(&v, "nope"), find(&v, "nope")), (None, None));
+        assert_eq!(json("not json"), None);
     }
 }

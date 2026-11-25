@@ -292,33 +292,9 @@ impl Storyboard {
     }
 }
 
-/// The strings in a JSON list of strings (`["a", "b\"c"]`).
+/// The strings in a JSON list of strings (`["a", "b\\"c"]`).
 pub fn json_strings(list: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut chars = list.chars();
-    while let Some(c) = chars.next() {
-        if c != '"' {
-            continue;
-        }
-        let mut s = String::new();
-        while let Some(c) = chars.next() {
-            match c {
-                '\\' => {
-                    if let Some(e) = chars.next() {
-                        s.push(match e {
-                            'n' => '\n',
-                            't' => '\t',
-                            other => other,
-                        });
-                    }
-                }
-                '"' => break,
-                c => s.push(c),
-            }
-        }
-        out.push(s);
-    }
-    out
+    serde_json::from_str(list).unwrap_or_default()
 }
 
 /// The storyboard from yt-dlp's two lines (see [`storyboard`]).
@@ -400,7 +376,7 @@ const FIELDS: &[&str] = &[
 pub fn parse_details(out: &str) -> Details {
     let lines: Vec<&str> = out.lines().collect();
     let get = |k: &str| FIELDS.iter().position(|f| *f == k).and_then(|i| lines.get(i)).copied().unwrap_or("NA");
-    let text = |k: &str| crate::http::json_string(get(k)).filter(|s| !s.is_empty());
+    let text = |k: &str| serde_json::from_str::<String>(get(k)).ok().filter(|s| !s.is_empty());
     let num = |k: &str| get(k).trim().parse::<f64>().ok();
     let mut d = Details::default();
     let handle = text("uploader_id");
@@ -419,9 +395,12 @@ pub fn parse_details(out: &str) -> Details {
     if let Some(v) = num("duration") {
         d.fields.push(("length", crate::nowplaying::clock(v)));
     }
-    d.chapters = crate::http::objects(get("chapters"))
+    let chapters = crate::http::json(get("chapters")).unwrap_or_default();
+    d.chapters = chapters
+        .as_array()
         .into_iter()
-        .filter_map(|o| Some(Chapter { start: crate::http::number_field(o, "start_time")?, title: crate::http::string_field(o, "title")? }))
+        .flatten()
+        .filter_map(|o| Some(Chapter { start: crate::http::number(o, "start_time")?, title: crate::http::text(o, "title")? }))
         .collect();
     d.description = text("description");
     // where to go from here: the channel, the chapters, links in the description
@@ -478,10 +457,11 @@ pub fn details(link: &str) -> Result<Details> {
 /// Where YouTube is: the video and how far in (or home), from its page.
 fn session(tv: &Tv) -> Option<crate::provider::Session> {
     let raw = devtools::with_conn(tv, PACKAGE, |c| c.eval("JSON.stringify({h:location.hash,t:(document.querySelector('video')||{}).currentTime||0})")).ok()?;
-    let hash = crate::http::string_field(&raw, "h")?;
+    let v = crate::http::json(&raw)?;
+    let hash = crate::http::text(&v, "h")?;
     Some(match video_id(&hash) {
         Some(id) => {
-            let t = crate::http::number_field(&raw, "t").unwrap_or(0.0).floor() as u64;
+            let t = crate::http::number(&v, "t").unwrap_or(0.0).floor() as u64;
             crate::provider::Session {
                 resume: None,
                 link: format!("https://www.youtube.com/watch?v={id}&t={t}s"),

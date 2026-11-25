@@ -17,6 +17,8 @@ categories = ["command-line-utilities"]
 # bundled, so no system library is needed (a C compiler is, to build it)
 diesel = { version = "2.2", default-features = false, features = ["sqlite"] }
 libsqlite3-sys = { version = ">=0.17.2, <0.31.0", features = ["bundled"] }
+# reading the JSON TVs and apps answer with (JointSpace, Kodi, devtools)
+serde_json = { version = "1", default-features = false, features = ["std"] }
 ratatui = { version = "0.30.2", optional = true, features = ["unstable-rendered-line-info"] }
 # the ui's preview panel: pictures in the terminal (sixel, kitty, iTerm2, or
 # unicode half-blocks), and JPEG decoding for YouTube's storyboard frames
