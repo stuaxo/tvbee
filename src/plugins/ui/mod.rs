@@ -8,11 +8,10 @@
 
 use crate::devtools::{self, SeekTo};
 use crate::error::Result;
-use crate::menu::{MenuItem, Run};
+use crate::actions::{ActionDescriptor, Params};
 use crate::nowplaying::{self, Activity, bar, clock, progress_bar};
 use crate::plugins::apps::list_name;
 use crate::plugins::{apps, info, media, search};
-use crate::registry::Command;
 use crate::tv::Tv;
 use crate::Ctx;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -188,7 +187,7 @@ struct App {
     error: Option<String>,
     mode: Mode,
     overlay: Overlay,
-    menu: Vec<MenuItem>,
+    menu: Vec<ActionDescriptor>,
     /// Where the clickable things were drawn last frame.
     hits: Vec<(ratatui::layout::Rect, Hit)>,
     /// Show the system panel (memory, storage, ...).
@@ -642,8 +641,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(result?)
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new(CAT, "ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking", ui).long(
+pub fn actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui).cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking").long(
         "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
          the arrows seek and change volume; in remote mode the keyboard is the TV's:\n\
@@ -859,7 +858,7 @@ impl App {
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
                 let standby = self.snap.as_ref().is_some_and(|s| s.standby);
-                let wake = self.menu.iter().position(|m| m.label == "wake").filter(|_| standby);
+                let wake = self.menu.iter().position(|m| m.id == "power.wake").filter(|_| standby);
                 self.overlay = Overlay::Menu(wake.unwrap_or(0));
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
@@ -897,12 +896,12 @@ impl App {
         }
         match (was, next, action) {
             (_, _, Some(a @ Action::Menu(i))) => {
-                self.note = format!("{}...", self.menu.get(i).map_or("", |m| m.label));
+                self.note = format!("{}...", self.menu.get(i).map_or("", |m| m.title));
                 let _ = actions.send(a);
             }
             (_, _, Some(a @ Action::MenuText(i, _))) => {
                 // e.g. "open a link": something new should come up
-                self.note = format!("{}...", self.menu.get(i).map_or("", |m| m.label));
+                self.note = format!("{}...", self.menu.get(i).map_or("", |m| m.title));
                 self.settle(self.note.clone(), None);
                 let _ = actions.send(a);
             }

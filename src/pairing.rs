@@ -9,7 +9,7 @@
 //! `~/.config/tveee/pairings/<id>-<ip>.txt` (readable only by you).
 
 use crate::error::{failed, usage, Error, Result};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 use std::path::PathBuf;
@@ -157,16 +157,16 @@ fn pairings(c: &Ctx, _: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> Vec<Command> {
+pub fn actions() -> Vec<ActionDescriptor> {
     vec![
-        Command::new("pairing", "pair", "[<id>]", "pair tveee with a service on the TV", pair).long(
+        ActionDescriptor::terminal("pairing.pair", "pairing", "pair tveee with a service on the TV", pair).cli("pair", "[<id>]", "pair tveee with a service on the TV").long(
             "Some TV services need a one-time pairing before tveee can use them (on\n\
              Philips TVs, the JointSpace API: the TV shows a PIN, you type it here).\n\
              With one pairing available, the id can be left out. 'tveee pairings' lists\n\
              them. Saved in ~/.config/tveee/pairings/ (readable only by you).",
         ),
-        Command::new("pairing", "unpair", "<id>", "forget a saved pairing", unpair),
-        Command::new("pairing", "pairings", "", "services tveee can pair with, and whether it has", pairings),
+        ActionDescriptor::terminal("pairing.unpair", "pairing", "forget a saved pairing", unpair).cli("unpair", "<id>", "forget a saved pairing"),
+        ActionDescriptor::terminal("pairing.pairings", "pairing", "services tveee can pair with, and whether it has", pairings).cli("pairings", "", "services tveee can pair with, and whether it has"),
     ]
 }
 

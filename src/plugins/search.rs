@@ -4,7 +4,7 @@
 use super::apps;
 use super::open::{normalise, parse_candidates, sh_quote};
 use crate::error::{failed, usage, Result};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 
@@ -286,8 +286,8 @@ fn search(c: &Ctx, args: &[String]) -> Result<()> {
     }
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new("apps", "search", USAGE, "search inside an app (YouTube, Kodi, live TV, ...)", search).long(
+pub fn actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("search.search", "apps", "search inside an app (YouTube, Kodi, live TV, ...)", search).cli("search", USAGE, "search inside an app (YouTube, Kodi, live TV, ...)").long(
         "Hands the query to the app's own search screen, using Android's search\n\
          intent (or a search-results link for YouTube, which only takes links).\n\
          With no arguments, or --list, shows which installed apps support it.\n\

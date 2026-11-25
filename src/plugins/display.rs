@@ -1,5 +1,5 @@
 use crate::error::{failed, Result};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::Ctx;
 use std::process::Command as Proc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,11 +38,14 @@ fn screenshot_item(tv: &crate::tv::Tv) -> Result<String> {
     Ok(format!("saved {out}{blank}"))
 }
 
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    vec![
-        crate::menu::MenuItem::new(CAT, 'M', "mirror screen (scrcpy window)", mirror_item),
-        crate::menu::MenuItem::new(CAT, 'S', "screenshot (saved here)", screenshot_item),
-    ]
+pub fn actions() -> Vec<ActionDescriptor> {
+    use crate::actions::ActionDescriptor as A;
+    let mut v = command_actions();
+    v.extend([
+        A::new("display.mirror_window", CAT, "mirror screen (scrcpy window)", |cx, _| mirror_item(cx.tv).map(Into::into)).key('M'),
+        A::new("display.screenshot_here", CAT, "screenshot (saved here)", |cx, _| screenshot_item(cx.tv).map(Into::into)).key('S'),
+    ]);
+    v
 }
 
 fn screenshot(c: &Ctx, args: &[String]) -> Result<()> {
@@ -118,11 +121,11 @@ fn mirror_item(tv: &crate::tv::Tv) -> Result<String> {
 }
 
 
-pub fn commands() -> Vec<Command> {
+pub fn command_actions() -> Vec<ActionDescriptor> {
     vec![
-        Command::new(CAT, "screenshot", "[file]", "save a PNG of the screen", screenshot)
+        ActionDescriptor::terminal("display.screenshot", CAT, "save a PNG of the screen", screenshot).cli("screenshot", "[file]", "save a PNG of the screen")
             .long("Default file is ./tveee-<unix-time>.png. The path is printed on stdout; notes go\nto stderr. TVs play video on a hardware layer that screencap can't capture, so the\npicture area comes out black (only app overlays/menus are captured); a note says\nwhen that applies."),
-        Command::new(CAT, "mirror", "[scrcpy args]", "show/control the screen on this PC with scrcpy", mirror)
+        ActionDescriptor::terminal("display.mirror", CAT, "show/control the screen on this PC with scrcpy", mirror).cli("mirror", "[scrcpy args]", "show/control the screen on this PC with scrcpy")
             .long("Extra arguments are passed straight to scrcpy, e.g. 'tveee mirror --no-control'.")
             .aliases(&["scrcpy"]),
     ]

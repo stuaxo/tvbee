@@ -3,7 +3,7 @@
 //! enabled when the Philips system service package is installed.
 
 use crate::error::{failed, usage, Result};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 
@@ -697,15 +697,15 @@ pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
     vec![&FREEVIEW]
 }
 
-pub fn commands() -> Vec<Command> {
-    let mut v = vec![Command::new(CAT, "jointspace", "[/6/<path>]", "read a path of Philips' TV API (JointSpace)", jointspace).long(
+pub fn actions() -> Vec<ActionDescriptor> {
+    let mut v = vec![ActionDescriptor::terminal("philips.jointspace", CAT, "read a path of Philips' TV API (JointSpace)", jointspace).cli("jointspace", "[/6/<path>]", "read a path of Philips' TV API (JointSpace)").long(
         "Reads a JointSpace path (default /6/system: model, API version, features).\n\
          Unpaired, only the public routes work (plain HTTP on :1925); others say\n\
          pairing is required. After 'tveee pair jointspace' (the TV shows a PIN),\n\
          paths are read over HTTPS on :1926 with the saved key: the current channel\n\
          (/6/activities/tv), channel lists (/6/channeldb/tv) and more.",
     )];
-    v.extend(super::ambilight::commands());
+    v.extend(super::ambilight::actions());
     v
 }
 

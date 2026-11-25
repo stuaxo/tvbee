@@ -13,7 +13,7 @@ use crate::provider::{Outcome, Playing};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 
 pub const PACKAGE: &str = "com.google.android.youtube.tv";
@@ -558,7 +558,7 @@ fn session(tv: &Tv) -> Option<crate::provider::Session> {
 }
 
 /// No commands of its own: `tveee app youtube` covers it (see `apps`).
-pub fn commands() -> Vec<Command> {
+pub fn actions() -> Vec<ActionDescriptor> {
     Vec::new()
 }
 

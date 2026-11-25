@@ -12,7 +12,7 @@ use crate::devtools::{Progress, SeekTo};
 use crate::error::{failed, Error, Result};
 use crate::more::Place;
 use crate::provider::{Outcome, Playing, Session};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 
 pub const PACKAGE: &str = "org.xbmc.kodi";
@@ -328,9 +328,6 @@ impl crate::provider::Provider for Kodi {
     fn details(&self) -> Option<&dyn crate::provider::Details> {
         Some(self)
     }
-    fn actions(&self) -> Option<(&'static str, crate::provider::Actions)> {
-        Some((ACTIONS, action))
-    }
     fn has_sessions(&self) -> bool {
         true
     }
@@ -599,26 +596,6 @@ impl crate::provider::Details for Kodi {
 
 // --- the app's own actions -------------------------------------------------------
 
-const ACTIONS: &str = "find <words> | play <words> | subtitles [next|off|on] | audio [next] | scan [clean] | notify <text>";
-
-/// `tveee app kodi <action...>`.
-fn action(tv: &Tv, args: &[String]) -> Result<String> {
-    let words: Vec<&str> = args.iter().map(String::as_str).collect();
-    let usage = || crate::error::usage(format!("app kodi: one of: {ACTIONS}"));
-    match words.as_slice() {
-        ["find", q @ ..] if !q.is_empty() => find(tv, &q.join(" ")),
-        ["play", q @ ..] if !q.is_empty() => play(tv, &q.join(" ")),
-        ["subtitles"] => subtitles(tv, "next"),
-        ["subtitles", how @ ("next" | "off" | "on" | "previous")] => subtitles(tv, how),
-        ["audio"] | ["audio", "next"] => audio(tv, "next"),
-        ["audio", "previous"] => audio(tv, "previous"),
-        ["scan"] => call(tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is looking for new videos (its library scan)".into()),
-        ["scan", "clean"] => call(tv, "VideoLibrary.Clean", "{}").map(|_| "Kodi is removing missing videos from its library".into()),
-        ["notify", text @ ..] if !text.is_empty() => notify(tv, &text.join(" ")),
-        _ => usage(),
-    }
-}
-
 /// Something in Kodi's library.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Found {
@@ -745,21 +722,59 @@ fn notify(tv: &Tv, text: &str) -> Result<String> {
     Ok("shown in Kodi".into())
 }
 
-/// Menu items for the ui.
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    use crate::menu::MenuItem;
+/// Words joined into one (a title, a message), or a usage error saying
+/// what's missing.
+fn words(args: &[String], what: &str) -> Result<String> {
+    match args.join(" ").trim() {
+        "" => crate::error::usage(format!("missing {what}")),
+        w => Ok(w.to_string()),
+    }
+}
+
+/// What it can do: `tveee app kodi <action>`, `tveee do kodi.<action>`, the ui menu.
+pub fn actions() -> Vec<ActionDescriptor> {
+    use crate::actions::ActionDescriptor as A;
     vec![
-        MenuItem::new("kodi", 'k', "kodi: next subtitles", |tv| subtitles(tv, "next")),
-        MenuItem::new("kodi", 'K', "kodi: subtitles off", |tv| subtitles(tv, "off")),
-        MenuItem::new("kodi", 'a', "kodi: next audio track", |tv| audio(tv, "next")),
-        MenuItem::new("kodi", 'L', "kodi: look for new videos (library scan)", |tv| {
-            call(tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is scanning its library".into())
-        }),
-        MenuItem::with_text("kodi", 'F', "kodi: find in the library", "Find in Kodi:", "a film or show's title", |tv, q| {
-            // one line, for the status line
-            find(tv, q).map(|s| s.replace('\n', "; "))
-        }),
+        A::new("kodi.find", "kodi", "kodi: find in the library", |cx, a| find(cx.tv, &words(a, "a title")?).map(Into::into))
+            .args("<words>")
+            .key('F')
+            .text("Find in Kodi:", "a film or show's title"),
+        A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?).map(Into::into))
+            .args("<words>")
+            .text("Play in Kodi:", "a film or show's title"),
+        A::new("kodi.subtitles", "kodi", "kodi: next subtitles", |cx, a| match a.first().map(String::as_str) {
+            None => subtitles(cx.tv, "next").map(Into::into),
+            Some(how @ ("next" | "off" | "on" | "previous")) => subtitles(cx.tv, how).map(Into::into),
+            Some(other) => crate::error::usage(format!("subtitles: next, off, on or previous, not '{other}'")),
+        })
+        .args("[next|off|on|previous]")
+        .key('k'),
+        A::new("kodi.subtitles.off", "kodi", "kodi: subtitles off", |cx, _| subtitles(cx.tv, "off").map(Into::into)).key('K'),
+        A::new("kodi.audio", "kodi", "kodi: next audio track", |cx, a| match a.first().map(String::as_str) {
+            None => audio(cx.tv, "next").map(Into::into),
+            Some(how @ ("next" | "previous")) => audio(cx.tv, how).map(Into::into),
+            Some(other) => crate::error::usage(format!("audio: next or previous, not '{other}'")),
+        })
+        .args("[next|previous]")
+        .key('a'),
+        A::new("kodi.scan", "kodi", "kodi: look for new videos (library scan)", |cx, a| match a.first().map(String::as_str) {
+            None => call(cx.tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is looking for new videos (its library scan)".into()),
+            // the older spelling, `app kodi scan clean`
+            Some("clean") => clean(cx.tv),
+            Some(other) => crate::error::usage(format!("scan: takes nothing (or 'clean'), not '{other}'")),
+        })
+        .args("[clean]")
+        .key('L'),
+        A::new("kodi.clean", "kodi", "kodi: forget videos that are gone (library clean)", |cx, _| clean(cx.tv))
+            .confirm("Remove the videos Kodi can't find any more from its library?"),
+        A::new("kodi.notify", "kodi", "kodi: show a notification", |cx, a| notify(cx.tv, &words(a, "a message")?).map(Into::into))
+            .args("<text>")
+            .text("Show in Kodi:", "a line of text"),
     ]
+}
+
+fn clean(tv: &Tv) -> Result<crate::actions::Output> {
+    call(tv, "VideoLibrary.Clean", "{}").map(|_| "Kodi is removing missing videos from its library".into())
 }
 
 pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
@@ -825,10 +840,6 @@ pub fn pairings() -> Vec<&'static dyn crate::pairing::Pairing> {
 }
 
 /// Nothing of its own: `tveee app kodi`, `goto kodi`, `seek`, ... cover it.
-pub fn commands() -> Vec<Command> {
-    Vec::new()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

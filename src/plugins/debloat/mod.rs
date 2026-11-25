@@ -8,7 +8,7 @@
 //! `speed` entries only apply on low-spec TVs (see [`Spec`]).
 
 use crate::error::{failed, usage, Result};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 use std::collections::BTreeSet;
@@ -824,14 +824,8 @@ fn debloat(c: &Ctx, args: &[String]) -> Result<()> {
     }
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new(
-        CAT,
-        "debloat",
-        "[status|list|apply|restore|trim] [-n] [--only G,..] [--skip G,..] [--yes] [--force] [--profile FILE]",
-        "disable unwanted system apps (reversible)",
-        debloat,
-    )
+pub fn actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("debloat.debloat", CAT, "disable unwanted system apps (reversible)", debloat).cli("debloat", "[status|list|apply|restore|trim] [-n] [--only G,..] [--skip G,..] [--yes] [--force] [--profile FILE]", "disable unwanted system apps (reversible)")
     .long(
         "Disables or removes (for user 0 only) system apps a profile lists, and pins a\n\
          few settings; 'restore' undoes it. Nothing is deleted and no root is needed.\n\

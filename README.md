@@ -189,6 +189,7 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
 [tools]
     commands     list all command names and aliases
     completion   print a bash/zsh completion script
+    do           run any action by its id (list them with no id)
     help         show this help, or help for one command
     plugins      list plugins and whether they are enabled
     wait         wait until the TV is reachable and booted

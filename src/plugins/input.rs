@@ -1,5 +1,5 @@
+use crate::actions::{ActionDescriptor as A, Cx, Output};
 use crate::error::{usage, Result};
-use crate::registry::Command;
 use crate::Ctx;
 
 const CAT: &str = "input";
@@ -35,24 +35,25 @@ pub fn channel_keys(n: &str) -> Vec<u32> {
     n.chars().filter_map(|c| c.to_digit(10)).map(|d| 7 + d).chain([66]).collect()
 }
 
-fn key(c: &Ctx, args: &[String]) -> Result<()> {
+fn key(c: &Cx, args: &[String]) -> Result<Output> {
     let Some(k) = args.first() else { return usage("key: missing key") };
     match key_code(k) {
-        Some(code) => c.tv.key(code),
+        Some(code) => c.tv.key(code).map(|()| format!("pressed {k}").into()),
         None => usage(format!("key: unknown key '{k}'")),
     }
 }
 
-fn text(c: &Ctx, args: &[String]) -> Result<()> {
+fn text(c: &Cx, args: &[String]) -> Result<Output> {
     if args.is_empty() {
         return usage("text: missing text");
     }
-    crate::keys::type_text(&c.tv, &args.join(" "))
+    crate::keys::type_text(c.tv, &args.join(" "))?;
+    Ok("typed it".into())
 }
 
-fn input(c: &Ctx, args: &[String]) -> Result<()> {
-    match args.first().and_then(|n| lookup(INPUTS, n)) {
-        Some(code) => c.tv.key(code),
+fn input(c: &Cx, args: &[String]) -> Result<Output> {
+    match args.first().and_then(|n| lookup(INPUTS, n).map(|code| (n, code))) {
+        Some((n, code)) => c.tv.key(code).map(|()| format!("switched to {n}").into()),
         None => {
             let mut names: Vec<_> = INPUTS.iter().map(|(n, _)| *n).collect();
             names.sort();
@@ -96,57 +97,56 @@ fn inputs(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn channel(c: &Ctx, args: &[String]) -> Result<()> {
+fn channel(c: &Cx, args: &[String]) -> Result<Output> {
     match args.first().map(String::as_str) {
-        Some("up") => c.tv.key(166),
-        Some("down") => c.tv.key(167),
+        Some("up") => c.tv.key(166).map(|()| "channel up".into()),
+        Some("down") => c.tv.key(167).map(|()| "channel down".into()),
         Some(n) if !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()) => {
-            channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))
+            channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))?;
+            Ok(format!("channel {n}").into())
         }
         _ => usage("usage: tveee channel up|down|<number>"),
     }
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![
-        Command::new(CAT, "key", "<name|code>", "send any remote key", key)
-            .long("Names: up down left right ok enter back home menu info guide power wake sleep\nplay pause stop playpause next prev ff rew mute volup voldown chup chdown\nred green yellow blue, or a numeric Android keycode."),
-        Command::new(CAT, "home", "[--list | --set <app>]", "go to the home screen, or choose the home app", super::apps::home).long(
-            "With no options, presses Home.\n\
-             \x20 --list        the installed home apps (launchers); * marks the default\n\
-             \x20 --set <app>   make <app> the default home app, e.g. 'tveee home --set projectivy'\n\
-             \x20               (an alias, a package, or package/activity)\n\
-             \n\
-             With no default set, Android asks which home app to use every time Home is\n\
-             pressed (including tveee's 'home' and the ui's h key).",
-        ),
-        Command::new(CAT, "back", "", "press the back button", |c, _| c.tv.key(4)),
-        Command::new(CAT, "text", "\"<string>\"", "type text into the focused field", text),
-        Command::new(CAT, "input", "<name>", "switch input source", input),
-        Command::new(CAT, "inputs", "[--all]", "list the TV's input sources", inputs)
-            .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
-        Command::new(CAT, "channel", "up|down|<number>", "change TV channel", channel).aliases(&["ch"]),
-    ]
-}
-
-
 macro_rules! input_item {
-    ($key:expr, $label:expr, $code:expr) => {{
-        fn run(tv: &crate::tv::Tv) -> Result<String> {
-            tv.keyevent($code)?;
-            Ok(format!("switched to {}", $label))
+    ($id:expr, $key:expr, $label:expr, $code:expr) => {{
+        fn run(cx: &crate::actions::Cx, _: &[String]) -> Result<crate::actions::Output> {
+            cx.tv.keyevent($code)?;
+            Ok(format!("switched to {}", $label).into())
         }
-        crate::menu::MenuItem::new(CAT, $key, $label, run)
+        crate::actions::ActionDescriptor::new($id, CAT, $label, run).key($key)
     }};
 }
 
-pub fn menu() -> Vec<crate::menu::MenuItem> {
+pub fn actions() -> Vec<A> {
     vec![
-        input_item!('t', "TV tuner", 170),
-        input_item!('1', "HDMI 1", 243),
-        input_item!('2', "HDMI 2", 244),
-        input_item!('3', "HDMI 3", 245),
-        input_item!('4', "HDMI 4", 246),
+        A::new("input.key", CAT, "press a remote key", key)
+            .cli("key", "<name|code>", "send any remote key")
+            .long("Names: up down left right ok enter back home menu info guide power wake sleep\nplay pause stop playpause next prev ff rew mute volup voldown chup chdown\nred green yellow blue, or a numeric Android keycode."),
+        A::terminal("input.home", CAT, "home screen", super::apps::home)
+            .cli("home", "[--list | --set <app>]", "go to the home screen, or choose the home app")
+            .long(
+                "With no options, presses Home.\n\
+                 \x20 --list        the installed home apps (launchers); * marks the default\n\
+                 \x20 --set <app>   make <app> the default home app, e.g. 'tveee home --set projectivy'\n\
+                 \x20               (an alias, a package, or package/activity)\n\
+                 \n\
+                 With no default set, Android asks which home app to use every time Home is\n\
+                 pressed (including tveee's 'home' and the ui's h key).",
+            ),
+        A::new("input.back", CAT, "back", |c, _| c.tv.key(4).map(|()| "back".into())).cli("back", "", "press the back button"),
+        A::new("input.text", CAT, "type text", text).cli("text", "\"<string>\"", "type text into the focused field").text("Type:", "text for the focused field"),
+        A::new("input.source", CAT, "switch input", input).cli("input", "<name>", "switch input source"),
+        A::terminal("input.list", CAT, "list inputs", inputs)
+            .cli("inputs", "[--all]", "list the TV's input sources")
+            .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
+        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]),
+        input_item!("input.tuner", 't', "TV tuner", 170),
+        input_item!("input.hdmi1", '1', "HDMI 1", 243),
+        input_item!("input.hdmi2", '2', "HDMI 2", 244),
+        input_item!("input.hdmi3", '3', "HDMI 3", 245),
+        input_item!("input.hdmi4", '4', "HDMI 4", 246),
     ]
 }
 

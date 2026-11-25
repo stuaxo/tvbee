@@ -8,7 +8,7 @@
 
 use crate::error::{failed, usage, Result};
 use crate::plugins::philips::{js_get_paired, js_post};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 
@@ -511,14 +511,8 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new(
-        CAT,
-        "ambilight",
-        "[on|off | lights | video | audio | colour | set | mode | hue]",
-        "Ambilight: what it's doing, its styles, and handing it to outside control",
-        ambilight,
-    )
+pub fn command_actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("ambilight.ambilight", CAT, "Ambilight: what it's doing, its styles, and handing it to outside control", ambilight).cli("ambilight", "[on|off | lights | video | audio | colour | set | mode | hue]", "Ambilight: what it's doing, its styles, and handing it to outside control")
     .long(
         "With nothing: what the lights are doing (power, who's in control, style,\n\
          Ambilight+Hue, how many lights). Needs pairing ('tveee pair jointspace').\n\
@@ -547,36 +541,41 @@ pub fn commands() -> Vec<Command> {
     )]
 }
 
-fn item(f: fn(&Tv) -> Result<String>) -> fn(&Tv) -> Result<String> {
-    f
-}
-
-pub fn menu() -> Vec<crate::menu::MenuItem> {
-    use crate::menu::MenuItem;
-    vec![
-        MenuItem::new(WHAT, 'A', "ambilight on/off", item(|tv| {
-            let on = crate::http::json(&get(tv, "/6/ambilight/power")?).and_then(|v| crate::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
-            set_power(tv, !on)
-        })),
-        MenuItem::new(WHAT, 'v', "ambilight: follow the video", item(|tv| {
-            set_style(tv, "FOLLOW_VIDEO", Some("STANDARD"), None)?;
+pub fn actions() -> Vec<ActionDescriptor> {
+    use crate::actions::ActionDescriptor as A;
+    let mut v = command_actions();
+    v.extend([
+        A::new("ambilight.power", WHAT, "ambilight on/off", |cx, _| {
+            let on = crate::http::json(&get(cx.tv, "/6/ambilight/power")?).and_then(|v| crate::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
+            set_power(cx.tv, !on).map(Into::into)
+        })
+        .key('A'),
+        A::new("ambilight.video", WHAT, "ambilight: follow the video", |cx, _| {
+            set_style(cx.tv, "FOLLOW_VIDEO", Some("STANDARD"), None)?;
             Ok("ambilight follows the video".into())
-        })),
-        MenuItem::new(WHAT, 'u', "ambilight: follow the sound", item(|tv| {
-            set_style(tv, "FOLLOW_AUDIO", Some("ENERGY_ADAPTIVE_BRIGHTNESS"), None)?;
+        })
+        .key('v'),
+        A::new("ambilight.sound", WHAT, "ambilight: follow the sound", |cx, _| {
+            set_style(cx.tv, "FOLLOW_AUDIO", Some("ENERGY_ADAPTIVE_BRIGHTNESS"), None)?;
             Ok("ambilight follows the sound".into())
-        })),
-        MenuItem::new(WHAT, 'l', "ambilight: warm white (lounge light)", item(|tv| {
-            set_style(tv, "FOLLOW_COLOR", Some("ISF"), Some("Warm White"))?;
+        })
+        .key('u'),
+        A::new("ambilight.warm", WHAT, "ambilight: warm white (lounge light)", |cx, _| {
+            set_style(cx.tv, "FOLLOW_COLOR", Some("ISF"), Some("Warm White"))?;
             Ok("ambilight: warm white".into())
-        })),
-        MenuItem::with_text(WHAT, 'c', "ambilight: one colour (outside control)", "Colour:", "red, warm, #ff8800 or 255,136,0", |tv, text| {
-            match parse_colour(text) {
-                Some(rgb) => set_colour(tv, rgb),
+        })
+        .key('l'),
+        A::new("ambilight.colour", WHAT, "ambilight: one colour (outside control)", |cx, a| {
+            let text = a.join(" ");
+            match parse_colour(&text) {
+                Some(rgb) => set_colour(cx.tv, rgb).map(Into::into),
                 None => failed(format!("'{text}' isn't a colour tveee knows (try red, #ff8800 or 255,136,0)")),
             }
-        }),
-    ]
+        })
+        .key('c')
+        .text("Colour:", "red, warm, #ff8800 or 255,136,0"),
+    ]);
+    v
 }
 
 #[cfg(test)]

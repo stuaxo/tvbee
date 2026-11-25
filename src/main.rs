@@ -1,5 +1,6 @@
 mod devtools;
 mod dotenv;
+mod actions;
 mod crypto;
 mod error;
 mod favourites;
@@ -10,7 +11,6 @@ mod keys;
 mod labels;
 mod log;
 mod mdns;
-mod menu;
 mod more;
 mod nowplaying;
 mod options;
@@ -35,9 +35,11 @@ pub struct Ctx {
     pub tv: Tv,
     /// Commands of the enabled plugins only.
     pub commands: Vec<Command>,
-    /// Menu items of the enabled plugins, in plugin order.
+    /// Actions of the enabled plugins, in plugin order.
+    pub actions: Vec<actions::ActionDescriptor>,
+    /// Those with a menu key.
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
-    pub menu: Vec<menu::MenuItem>,
+    pub menu: Vec<actions::ActionDescriptor>,
     pub plugins: Vec<PluginState>,
 }
 
@@ -67,23 +69,24 @@ fn main() {
         .iter()
         .zip(&states)
         .filter(|(_, s)| s.enabled)
-        .flat_map(|(p, _)| (p.commands)())
+        .flat_map(|(p, _)| p.commands())
         .collect();
     // the enabled plugins' apps join the core list, before anything looks one up
     plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
     provider::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.providers)()).collect());
     pairing::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.pairings)()).collect());
-    let menu: Vec<menu::MenuItem> = all
+    let actions: Vec<actions::ActionDescriptor> = all
         .iter()
         .zip(&states)
         .filter(|(_, s)| s.enabled)
-        .flat_map(|(p, _)| (p.menu)())
+        .flat_map(|(p, _)| (p.actions)())
         .collect();
-    let ctx = Ctx { tv, commands, menu, plugins: states };
+    let menu = actions.iter().filter(|a| a.key.is_some()).copied().collect();
+    let ctx = Ctx { tv, commands, actions, menu, plugins: states };
 
     // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {
-        let every: Vec<Command> = all.iter().flat_map(|p| (p.commands)()).collect();
+        let every: Vec<Command> = all.iter().flat_map(|p| p.commands()).collect();
         if let Some(cmd) = registry::find(&every, sub) {
             print!("{}", registry::help_for(cmd));
             let disabled = all.iter().find(|p| p.command_names().contains(&sub));
@@ -124,7 +127,7 @@ fn main() {
         }
         std::process::exit(2);
     };
-    if let Err(e) = (cmd.run)(&ctx, rest) {
+    if let Err(e) = cmd.run.call(&ctx, rest) {
         eprintln!("tveee: {e}");
         if let Error::Usage(_) = e {
             eprintln!("(see 'tveee {} --help')", cmd.name);
@@ -154,7 +157,7 @@ mod tests {
         let cmds: Vec<Command> = plugins::all()
             .iter()
             .filter(|p| matches!(p.enable, plugin::Enable::Always) && p.name != "ui")
-            .flat_map(|p| (p.commands)())
+            .flat_map(|p| p.commands())
             .collect();
         let want = registry::usage_text(&cmds);
         assert!(
@@ -166,15 +169,26 @@ mod tests {
     #[test]
     fn menu_keys_are_unique() {
         let mut seen = HashSet::new();
-        for m in plugins::all().iter().flat_map(|p| (p.menu)()) {
-            assert!(seen.insert(m.key), "duplicate menu key: {}", m.key);
+        for m in plugins::all().iter().flat_map(|p| (p.actions)()).filter(|a| a.key.is_some()) {
+            assert!(seen.insert(m.key), "duplicate menu key: {:?}", m.key);
+        }
+    }
+
+    #[test]
+    fn action_ids_are_unique_and_namespaced() {
+        let mut seen = HashSet::new();
+        for p in plugins::all() {
+            for a in (p.actions)() {
+                assert!(seen.insert(a.id), "duplicate action id: {}", a.id);
+                assert!(a.id.split_once('.').is_some_and(|(ns, rest)| !ns.is_empty() && !rest.is_empty()), "action id isn't <plugin>.<what>: {}", a.id);
+            }
         }
     }
 
     #[test]
     fn names_and_aliases_are_unique() {
         let mut seen = HashSet::new();
-        for c in plugins::all().iter().flat_map(|p| (p.commands)()) {
+        for c in plugins::all().iter().flat_map(|p| p.commands()) {
             for n in std::iter::once(c.name).chain(c.aliases.iter().copied()) {
                 assert!(seen.insert(n), "duplicate command or alias: {n}");
             }

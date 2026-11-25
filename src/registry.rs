@@ -5,7 +5,7 @@ use crate::error::Result;
 use crate::Ctx;
 use std::collections::BTreeMap;
 
-pub type Run = fn(&Ctx, &[String]) -> Result<()>;
+pub use crate::actions::Run;
 
 pub struct Command {
     pub category: &'static str,
@@ -23,9 +23,9 @@ impl Command {
         name: &'static str,
         usage: &'static str,
         desc: &'static str,
-        run: Run,
+        run: fn(&Ctx, &[String]) -> Result<()>,
     ) -> Self {
-        Command { category, name, usage, desc, long: "", aliases: &[], run }
+        Command { category, name, usage, desc, long: "", aliases: &[], run: Run::Terminal(run) }
     }
 
     pub fn long(mut self, long: &'static str) -> Self {
