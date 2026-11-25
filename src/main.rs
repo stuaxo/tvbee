@@ -67,7 +67,7 @@ fn main() {
         .iter()
         .zip(&states)
         .filter(|(_, s)| s.enabled)
-        .flat_map(|(p, _)| p.all_commands())
+        .flat_map(|(p, _)| p.commands())
         .collect();
     // the enabled plugins' apps join the core list, before anything looks one up
     plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
@@ -83,7 +83,7 @@ fn main() {
 
     // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {
-        let every: Vec<Command> = all.iter().flat_map(|p| p.all_commands()).collect();
+        let every: Vec<Command> = all.iter().flat_map(|p| p.commands()).collect();
         if let Some(cmd) = registry::find(&every, sub) {
             print!("{}", registry::help_for(cmd));
             let disabled = all.iter().find(|p| p.command_names().contains(&sub));
@@ -154,7 +154,7 @@ mod tests {
         let cmds: Vec<Command> = plugins::all()
             .iter()
             .filter(|p| matches!(p.enable, plugin::Enable::Always) && p.name != "ui")
-            .flat_map(|p| p.all_commands())
+            .flat_map(|p| p.commands())
             .collect();
         let want = registry::usage_text(&cmds);
         assert!(
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn names_and_aliases_are_unique() {
         let mut seen = HashSet::new();
-        for c in plugins::all().iter().flat_map(|p| p.all_commands()) {
+        for c in plugins::all().iter().flat_map(|p| p.commands()) {
             for n in std::iter::once(c.name).chain(c.aliases.iter().copied()) {
                 assert!(seen.insert(n), "duplicate command or alias: {n}");
             }

@@ -3,7 +3,7 @@
 //! dialog (`,`) or `tveee options`.
 
 use crate::error::{failed, usage, Result};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::Ctx;
 use std::sync::Mutex;
 
@@ -117,8 +117,8 @@ fn options(_: &Ctx, args: &[String]) -> Result<()> {
     }
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new("options", "options", "[<name> on|off]", "tveee's own settings: list them, or set one", options).long(
+pub fn actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("options.options", "options", "tveee's own settings: list them, or set one", options).cli("options", "[<name> on|off]", "tveee's own settings: list them, or set one").long(
         "Saved in ~/.config/tveee/options.txt. In the ui, ',' opens the same options.",
     )]
 }

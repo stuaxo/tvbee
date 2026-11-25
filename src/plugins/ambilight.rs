@@ -8,7 +8,7 @@
 
 use crate::error::{failed, usage, Result};
 use crate::plugins::philips::{js_get_paired, js_post};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 
@@ -511,14 +511,8 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new(
-        CAT,
-        "ambilight",
-        "[on|off | lights | video | audio | colour | set | mode | hue]",
-        "Ambilight: what it's doing, its styles, and handing it to outside control",
-        ambilight,
-    )
+pub fn command_actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("ambilight.ambilight", CAT, "Ambilight: what it's doing, its styles, and handing it to outside control", ambilight).cli("ambilight", "[on|off | lights | video | audio | colour | set | mode | hue]", "Ambilight: what it's doing, its styles, and handing it to outside control")
     .long(
         "With nothing: what the lights are doing (power, who's in control, style,\n\
          Ambilight+Hue, how many lights). Needs pairing ('tveee pair jointspace').\n\
@@ -547,9 +541,10 @@ pub fn commands() -> Vec<Command> {
     )]
 }
 
-pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+pub fn actions() -> Vec<ActionDescriptor> {
     use crate::actions::ActionDescriptor as A;
-    vec![
+    let mut v = command_actions();
+    v.extend([
         A::new("ambilight.power", WHAT, "ambilight on/off", |cx, _| {
             let on = crate::http::json(&get(cx.tv, "/6/ambilight/power")?).and_then(|v| crate::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
             set_power(cx.tv, !on).map(Into::into)
@@ -579,7 +574,8 @@ pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
         })
         .key('c')
         .text("Colour:", "red, warm, #ff8800 or 255,136,0"),
-    ]
+    ]);
+    v
 }
 
 #[cfg(test)]

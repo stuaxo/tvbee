@@ -156,10 +156,6 @@ impl ActionDescriptor {
     }
 }
 
-pub fn none() -> Vec<ActionDescriptor> {
-    Vec::new()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

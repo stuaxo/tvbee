@@ -12,7 +12,6 @@ use crate::actions::{ActionDescriptor, Params};
 use crate::nowplaying::{self, Activity, bar, clock, progress_bar};
 use crate::plugins::apps::list_name;
 use crate::plugins::{apps, info, media, search};
-use crate::registry::Command;
 use crate::tv::Tv;
 use crate::Ctx;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -642,8 +641,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(result?)
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new(CAT, "ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking", ui).long(
+pub fn actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui).cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking").long(
         "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
          the arrows seek and change volume; in remote mode the keyboard is the TV's:\n\

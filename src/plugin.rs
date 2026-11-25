@@ -9,7 +9,7 @@
 //! never touches the TV.
 
 use crate::error::Result;
-use crate::actions::{self, ActionDescriptor};
+use crate::actions::ActionDescriptor;
 use crate::plugins::apps::App;
 use crate::registry::Command;
 use crate::tv::Tv;
@@ -25,8 +25,6 @@ pub struct Plugin {
     pub name: &'static str,
     pub desc: &'static str,
     pub enable: Enable,
-    /// Commands that aren't actions (yet).
-    pub commands: fn() -> Vec<Command>,
     /// What it can do (see `crate::actions`): commands, menu items, ...
     pub actions: fn() -> Vec<ActionDescriptor>,
     /// Apps this plugin knows (added to the core list when it's enabled).
@@ -50,17 +48,17 @@ fn no_apps() -> Vec<App> {
 }
 
 impl Plugin {
-    pub fn builtin(name: &'static str, desc: &'static str, commands: fn() -> Vec<Command>) -> Self {
-        Plugin { name, desc, enable: Enable::Always, commands, actions: actions::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
+    pub fn builtin(name: &'static str, desc: &'static str, actions: fn() -> Vec<ActionDescriptor>) -> Self {
+        Plugin { name, desc, enable: Enable::Always, actions, apps: no_apps, providers: no_providers, pairings: no_pairings }
     }
 
     pub fn detect(
         name: &'static str,
         desc: &'static str,
         detect: fn(&Tv) -> Result<bool>,
-        commands: fn() -> Vec<Command>,
+        actions: fn() -> Vec<ActionDescriptor>,
     ) -> Self {
-        Plugin { name, desc, enable: Enable::Detect(detect), commands, actions: actions::none, apps: no_apps, providers: no_providers, pairings: no_pairings }
+        Plugin { name, desc, enable: Enable::Detect(detect), actions, apps: no_apps, providers: no_providers, pairings: no_pairings }
     }
 
     /// Register these providers while the plugin is enabled.
@@ -81,17 +79,9 @@ impl Plugin {
         self
     }
 
-    /// Add these actions (commands, ui menu items, ...).
-    pub fn with_actions(mut self, actions: fn() -> Vec<ActionDescriptor>) -> Self {
-        self.actions = actions;
-        self
-    }
-
-    /// Its commands: the plain ones and those of its actions.
-    pub fn all_commands(&self) -> Vec<Command> {
-        let mut cmds = (self.commands)();
-        cmds.extend((self.actions)().iter().filter_map(ActionDescriptor::command));
-        cmds
+    /// Its commands: the actions the command line reaches.
+    pub fn commands(&self) -> Vec<Command> {
+        (self.actions)().iter().filter_map(ActionDescriptor::command).collect()
     }
 
     /// Its actions with a key, for the ui menu.
@@ -101,7 +91,7 @@ impl Plugin {
 
     /// Command names and aliases this plugin provides.
     pub fn command_names(&self) -> Vec<&'static str> {
-        self.all_commands()
+        self.commands()
             .iter()
             .flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied()))
             .collect()
@@ -270,7 +260,7 @@ mod tests {
         assert!(parse_cache("junk\nx=maybe\n").is_empty());
     }
 
-    fn none() -> Vec<Command> {
+    fn none() -> Vec<ActionDescriptor> {
         Vec::new()
     }
 
@@ -288,8 +278,8 @@ mod tests {
 
     #[test]
     fn probes_only_when_useful() {
-        fn vcmds() -> Vec<Command> {
-            vec![Command::new("v", "vendorcmd", "", "", |_, _| Ok(()))]
+        fn vcmds() -> Vec<ActionDescriptor> {
+            vec![ActionDescriptor::terminal("v.vendorcmd", "v", "", |_, _| Ok(())).cli("vendorcmd", "", "")]
         }
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let quiet = [Plugin::detect("v", "", yes, vcmds)];

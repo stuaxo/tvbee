@@ -3,7 +3,7 @@
 
 use crate::error::{failed, usage, Result};
 use crate::provider::{self, Cx, Event};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::Ctx;
 
 const CAT: &str = "guide";
@@ -291,9 +291,9 @@ fn providers(c: &Ctx, _: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> Vec<Command> {
+pub fn actions() -> Vec<ActionDescriptor> {
     vec![
-        Command::new(CAT, "guide", "[<channel>] [--hours N] [--provider ID]", "programme guide: now/next, or one channel's schedule", guide).long(
+        ActionDescriptor::terminal("guide.guide", CAT, "programme guide: now/next, or one channel's schedule", guide).cli("guide", "[<channel>] [--hours N] [--provider ID]", "programme guide: now/next, or one channel's schedule").long(
             "From the first provider with a guide (live TV over the air on Philips TVs,\n\
              from the broadcast EPG the TV collects).\n\
              \x20 tveee guide                now and next on every channel\n\
@@ -303,13 +303,13 @@ pub fn commands() -> Vec<Command> {
              Philips TVs needs pairing ('tveee pair'); without it the guide shows the\n\
              TV's internal channel ids.",
         ),
-        Command::new(CAT, "channels", "[--tv | --radio] [--provider ID]", "channels you can watch, with what's on", channels)
+        ActionDescriptor::terminal("guide.channels", CAT, "channels you can watch, with what's on", channels).cli("channels", "[--tv | --radio] [--provider ID]", "channels you can watch, with what's on")
             .long("The live TV channel list with what's on each now, marking the one the TV is\ntuned to. On Philips TVs it needs pairing ('tveee pair')."),
-        Command::new(CAT, "watch", "<channel> [--provider ID]", "switch live TV to a channel, by number or name", watch)
+        ActionDescriptor::terminal("guide.watch", CAT, "switch live TV to a channel, by number or name", watch).cli("watch", "<channel> [--provider ID]", "switch live TV to a channel, by number or name")
             .long("  tveee watch 4\n  tveee watch more 4\n  tveee watch bbc two\nNames match from the start, then anywhere; the lowest channel number wins."),
-        Command::new(CAT, "onnow", "[--info] [--provider ID]", "the channel live TV is on, and what's on it now and next", on_now)
+        ActionDescriptor::terminal("guide.onnow", CAT, "the channel live TV is on, and what's on it now and next", on_now).cli("onnow", "[--info] [--provider ID]", "the channel live TV is on, and what's on it now and next")
             .long("  --info   with each programme's description, from the broadcast guide (the first\n           time takes the TV about half a minute; then it's cached)"),
-        Command::new(CAT, "fav", "[add|remove <channel>] [--provider ID]", "favourite channels: list, add, remove", fav).long(
+        ActionDescriptor::terminal("guide.fav", CAT, "favourite channels: list, add, remove", fav).cli("fav", "[add|remove <channel>] [--provider ID]", "favourite channels: list, add, remove").long(
             "  tveee fav                  list them\n\
              \x20 tveee fav add more 4       add a channel (by number or name)\n\
              \x20 tveee fav remove 18        remove one\n\
@@ -319,7 +319,7 @@ pub fn commands() -> Vec<Command> {
              later change wins. On Philips TVs new favourites go in Favourites 1, and\n\
              removing takes a channel out of every list.",
         ),
-        Command::new(CAT, "providers", "", "content providers and what each can do", providers).long(
+        ActionDescriptor::terminal("guide.providers", CAT, "content providers and what each can do", providers).cli("providers", "", "content providers and what each can do").long(
             "Providers are the sources of content tveee knows (live TV, YouTube, ...),\n\
              registered by plugins, with their capabilities: guide, channels, details,\n\
              places, search, now-playing.",

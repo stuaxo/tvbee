@@ -1,7 +1,7 @@
 use crate::error::{failed, usage, Result};
 use crate::nowplaying::{self, clock, Activity};
 use crate::tv::Tv;
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::Ctx;
 
 const CAT: &str = "info";
@@ -670,27 +670,27 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     }
 }
 
-pub fn commands() -> Vec<Command> {
+pub fn actions() -> Vec<ActionDescriptor> {
     vec![
-        Command::new(CAT, "status", WATCH_USAGE, "power state, foreground app, mute and free RAM", status).long(concat!(
+        ActionDescriptor::terminal("info.status", CAT, "power state, foreground app, mute and free RAM", status).cli("status", WATCH_USAGE, "power state, foreground app, mute and free RAM").long(concat!(
             "When tveee recognises what is on, it says so in words, e.g.\n  what:     Watching YouTube\n  title:    <title> (<channel>)\n  progress: ━━━━━━━━━━━━━━━━━━━━━━━━━━━┃── 25:16 / 27:31 (91%)\n  url:      https://www.youtube.com/watch?v=...\nTitles come from the app's media session; the progress bar and link from its\ndevtools page, for apps that expose one (currently YouTube). Lines are left out\nwhen there is nothing to say. 'tveee nowplaying' shows just those lines.\n\n", watch_long!()),
         ),
-        Command::new(CAT, "nowplaying", WATCH_USAGE, "what's on: app, title, progress bar and link", nowplaying_cmd)
+        ActionDescriptor::terminal("info.nowplaying", CAT, "what's on: app, title, progress bar and link", nowplaying_cmd).cli("nowplaying", WATCH_USAGE, "what's on: app, title, progress bar and link")
             .long(concat!(
                 "The what/title/progress/url lines from 'tveee status', on their own. Prints\n\"nothing playing ...\" and exits 1 when tveee doesn't recognise what is on.\n\n",
                 watch_long!()
             ))
             .aliases(&["np"]),
-        Command::new(CAT, "time", "", "show the TV's clock and compare it with this PC", time).long(
+        ActionDescriptor::terminal("info.time", CAT, "show the TV's clock and compare it with this PC", time).cli("time", "", "show the TV's clock and compare it with this PC").long(
             "Prints the TV's local time, timezone and automatic-time settings, and how far\nits clock is from this PC's. Warns when the clock is off by more than 5s or the\nUTC offset differs (the usual symptom after a daylight-saving change).",
         ),
-        Command::new(CAT, "now", "", "print the foreground window only", now),
-        Command::new(CAT, "details", "[--full]", "more about what's on: channel, chapters, description", details_cmd).long(
+        ActionDescriptor::terminal("info.now", CAT, "print the foreground window only", now).cli("now", "", "print the foreground window only"),
+        ActionDescriptor::terminal("info.details", CAT, "more about what's on: channel, chapters, description", details_cmd).cli("details", "[--full]", "more about what's on: channel, chapters, description").long(
             "For apps whose plugin knows how (YouTube, using yt-dlp; cached a day per video):\n\
              the channel, upload date, views, likes, length, chapters and description.\n\
              \x20 --full   the whole description, not just its first lines",
         ),
-        Command::new(CAT, "goto", "[app] [place|channel|chapter N|N]", "go to a place in an app, or a link from what's on", goto_cmd).long(
+        ActionDescriptor::terminal("info.goto", CAT, "go to a place in an app, or a link from what's on", goto_cmd).cli("goto", "[app] [place|channel|chapter N|N]", "go to a place in an app, or a link from what's on").long(
             "With nothing more, lists where you can go: the app's places (YouTube: home,\n\
              subscriptions, history, library, watchlater) and, for what's on, its channel,\n\
              chapters and the links in its description, numbered.\n\
@@ -700,7 +700,7 @@ pub fn commands() -> Vec<Command> {
              \x20 tveee goto chapter 3        seek to chapter 3\n\
              \x20 tveee goto 7                link 7 from the list",
         ),
-        Command::new(CAT, "logs", "[regex]", "recent logcat, optionally filtered", logs)
+        ActionDescriptor::terminal("info.logs", CAT, "recent logcat, optionally filtered", logs).cli("logs", "[regex]", "recent logcat, optionally filtered")
             .long("Case-insensitive extended regex; shows the last 200 matching lines."),
     ]
 }

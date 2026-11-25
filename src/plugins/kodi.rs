@@ -12,7 +12,7 @@ use crate::devtools::{Progress, SeekTo};
 use crate::error::{failed, Error, Result};
 use crate::more::Place;
 use crate::provider::{Outcome, Playing, Session};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 
 pub const PACKAGE: &str = "org.xbmc.kodi";
@@ -746,9 +746,10 @@ fn notify(tv: &Tv, text: &str) -> Result<String> {
 }
 
 /// What it can do (for now, the ui menu's items).
-pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+pub fn actions() -> Vec<ActionDescriptor> {
     use crate::actions::ActionDescriptor as A;
-    vec![
+    let mut v = command_actions();
+    v.extend([
         A::new("kodi.subtitles.next", "kodi", "kodi: next subtitles", |cx, _| subtitles(cx.tv, "next").map(Into::into)).key('k'),
         A::new("kodi.subtitles.off", "kodi", "kodi: subtitles off", |cx, _| subtitles(cx.tv, "off").map(Into::into)).key('K'),
         A::new("kodi.audio.next", "kodi", "kodi: next audio track", |cx, _| audio(cx.tv, "next").map(Into::into)).key('a'),
@@ -762,7 +763,8 @@ pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
         })
         .key('F')
         .text("Find in Kodi:", "a film or show's title"),
-    ]
+    ]);
+    v
 }
 
 pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
@@ -828,7 +830,7 @@ pub fn pairings() -> Vec<&'static dyn crate::pairing::Pairing> {
 }
 
 /// Nothing of its own: `tveee app kodi`, `goto kodi`, `seek`, ... cover it.
-pub fn commands() -> Vec<Command> {
+pub fn command_actions() -> Vec<ActionDescriptor> {
     Vec::new()
 }
 

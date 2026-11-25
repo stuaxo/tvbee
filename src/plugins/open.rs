@@ -2,7 +2,7 @@
 
 use super::apps;
 use crate::error::{failed, usage, Result};
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 
@@ -147,7 +147,7 @@ pub fn open_link(tv: &Tv, line: &str) -> Result<String> {
     Ok(format!("opened in {}", label(&component)))
 }
 
-pub fn actions() -> Vec<crate::actions::ActionDescriptor> {
+pub fn actions() -> Vec<ActionDescriptor> {
     vec![crate::actions::ActionDescriptor::new("apps.open_link", "apps", "open a link", |cx, a| open_link(cx.tv, &a.join(" ")).map(Into::into))
         .key('o')
         .text("Link to open:", "e.g. https://youtu.be/...   or   vlc http://host/film.mkv")]
@@ -187,8 +187,8 @@ fn open(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> Vec<Command> {
-    vec![Command::new("apps", "open", USAGE, "open a link in the app that handles it", open).long(
+pub fn command_actions() -> Vec<ActionDescriptor> {
+    vec![ActionDescriptor::terminal("open.open", "apps", "open a link in the app that handles it", open).cli("open", USAGE, "open a link in the app that handles it").long(
         "Sends the TV a 'view this link' request. Without an app, Android picks the app\n\
          that claims the link (YouTube and Netflix links open in their apps). Links\n\
          straight to media files (.mp4, .mkv, .m3u8, ...) go to VLC, then MX Player,\n\

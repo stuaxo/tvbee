@@ -2,7 +2,7 @@
 
 use crate::error::{failed, usage, Result};
 use crate::mdns;
-use crate::registry::Command;
+use crate::actions::ActionDescriptor;
 use crate::tv;
 use crate::Ctx;
 use std::collections::BTreeMap;
@@ -388,9 +388,9 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> Vec<Command> {
+pub fn actions() -> Vec<ActionDescriptor> {
     vec![
-        Command::new(CAT, "findtv", "[--scan] [--wait <secs>] [--raw]", "look for Android / Google TVs on the network", findtv).long(
+        ActionDescriptor::terminal("diagnose.findtv", CAT, "look for Android / Google TVs on the network", findtv).cli("findtv", "[--scan] [--wait <secs>] [--raw]", "look for Android / Google TVs on the network").long(
             "Asks the local network (mDNS / DNS-SD) for the few services an Android or\n\
              Google TV advertises: Cast, the Android TV Remote service, and ADB. For each\n\
              TV it shows the name, model, what it offers, and whether adb can reach it.\n\
@@ -400,7 +400,7 @@ pub fn commands() -> Vec<Command> {
              \x20 --wait <secs>   how long to listen for answers (default 2s)\n\
              \x20 --raw           list every service as advertised, with its TXT fields",
         ),
-        Command::new(CAT, "diagnose", "", "check adb, scrcpy, TV_IP and the connection to the TV", diagnose).long(
+        ActionDescriptor::terminal("diagnose.diagnose", CAT, "check adb, scrcpy, TV_IP and the connection to the TV", diagnose).cli("diagnose", "", "check adb, scrcpy, TV_IP and the connection to the TV").long(
             "Checks, in order: that adb can be found ($ADB, PATH, $ANDROID_HOME,\n\
              $ANDROID_SDK_ROOT) and its version; scrcpy (for 'mirror'); which TV_IP is in\n\
              use and where it was set; that the TV answers on the adb port; and whether\n\

@@ -1,6 +1,7 @@
 use crate::error::{failed, usage, Result};
 use crate::plugin::{self, Mode};
-use crate::registry::{self, Command};
+use crate::actions::ActionDescriptor;
+use crate::registry;
 use crate::Ctx;
 use std::io::Write;
 use std::process::{Command as Proc, Stdio};
@@ -150,16 +151,16 @@ fn plugins_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> Vec<Command> {
+pub fn actions() -> Vec<ActionDescriptor> {
     vec![
-        Command::new(CAT, "wait", "[secs]", "wait until the TV is reachable and booted", wait)
+        ActionDescriptor::terminal("tools.wait", CAT, "wait until the TV is reachable and booted", wait).cli("wait", "[secs]", "wait until the TV is reachable and booted")
             .long("Default timeout 180s. Useful as: tveee reboot && tveee wait && tveee launch iplayer"),
-        Command::new(CAT, "plugins", "[--refresh]", "list plugins and whether they are enabled", plugins_cmd).long(
+        ActionDescriptor::terminal("tools.plugins", CAT, "list plugins and whether they are enabled", plugins_cmd).cli("plugins", "[--refresh]", "list plugins and whether they are enabled").long(
             "Vendor plugins are enabled by detection, cached per TV in ~/.cache/tveee.\n  --refresh  re-probe the TV now (contacts it) and update the cache\nTVEEE_PLUGINS=philips,-other forces plugins on or off.",
         ),
-        Command::new(CAT, "commands", "", "list all command names and aliases", commands_list),
-        Command::new(CAT, "completion", "", "print a bash/zsh completion script", completion),
-        Command::new(CAT, "help", "[command]", "show this help, or help for one command", help),
+        ActionDescriptor::terminal("tools.commands", CAT, "list all command names and aliases", commands_list).cli("commands", "", "list all command names and aliases"),
+        ActionDescriptor::terminal("tools.completion", CAT, "print a bash/zsh completion script", completion).cli("completion", "", "print a bash/zsh completion script"),
+        ActionDescriptor::terminal("tools.help", CAT, "show this help, or help for one command", help).cli("help", "[command]", "show this help, or help for one command"),
     ]
 }
 
