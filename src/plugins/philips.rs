@@ -236,6 +236,11 @@ pub fn nettv_app(tv: &Tv) -> Option<String> {
     Some(nettv_app_name(link))
 }
 
+/// Which NetTV app the browser is showing (`nowplaying::named`).
+pub fn namers() -> Vec<crate::nowplaying::Namer> {
+    vec![crate::nowplaying::Namer { package: NETTV_BROWSER, name: nettv_app }]
+}
+
 /// Philips' apps: the NetTV web apps (each a small wrapper package that opens
 /// org.droidtv.nettvbrowser), the browser itself, and the TV app.
 pub fn apps() -> Vec<crate::plugins::apps::App> {

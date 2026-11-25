@@ -80,6 +80,7 @@ fn main() {
     plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
     provider::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.providers)()).collect());
     pairing::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.pairings)()).collect());
+    nowplaying::install_namers(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.namers)()).collect());
     let actions: Vec<actions::ActionDescriptor> = all
         .iter()
         .zip(&states)

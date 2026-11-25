@@ -305,7 +305,7 @@ impl Refresher {
 
     /// [`nowplaying::named`], read again every [`NAMED_EVERY`] (it costs an adb call).
     fn named(&mut self, pkg: &str, who: Who) -> Who {
-        if pkg != crate::plugins::philips::NETTV_BROWSER {
+        if !nowplaying::has_namer(pkg) {
             return who;
         }
         match &self.named {
