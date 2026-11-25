@@ -2,16 +2,8 @@
 
 use super::*;
 
-pub const KEY_BACK: u32 = 4;
-pub const KEY_HOME: u32 = 3;
 pub(super) const DPAD: [(KeyCode, u32, &str); 4] =
     [(KeyCode::Up, 19, "up"), (KeyCode::Down, 20, "down"), (KeyCode::Left, 21, "left"), (KeyCode::Right, 22, "right")];
-pub const KEY_OK: u32 = 23;
-/// Delete (backspace), forward delete, page up / down.
-pub const KEY_DEL: u32 = 67;
-pub const KEY_FORWARD_DEL: u32 = 112;
-pub const KEY_PAGE_UP: u32 = 92;
-pub const KEY_PAGE_DOWN: u32 = 93;
 
 /// What the arrow keys do: seek/volume, or move around the TV's menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,18 +36,7 @@ pub enum Input {
     Nothing,
 }
 
-pub fn key_name(code: u32) -> &'static str {
-    match code {
-        KEY_BACK => "back",
-        KEY_HOME => "home",
-        KEY_OK => "ok",
-        KEY_DEL => "delete",
-        KEY_FORWARD_DEL => "forward delete",
-        KEY_PAGE_UP => "page up",
-        KEY_PAGE_DOWN => "page down",
-        c => DPAD.iter().find(|(_, k, _)| *k == c).map_or("key", |(_, _, n)| n),
-    }
-}
+
 
 /// Map a key to what it means in `mode`.
 pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {

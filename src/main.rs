@@ -1,4 +1,6 @@
 mod devtools;
+#[cfg(feature = "engine")]
+mod engine;
 mod dotenv;
 mod actions;
 mod crypto;
@@ -15,7 +17,7 @@ mod more;
 mod nowplaying;
 mod options;
 mod plugin;
-#[cfg(feature = "ui")]
+#[cfg(feature = "engine")]
 mod preview;
 mod pairing;
 mod plugins;

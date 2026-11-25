@@ -4,7 +4,7 @@
 use super::*;
 
 /// A thread with a name (shown in the debug log, `TVEEE_LOG`).
-pub(super) fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
+pub(crate) fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
     let _ = std::thread::Builder::new().name(name.to_string()).spawn(f);
 }
 
@@ -32,7 +32,7 @@ pub fn lane(a: &Action) -> Lane {
 
 /// Hand each action to its lane, noting when the user last asked for
 /// something. Ends when the UI hangs up.
-pub(super) fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender<Action>)]) {
+pub(crate) fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender<Action>)]) {
     for a in actions {
         // not work for anyone: what the refresh should read
         if let Action::AmbilightPanel(on) = a {
@@ -56,7 +56,7 @@ pub(super) fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane,
 
 /// Send remote keys and typing as they come, over a shell kept open on the
 /// TV, written raw to an input device where possible (see `crate::keys`).
-pub(super) fn send_keys(tv: Tv, keys: &Receiver<Action>, tx: &Sender<Msg>) {
+pub(crate) fn send_keys(tv: Tv, keys: &Receiver<Action>, tx: &Sender<Msg>) {
     let mut session = crate::keys::Session::new(tv);
     session.warm();
     while let Ok(first) = keys.recv() {
@@ -119,49 +119,49 @@ pub fn batches(actions: Vec<Action>) -> Vec<Batch> {
 }
 
 /// What the lanes share.
-pub(super) struct Shared {
-    pub(super) ip: String,
+pub(crate) struct Shared {
+    pub(crate) ip: String,
     /// Set by the UI on quit: finish up, and don't open new port forwards.
-    pub(super) stop: Arc<AtomicBool>,
+    pub(crate) stop: Arc<AtomicBool>,
     /// The app in front, as of the last refresh.
-    pub(super) pkg: std::sync::Mutex<Option<String>>,
+    pub(crate) pkg: std::sync::Mutex<Option<String>>,
     /// Kinds of apps tveee has no entry for (fetched in the background).
-    pub(super) guesses: std::sync::Mutex<Vec<apps::Guess>>,
+    pub(crate) guesses: std::sync::Mutex<Vec<apps::Guess>>,
     /// Apps with a proper search (fetched in the background, or when needed).
-    pub(super) searchable: std::sync::Mutex<Vec<search::Searchable>>,
+    pub(crate) searchable: std::sync::Mutex<Vec<search::Searchable>>,
     /// Actions running now: the refresh holds off for them.
-    pub(super) busy: std::sync::atomic::AtomicUsize,
+    pub(crate) busy: std::sync::atomic::AtomicUsize,
     /// When the user last asked for something: background work waits for a lull.
-    pub(super) input_at: std::sync::Mutex<Instant>,
+    pub(crate) input_at: std::sync::Mutex<Instant>,
     /// Something the user did may have changed live TV's channel.
-    pub(super) channel_stale: AtomicBool,
+    pub(crate) channel_stale: AtomicBool,
     /// The first refresh has been shown (background work waits for it).
-    pub(super) shown: AtomicBool,
+    pub(crate) shown: AtomicBool,
     /// The Ambilight panel is open: the refresh reads the lights too.
-    pub(super) ambilight: AtomicBool,
+    pub(crate) ambilight: AtomicBool,
     /// The preview panel is open: its lane makes pictures.
-    pub(super) preview: AtomicBool,
+    pub(crate) preview: AtomicBool,
     /// A picture of what an app's player is playing, for the preview.
-    pub(super) art: std::sync::Mutex<Option<ArtNow>>,
+    pub(crate) art: std::sync::Mutex<Option<ArtNow>>,
 
     /// The launcher's apps have been sent (held while they're being read, so
     /// they're read once, by whichever lane gets there first).
-    pub(super) apps_sent: std::sync::Mutex<bool>,
+    pub(crate) apps_sent: std::sync::Mutex<bool>,
 }
 
 /// How long the user has to leave things alone before background work runs.
-pub(super) const LULL: Duration = Duration::from_secs(2);
+pub(crate) const LULL: Duration = Duration::from_secs(2);
 /// How long the refresh holds off for an action before going ahead anyway.
-pub(super) const HOLD_OFF: Duration = Duration::from_millis(1500);
+pub(crate) const HOLD_OFF: Duration = Duration::from_millis(1500);
 /// How often live TV's channel is read again when nothing suggests it changed.
-pub(super) const CHANNEL_EVERY: Duration = Duration::from_secs(5);
+pub(crate) const CHANNEL_EVERY: Duration = Duration::from_secs(5);
 
-pub(super) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Shared {
-    pub(super) fn new(ip: String, stop: Arc<AtomicBool>) -> Shared {
+    pub(crate) fn new(ip: String, stop: Arc<AtomicBool>) -> Shared {
         Shared {
             ip,
             stop,
@@ -180,27 +180,27 @@ impl Shared {
         }
     }
 
-    pub(super) fn tv(&self) -> Tv {
+    pub(crate) fn tv(&self) -> Tv {
         Tv { ip: self.ip.clone() }
     }
 
-    pub(super) fn stopping(&self) -> bool {
+    pub(crate) fn stopping(&self) -> bool {
         self.stop.load(Ordering::Relaxed)
     }
 
     /// The user asked for something.
-    pub(super) fn touched(&self) {
+    pub(crate) fn touched(&self) {
         *lock(&self.input_at) = Instant::now();
         self.channel_stale.store(true, Ordering::Relaxed);
     }
 
     /// Nothing asked for lately and nothing running: background work may go.
-    pub(super) fn idle(&self) -> bool {
+    pub(crate) fn idle(&self) -> bool {
         self.shown.load(Ordering::Relaxed) && self.busy.load(Ordering::Relaxed) == 0 && lock(&self.input_at).elapsed() >= LULL
     }
 
     /// Wait for a lull; false if quitting meanwhile.
-    pub(super) fn wait_idle(&self) -> bool {
+    pub(crate) fn wait_idle(&self) -> bool {
         while !self.idle() {
             if self.stopping() {
                 return false;
@@ -213,7 +213,7 @@ impl Shared {
 
 /// Read the launcher's apps and send them, unless that's been done. False if
 /// the TV couldn't say (try again later).
-pub(super) fn send_apps(shared: &Shared, tv: &Tv, tx: &Sender<Msg>) -> bool {
+pub(crate) fn send_apps(shared: &Shared, tv: &Tv, tx: &Sender<Msg>) -> bool {
     let mut sent = lock(&shared.apps_sent);
     if *sent {
         return true;
@@ -225,7 +225,7 @@ pub(super) fn send_apps(shared: &Shared, tv: &Tv, tx: &Sender<Msg>) -> bool {
 }
 
 /// The launcher's rows, read from the TV now.
-pub(super) fn app_rows(shared: &Shared, tv: &Tv) -> Option<Vec<Entry>> {
+pub(crate) fn app_rows(shared: &Shared, tv: &Tv) -> Option<Vec<Entry>> {
     let pm = tv.shell(&["cmd", "package", "list", "packages"]).ok()?;
     let guesses = apps::guesses(tv);
     *lock(&shared.guesses) = guesses.clone();
@@ -235,7 +235,7 @@ pub(super) fn app_rows(shared: &Shared, tv: &Tv) -> Option<Vec<Entry>> {
 }
 
 /// Tell the ui which apps are running.
-pub(super) fn send_running(tv: &Tv, tx: &Sender<Msg>) {
+pub(crate) fn send_running(tv: &Tv, tx: &Sender<Msg>) {
     let cmd = format!("ps -A -o NAME; echo @@; {}", apps::PERSISTENT_CMD);
     if let Ok(out) = tv.shell(&[&cmd]) {
         let (ps, pers) = out.split_once("@@").unwrap_or((&out, ""));
@@ -251,21 +251,21 @@ type Who = Option<(String, apps::Kind)>;
 /// How often the refresh asks again which NetTV app is showing.
 const NAMED_EVERY: Duration = Duration::from_secs(30);
 
-pub(super) struct Refresher {
-    pub(super) tv: Tv,
-    pub(super) shared: Arc<Shared>,
+pub(crate) struct Refresher {
+    pub(crate) tv: Tv,
+    pub(crate) shared: Arc<Shared>,
     /// Live TV's channel, and when it was read.
-    pub(super) channel: Option<(crate::provider::Channel, Instant)>,
+    pub(crate) channel: Option<(crate::provider::Channel, Instant)>,
     /// The app's better name ([`nowplaying::named`]): for which package,
     /// when it was read, and the name.
-    pub(super) named: Option<(String, Instant, Who)>,
+    pub(crate) named: Option<(String, Instant, Who)>,
     /// The last window dump that said what's in front: a busy TV's dumpsys
     /// sometimes answers with nothing, which isn't "nothing in front".
-    pub(super) last_window: String,
+    pub(crate) last_window: String,
 }
 
 impl Refresher {
-    pub(super) fn run(mut self, wake: &Receiver<()>, tx: Sender<Msg>) {
+    pub(crate) fn run(mut self, wake: &Receiver<()>, tx: Sender<Msg>) {
         // every REFRESH, or when woken; until the action lane has gone
         while let Ok(()) | Err(RecvTimeoutError::Timeout) = wake.recv_timeout(REFRESH) {
             // several wake-ups at once: one refresh
@@ -294,7 +294,7 @@ impl Refresher {
 
     /// Live TV in `pkg`: its channel is read again only now and then, or
     /// when the user may have changed it.
-    pub(super) fn live(&mut self, pkg: &str) -> Option<Activity> {
+    pub(crate) fn live(&mut self, pkg: &str) -> Option<Activity> {
         let stale = self.shared.channel_stale.swap(false, Ordering::Relaxed);
         if stale || self.channel.as_ref().is_none_or(|(_, at)| at.elapsed() >= CHANNEL_EVERY) {
             self.channel = nowplaying::live_channel(&self.tv, pkg).map(|c| (c, Instant::now()));
@@ -318,7 +318,7 @@ impl Refresher {
         }
     }
 
-    pub(super) fn snapshot(&mut self) -> Result<Snapshot> {
+    pub(crate) fn snapshot(&mut self) -> Result<Snapshot> {
         let tv = &self.tv;
         let watch_lights = self.shared.ambilight.load(Ordering::Relaxed);
         let (power, window, media_dump, audio, system, ambilight) = std::thread::scope(|sc| {
@@ -408,20 +408,20 @@ impl Refresher {
 
 /// The action lane: what the user did, one at a time, as soon as it comes.
 /// Each wakes the refresh when done, so the screen catches up.
-pub(super) struct Actor {
-    pub(super) tv: Tv,
-    pub(super) shared: Arc<Shared>,
-    pub(super) menu: Vec<ActionDescriptor>,
+pub(crate) struct Actor {
+    pub(crate) tv: Tv,
+    pub(crate) shared: Arc<Shared>,
+    pub(crate) menu: Vec<ActionDescriptor>,
     /// Wakes the refresh.
-    pub(super) wake: Sender<()>,
+    pub(crate) wake: Sender<()>,
     /// The read lane (to update the running apps after launching, closing).
-    pub(super) reads: Sender<Action>,
+    pub(crate) reads: Sender<Action>,
     /// A pairing under way: the TV is showing a PIN.
-    pub(super) pairing: Option<crate::plugins::philips::PairStart>,
+    pub(crate) pairing: Option<crate::plugins::philips::PairStart>,
 }
 
 impl Actor {
-    pub(super) fn run(mut self, actions: &Receiver<Action>, tx: Sender<Msg>) {
+    pub(crate) fn run(mut self, actions: &Receiver<Action>, tx: Sender<Msg>) {
         while let Ok(first) = actions.recv() {
             // keys already pressed still go, even when quitting
             let mut queued = vec![first];
@@ -450,13 +450,13 @@ impl Actor {
 
     /// Seek exactly through the app's own player (YouTube, Kodi); None: it
     /// has none, or it can't now (then keys do it).
-    pub(super) fn exact_seek(&mut self, to: SeekTo) -> Option<f64> {
+    pub(crate) fn exact_seek(&mut self, to: SeekTo) -> Option<f64> {
         let pkg = lock(&self.shared.pkg).clone()?;
         crate::provider::for_package(&pkg)?.player()?.seek(&self.tv, to).handled()
     }
 
     /// Carry out one action; returns status-line feedback.
-    pub(super) fn act(&mut self, a: Action, tx: &Sender<Msg>) -> Result<String> {
+    pub(crate) fn act(&mut self, a: Action, tx: &Sender<Msg>) -> Result<String> {
         Ok(match a {
             Action::Favourite(ch, on) => {
                 let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV here".into())) };
@@ -590,7 +590,7 @@ impl Actor {
 
 /// The read lane: things the user is waiting to see, kept apart from
 /// actions so a slow read doesn't hold one up.
-pub(super) fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg>) {
+pub(crate) fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg>) {
     let tv = &shared.tv();
     while let Ok(first) = actions.recv() {
         let mut queued = vec![first];
@@ -617,7 +617,7 @@ pub(super) fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg
 /// user has paused ([`LULL`]): the launcher's apps and what can be searched,
 /// reading the guide ahead of it being opened, and its descriptions when
 /// asked to.
-pub(super) fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
+pub(crate) fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
     let tv = shared.tv();
     // whether there's an Ambilight panel to offer (one quick, public read)
     if tx.send(Msg::Ambilight(crate::plugins::ambilight::has_ambilight(&tv))).is_err() {
@@ -696,7 +696,7 @@ const PUSH_RETRY: Duration = Duration::from_secs(10);
 /// The push lane: while the app in front can say when playback changes
 /// (Kodi, YouTube: [`crate::provider::Player::watch`]), the refresh is woken
 /// as soon as it does, rather than up to a second later.
-pub(super) fn push_lane(shared: &Shared, wake: &Sender<()>) {
+pub(crate) fn push_lane(shared: &Shared, wake: &Sender<()>) {
     use crate::provider::Outcome;
     let tv = shared.tv();
     // the app given up on lately, and when

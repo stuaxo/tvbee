@@ -175,6 +175,8 @@ fn settling_waits_out_the_steps_on_the_way() {
 }
 
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[test]
 fn keys_by_mode() {
