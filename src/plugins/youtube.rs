@@ -378,6 +378,40 @@ pub fn storyboard(id: &str) -> Option<Storyboard> {
     board
 }
 
+/// Of the storyboard sheets here (file name, last changed), those to delete:
+/// all but those of the [`KEEP`] videos used last.
+pub fn sheets_to_remove(sheets: &[(String, std::time::SystemTime)]) -> Vec<String> {
+    let video = |name: &str| name.rfind("-sb").map(|i| name[..i].to_string());
+    let mut last_used: HashMap<String, std::time::SystemTime> = HashMap::new();
+    for (name, at) in sheets {
+        if let Some(v) = video(name) {
+            let e = last_used.entry(v).or_insert(*at);
+            *e = (*e).max(*at);
+        }
+    }
+    let mut videos: Vec<(std::time::SystemTime, String)> = last_used.into_iter().map(|(v, at)| (at, v)).collect();
+    videos.sort_by(|a, b| b.cmp(a));
+    let keep: Vec<String> = videos.into_iter().take(KEEP).map(|(_, v)| v).collect();
+    sheets.iter().filter(|(n, _)| video(n).is_some_and(|v| !keep.contains(&v))).map(|(n, _)| n.clone()).collect()
+}
+
+/// Delete old storyboard sheets (see [`sheets_to_remove`]).
+fn prune_sheets(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let sheets: Vec<(String, std::time::SystemTime)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            (name.contains("-sb") && name.ends_with(".jpg")).then_some(())?;
+            Some((name, e.metadata().ok()?.modified().ok()?))
+        })
+        .collect();
+    for name in sheets_to_remove(&sheets) {
+        let _ = std::fs::remove_file(dir.join(&name));
+        crate::tlog!("youtube: removed old storyboard sheet {name}");
+    }
+}
+
 /// The storyboard frame of video `id` at `secs`, as JPEG.
 pub fn storyboard_frame(id: &str, secs: f64) -> Option<Vec<u8>> {
     let board = storyboard(id)?;
@@ -397,6 +431,7 @@ pub fn storyboard_frame(id: &str, secs: f64) -> Option<Vec<u8>> {
         if !ok {
             return None;
         }
+        prune_sheets(&dir);
     }
     ffmpeg_jpeg(None, &sheet, &format!("crop={}:{}:{x}:{y}", board.width, board.height))
 }
@@ -526,6 +561,26 @@ pub fn commands() -> Vec<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_sheets_go() {
+        let t = |secs| std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        // six videos (ids may contain '-'), one with two sheets; KEEP is 4
+        let sheets: Vec<(String, std::time::SystemTime)> = vec![
+            ("aaa-sb0.jpg".into(), t(1)),
+            ("aaa-sb1.jpg".into(), t(60)),
+            ("b-b-sb0.jpg".into(), t(2)),
+            ("ccc-sb0.jpg".into(), t(30)),
+            ("ddd-sb0.jpg".into(), t(40)),
+            ("eee-sb0.jpg".into(), t(50)),
+            ("fff-sb0.jpg".into(), t(3)),
+        ];
+        let mut gone = sheets_to_remove(&sheets);
+        gone.sort();
+        // aaa was used last (its second sheet), so both its sheets stay
+        assert_eq!(gone, vec!["b-b-sb0.jpg".to_string(), "fff-sb0.jpg".to_string()]);
+        assert!(sheets_to_remove(&sheets[..3]).is_empty());
+    }
 
     #[test]
     fn storyboard_frames() {
