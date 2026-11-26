@@ -23,8 +23,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets --features "${{ matrix.features }}" -- -D warnings
-      - run: cargo test --features "${{ matrix.features }}"
+      - run: cargo clippy --workspace --all-targets --features "${{ matrix.features }}" -- -D warnings
+      - run: cargo test --workspace --features "${{ matrix.features }}"
 
   # build with Debian's own packaged Rust (no rustup), as someone building
   # from source on Debian 13 would
@@ -37,7 +37,7 @@ jobs:
       # ca-certificates: cargo fetches crates over HTTPS; gcc and libc6-dev
       # build the bundled SQLite
       - run: apt-get update && apt-get install -y --no-install-recommends cargo ca-certificates gcc libc6-dev
-      - run: cargo --version && cargo build --locked && cargo test --locked
+      - run: cargo --version && cargo build --locked && cargo test --workspace --locked
 
   # the oldest Rust we claim to support (Cargo.toml rust-version)
   msrv:
@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked
+      - run: cargo test --workspace --locked
 
   windows:
     name: Windows (${{ matrix.features || 'default' }})
@@ -62,8 +62,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets --features "${{ matrix.features }}" -- -D warnings
-      - run: cargo test --features "${{ matrix.features }}"
+      - run: cargo clippy --workspace --all-targets --features "${{ matrix.features }}" -- -D warnings
+      - run: cargo test --workspace --features "${{ matrix.features }}"
 
   # the release's static Linux builds (musl), cross-compiled; the tests run
   # under qemu, which also catches 32-bit problems on the ARM ones
@@ -87,7 +87,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - run: cargo test --features ui
+      - run: cargo test --workspace --features ui
       - run: cargo build --release --features ui
       - name: Statically linked
         run: |

@@ -6,7 +6,6 @@
 //!
 //! Plain data, so plugins describe them whether or not a front end is built.
 
-#![cfg_attr(not(feature = "ui"), allow(dead_code))]
 
 use crate::tv::Tv;
 

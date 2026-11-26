@@ -1919,9 +1919,19 @@ version = "0.2.0"
 dependencies = [
  "diesel",
  "image",
- "libsqlite3-sys",
  "ratatui",
  "ratatui-image",
+ "serde_json",
+ "tveee-core",
+]
+
+[[package]]
+name = "tveee-core"
+version = "0.2.0"
+dependencies = [
+ "diesel",
+ "image",
+ "libsqlite3-sys",
  "serde_json",
 ]
 

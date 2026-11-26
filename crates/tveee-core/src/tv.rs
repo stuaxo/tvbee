@@ -283,7 +283,6 @@ impl Tv {
 
     /// Start `cmd` on the TV and leave it running (output discarded); kill
     /// the child to stop it.
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn spawn_shell(&self, cmd: &str) -> Result<std::process::Child> {
         self.ready()?;
         Proc::new(adb_program())
@@ -331,7 +330,6 @@ impl Tv {
 
     /// Forward a free local port to a TCP port on the TV itself (reaching
     /// what only listens there).
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn forward_tcp(&self, port: u16) -> Result<Forward> {
         self.forward(&format!("tcp:{port}"))
     }

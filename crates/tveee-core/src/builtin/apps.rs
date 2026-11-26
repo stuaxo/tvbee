@@ -109,18 +109,7 @@ pub const CORE: &[App] = &[
     known("the home screen", "com.google.android.leanbacklauncher", Kind::Launcher),
 ];
 
-static REGISTRY: std::sync::OnceLock<Vec<App>> = std::sync::OnceLock::new();
-
-/// Plugins' apps before `install` (main installs first): none; in tests,
-/// every plugin's.
-#[cfg(not(test))]
-fn not_installed() -> Vec<App> {
-    Vec::new()
-}
-#[cfg(test)]
-fn not_installed() -> Vec<App> {
-    crate::plugins::all().iter().flat_map(|p| (p.apps)()).collect()
-}
+static REGISTRY: crate::plugin::Registry<App> = crate::plugin::Registry::new();
 
 /// The core apps with plugins' apps (`extra`) placed after `home`, so they
 /// list near the top.
@@ -134,12 +123,14 @@ pub fn registry(extra: Vec<App>) -> Vec<App> {
 /// Set the apps of the enabled plugins. Call once, before anything looks an
 /// app up (main does).
 pub fn install(plugin_apps: Vec<App>) {
-    let _ = REGISTRY.set(registry(plugin_apps));
+    REGISTRY.install(registry(plugin_apps));
 }
 
-/// Every app tveee knows. Without [`install`] (tests) that's every plugin's.
+/// Every app tveee knows: the core's, and the enabled plugins' once
+/// they're installed.
 pub fn all() -> &'static [App] {
-    REGISTRY.get_or_init(|| registry(not_installed()))
+    static CORE_ONLY: std::sync::OnceLock<Vec<App>> = std::sync::OnceLock::new();
+    REGISTRY.get().unwrap_or_else(|| CORE_ONLY.get_or_init(|| registry(Vec::new())))
 }
 
 /// "the home screen" -> "Home screen": app names are written for sentences.
@@ -158,7 +149,6 @@ pub fn list_name(name: &str) -> String {
         None => name.to_string(),
     }
 }
-
 
 pub fn is_alias(name: &str) -> bool {
     by_alias(name).is_some()
@@ -301,7 +291,6 @@ const HOGS: &[&str] = &[
 
 /// Whether the TV passes through `pkg` on the way from one app to another:
 /// a home screen tveee knows, or Android's own screens.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn passes_through(pkg: &str) -> bool {
     pkg == "android" || pkg == "com.android.systemui" || by_package(pkg).is_some_and(|a| a.kind == Kind::Launcher)
 }
@@ -478,7 +467,6 @@ no default set: the TV asks which to use when Home is pressed ('tveee home --set
 }
 
 /// Aliases whose app is installed (`pm list packages` output); `home` always.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn installed_aliases(pm_list: &str) -> Vec<&'static App> {
     let installed: Vec<&str> = pm_list.lines().filter_map(|l| l.trim().strip_prefix("package:")).collect();
     all().iter()
@@ -547,7 +535,6 @@ pub fn bring_to_front(tv: &Tv, app: &str) -> Result<String> {
 
 /// The app packages with a running process, from `ps -A -o NAME` (an app's
 /// extra processes, `pkg:name`, count as the app).
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn running(ps: &str) -> std::collections::BTreeSet<String> {
     ps.lines()
         .skip(1)
@@ -558,14 +545,12 @@ pub fn running(ps: &str) -> std::collections::BTreeSet<String> {
 }
 
 /// The command whose output [`persistent`] reads.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub const PERSISTENT_CMD: &str = "dumpsys activity processes | grep '[*]PERS[*]'";
 
 /// Packages Android keeps running whatever happens ("persistent": live TV,
 /// system UI, ...): a force-stop is undone straight away, so they can't be
 /// closed. From [`PERSISTENT_CMD`]'s lines, e.g.
 /// `*PERS* UID 1000 ProcessRecord{fc3af50 2241:org.droidtv.zapster/1000}`.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn persistent(dump: &str) -> std::collections::BTreeSet<String> {
     dump.lines()
         .filter(|l| l.trim_start().starts_with("*PERS*"))
@@ -871,7 +856,6 @@ mod tests {
 
     #[test]
     fn resolves_aliases_and_packages() {
-        assert_eq!(pkg_of("iplayer"), "org.droidtv.nettvapp4340");
         assert_eq!(target("kodi"), "org.xbmc.kodi");
         assert_eq!(pkg_of("com.example/.Main"), "com.example");
         assert_eq!(target("home"), "@home");
@@ -880,15 +864,11 @@ mod tests {
     #[test]
     fn finds_aliases_by_package() {
         assert_eq!(aliases_for_package("org.xbmc.kodi"), vec!["kodi"]);
-        assert_eq!(aliases_for_package("org.droidtv.nettvapp4340"), vec!["iplayer"]);
-        assert!(aliases_for_package("org.droidtv.nettvbrowser").is_empty());
         assert!(aliases_for_package("@home").is_empty());
     }
 
     #[test]
     fn finds_apps_by_package() {
-        assert_eq!(by_package("com.google.android.youtube.tv").unwrap().name, "YouTube");
-        assert_eq!(by_package("org.droidtv.zapster").unwrap().kind, Kind::LiveTv);
         assert!(by_package("com.example.unknown").is_none());
     }
 
@@ -972,15 +952,6 @@ mod tests {
         assert_eq!(pick_home(&homes, "com.android.tv.settings").map(String::as_str), Some("com.android.tv.settings/.system.FallbackHome"));
         assert_eq!(pick_home(&homes, "com.spocky.projengmenu/.ui.home.MainActivity"), Some(&homes[1]));
         assert_eq!(pick_home(&homes, "kodi"), None);
-    }
-
-    #[test]
-    fn lists_installed_aliases() {
-        let pm = "package:com.google.android.youtube.tv\npackage:org.videolan.vlc\npackage:org.droidtv.zapster\npackage:com.nowhere\n";
-        let names: Vec<_> = installed_aliases(pm).iter().filter_map(|a| a.alias).collect();
-        // home is always there; the rest only if installed
-        // plugin apps (livetv from philips, youtube) come right after home
-        assert_eq!(names, vec!["home", "livetv", "youtube", "vlc"]);
     }
 
     #[test]

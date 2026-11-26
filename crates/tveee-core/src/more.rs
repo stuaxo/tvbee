@@ -3,7 +3,7 @@
 //! what's on (the channel, chapters, links in the description).
 //!
 //! These are shapes the core shows (`tveee details`, `tveee goto`) and
-//! plugins fill in through their apps' hooks ([`crate::plugins::apps::App`]).
+//! plugins fill in through their apps' hooks ([`crate::builtin::apps::App`]).
 
 /// How to get somewhere.
 #[derive(Debug, Clone, PartialEq)]

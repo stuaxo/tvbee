@@ -370,7 +370,7 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
     for f in c.diagnoses.iter().flat_map(|d| d(&c.tv)) {
         report(f.ok, f.what, &f.detail);
     }
-    report(None, "ui", if cfg!(feature = "ui") { "built in ('tveee ui')" } else { "not in this build (cargo install --features ui)" });
+    report(None, "ui", if c.has_ui { "built in ('tveee ui')" } else { "not in this build (cargo install --features ui)" });
 
     if problems > 0 {
         println!("\n{problems} problem(s) found");

@@ -11,7 +11,6 @@
 //! Names are cached per TV with the APK's path, which changes whenever the
 //! app is installed again or updated, so an app is only read once a version.
 //! The ui finds them (in the background); everything else uses what it found.
-#![cfg_attr(not(feature = "ui"), allow(dead_code))]
 
 use crate::error::{failed, Result};
 use crate::tv::Tv;
@@ -277,8 +276,19 @@ fn known() -> &'static Mutex<HashMap<String, (String, String)>> {
     })
 }
 
+static IGNORE_CACHE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Leave this machine's cached names out (tests in other crates: they
+/// mustn't depend on what's been seen on this machine's TV).
+pub fn ignore_cache() {
+    IGNORE_CACHE.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The app's own name, if tveee has found it.
 pub fn name(pkg: &str) -> Option<String> {
+    if IGNORE_CACHE.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
     let m = known().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     m.get(pkg).map(|(_, n)| n.clone()).filter(|n| !n.is_empty())
 }
@@ -291,7 +301,7 @@ pub fn refresh(tv: &Tv) -> Result<usize> {
     let lang = tv.shell(&["getprop", "persist.sys.locale"]).map(|l| l.trim().to_string()).unwrap_or_default();
     let mut new = 0;
     // only apps that would otherwise show as their package
-    let named = |pkg: &str| crate::plugins::apps::by_package(pkg).is_some_and(|a| !a.name.starts_with("a ") && !a.name.starts_with("the "));
+    let named = |pkg: &str| crate::builtin::apps::by_package(pkg).is_some_and(|a| !a.name.starts_with("a ") && !a.name.starts_with("the "));
     for f in found.into_iter().filter(|f| !named(&f.package)) {
         let current = known().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&f.package).cloned();
         if current.as_ref().is_some_and(|(apk, _)| *apk == f.apk) {

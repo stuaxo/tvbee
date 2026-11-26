@@ -25,7 +25,7 @@ pub fn app_name(pkg: &str) -> String {
 /// Other-tab headings, in the order they're shown.
 pub const SECTIONS: &[&str] = &["Other home apps", "Video & music", "Players", "Live TV", "Stores", "Other apps"];
 
-pub(crate) fn section_of(kind: apps::Kind) -> &'static str {
+pub fn section_of(kind: apps::Kind) -> &'static str {
     match kind {
         apps::Kind::Launcher => SECTIONS[0],
         apps::Kind::Video | apps::Kind::Music => SECTIONS[1],

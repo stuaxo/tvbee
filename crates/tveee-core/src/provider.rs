@@ -291,7 +291,6 @@ pub trait Player: Sync {
     }
     /// Picture `art` (from [`Playing::art`]), as image file bytes, for the
     /// ui's preview; `at`: how far in it is now, for pictures that move.
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     fn picture(&self, _tv: &crate::tv::Tv, _art: &str, _at: Option<f64>) -> Outcome<Vec<u8>> {
         Outcome::Fallback
     }
@@ -299,13 +298,11 @@ pub trait Player: Sync {
     /// as soon as the app says playback changed, rather than waiting to be
     /// asked; until `go` says to stop (it's asked at least every second).
     /// Fall back: the app can't say (it's asked every second instead).
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     fn watch(&self, _tv: &crate::tv::Tv, _changed: &dyn Fn(&str), _go: &dyn Fn() -> bool) -> Outcome<()> {
         Outcome::Fallback
     }
     /// Stop anything started in the background for pictures (a download):
     /// the preview has moved on.
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     fn stop(&self) {}
 }
 
@@ -405,26 +402,16 @@ pub fn capabilities(p: &dyn Provider) -> Vec<&'static str> {
     v
 }
 
-static REGISTRY: std::sync::OnceLock<Vec<&'static dyn Provider>> = std::sync::OnceLock::new();
-
-/// Before `install` (main installs first): none; in tests, every plugin's.
-#[cfg(not(test))]
-fn not_installed() -> Vec<&'static dyn Provider> {
-    Vec::new()
-}
-#[cfg(test)]
-fn not_installed() -> Vec<&'static dyn Provider> {
-    crate::plugins::all().iter().flat_map(|p| (p.providers)()).collect()
-}
+static REGISTRY: crate::plugin::Registry<&'static dyn Provider> = crate::plugin::Registry::new();
 
 /// Set the providers of the enabled plugins. Call once, early (main does).
 pub fn install(providers: Vec<&'static dyn Provider>) {
-    let _ = REGISTRY.set(providers);
+    REGISTRY.install(providers);
 }
 
-/// Every provider. Without [`install`] (tests) that's every plugin's.
+/// Every provider of the enabled plugins (none before [`install`]).
 pub fn all() -> &'static [&'static dyn Provider] {
-    REGISTRY.get_or_init(not_installed)
+    REGISTRY.get().unwrap_or_default()
 }
 
 /// The provider hosted by `pkg`, if any.
@@ -451,18 +438,6 @@ mod tests {
         let done: Outcome<u8> = Ok(3).into();
         assert_eq!(done.handled(), Some(3));
         assert_eq!(Outcome::<u8>::Fallback.or_fallback().unwrap(), None);
-    }
-
-    #[test]
-    fn registry_has_the_built_in_providers() {
-        let ids: Vec<_> = all().iter().map(|p| p.id()).collect();
-        assert!(ids.contains(&"youtube") && ids.contains(&"freeview"), "{ids:?}");
-        let yt = for_package("com.google.android.youtube.tv").unwrap();
-        assert_eq!(capabilities(yt), vec!["details", "places", "search", "sessions", "player"]);
-        let tv = with_guide(None).unwrap();
-        assert_eq!(tv.id(), "freeview");
-        assert_eq!(capabilities(tv), vec!["guide", "channels"]);
-        assert!(with_guide(Some("youtube")).is_none());
     }
 
     #[test]

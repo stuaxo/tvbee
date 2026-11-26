@@ -8,15 +8,13 @@
 //!
 //! No terminal in here: `tveee ui` is one front end, a GUI could be another.
 
-// built on its own (`--features engine`) nothing uses it yet
-#![cfg_attr(not(feature = "ui"), allow(dead_code, unused_imports))]
 
 use crate::actions::{ActionDescriptor, Params};
 use crate::devtools::{self, SeekTo};
 use crate::error::Result;
 use crate::nowplaying::{self, clock, Activity};
-use crate::plugins::apps::list_name;
-use crate::plugins::{apps, info, media, search};
+use crate::builtin::apps::list_name;
+use crate::builtin::{apps, info, media, search};
 use crate::tv::Tv;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -34,7 +32,7 @@ pub use self::apps_rows::*;
 pub use self::guide::*;
 pub use self::lanes::*;
 pub use self::last::LastSeen;
-pub(crate) use self::preview::*;
+pub use self::preview::*;
 pub use self::state::*;
 
 pub const KEY_BACK: u32 = 4;

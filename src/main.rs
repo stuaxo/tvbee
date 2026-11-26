@@ -1,56 +1,26 @@
-mod devtools;
-#[cfg(feature = "engine")]
-mod engine;
-mod dotenv;
-mod actions;
-mod crypto;
-mod error;
-mod favourites;
-mod frames;
-mod http;
-mod lineups;
-mod https;
-mod keys;
-mod labels;
-mod log;
-mod mdns;
-mod mock;
-mod more;
-mod nowplaying;
-mod options;
-mod plugin;
-#[cfg(feature = "engine")]
-mod preview;
-mod pairing;
-mod panel;
+//! `tveee`: the command line, and the list of plugins it's built with.
+//! Everything else is in `tveee-core` (and the vendor plugins' and the
+//! terminal remote's crates).
+
 mod plugins;
-mod provider;
-mod registry;
-mod store;
-mod tv;
-mod watch;
-mod ws;
+#[cfg(test)]
+mod plugin_tests;
+
+// core's modules where the plugins here look for them (`crate::tv`, ...)
+// until they're crates of their own
+#[allow(unused_imports)]
+pub(crate) use tveee_core::{
+    actions, crypto, devtools, dotenv, error, favourites, frames, http, https, keys, labels, lineups, log, mdns, mock, more,
+    nowplaying, options, pairing, panel, plugin, provider, registry, store, tlog, tv, watch, ws, Ctx,
+};
+#[cfg(feature = "engine")]
+#[allow(unused_imports)]
+pub(crate) use tveee_core::{engine, preview};
 
 use error::Error;
-use plugin::{Mode, PluginState};
+use plugin::Mode;
 use registry::Command;
 use tv::Tv;
-
-pub struct Ctx {
-    pub tv: Tv,
-    /// Commands of the enabled plugins only.
-    pub commands: Vec<Command>,
-    /// Actions of the enabled plugins, in plugin order.
-    pub actions: Vec<actions::ActionDescriptor>,
-    /// Those with a menu key.
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
-    pub menu: Vec<actions::ActionDescriptor>,
-    pub plugins: Vec<PluginState>,
-    /// Every plugin, enabled or not (`plugins --refresh` probes them all).
-    pub all: fn() -> Vec<plugin::Plugin>,
-    /// The enabled plugins' parts of `tveee diagnose`.
-    pub diagnoses: Vec<fn(&Tv) -> Vec<plugin::Finding>>,
-}
 
 fn main() {
     // before anything reads TV_IP etc. (and before any threads)
@@ -94,7 +64,7 @@ fn main() {
         .collect();
     let menu = actions.iter().filter(|a| a.key.is_some()).copied().collect();
     let diagnoses = all.iter().zip(&states).filter(|(_, s)| s.enabled).map(|(p, _)| p.diagnose).collect();
-    let ctx = Ctx { tv, commands, actions, menu, plugins: states, all: plugins::all, diagnoses };
+    let ctx = Ctx { tv, commands, actions, menu, plugins: states, all: plugins::all, diagnoses, has_ui: cfg!(feature = "ui") };
 
     // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {

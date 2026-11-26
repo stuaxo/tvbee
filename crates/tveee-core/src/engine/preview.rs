@@ -4,31 +4,31 @@ use super::*;
 
 /// What a player said it has a picture of, as of a refresh.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ArtNow {
-    pub(crate) pkg: String,
-    pub(crate) art: String,
+pub struct ArtNow {
+    pub pkg: String,
+    pub art: String,
     /// The picture changes as it plays (a video frame): ask for it again,
     /// at the position now.
-    pub(crate) moves: bool,
-    pub(crate) position: Option<f64>,
-    pub(crate) paused: bool,
+    pub moves: bool,
+    pub position: Option<f64>,
+    pub paused: bool,
     /// When that was read.
-    pub(crate) at: Instant,
+    pub at: Instant,
 }
 
 impl ArtNow {
     /// How far in it is now (moving on from the refresh if it's playing).
-    pub(crate) fn now(&self) -> Option<f64> {
+    pub fn now(&self) -> Option<f64> {
         let p = self.position?;
         Some(if self.paused { p } else { p + self.at.elapsed().as_secs_f64() })
     }
 }
 
 /// Said when the preview comes out black.
-pub(crate) const HIDDEN_VIDEO: &str = "black: the TV plays this video on a layer pictures can't see";
+pub const HIDDEN_VIDEO: &str = "black: the TV plays this video on a layer pictures can't see";
 
 /// Tell app `pkg`'s player the preview has moved on (stop its downloads).
-pub(crate) fn stop_pictures(pkg: Option<String>) {
+pub fn stop_pictures(pkg: Option<String>) {
     if let Some(player) = pkg.as_deref().and_then(crate::provider::for_package).and_then(|p| p.player()) {
         player.stop();
     }
@@ -40,7 +40,7 @@ pub(crate) fn stop_pictures(pkg: Option<String>) {
 /// the video (downloaded meanwhile) at the TV's position, which keeps them in
 /// step. Anything else: scrcpy's pictures (the default for apps without
 /// their own way), or a screenshot every few seconds without it.
-pub(crate) fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
+pub fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
     use crate::preview::{screencap, Scrcpy};
     let tv = shared.tv();
     let open = || shared.preview.load(Ordering::Relaxed) && !shared.stopping();

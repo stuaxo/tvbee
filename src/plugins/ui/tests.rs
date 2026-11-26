@@ -299,6 +299,7 @@ fn searchables() -> Vec<search::Searchable> {
 
 #[test]
 fn search_box_targets() {
+    crate::plugins::install_all();
     let s = searchables();
     // the app in front first, then the searchable ones
     let t = search_targets(Some("com.netflix.ninja"), &s);
@@ -314,6 +315,7 @@ fn search_box_targets() {
 
 #[test]
 fn search_box_keys() {
+    crate::plugins::install_all();
     let t = search_targets(Some("com.netflix.ninja"), &searchables());
     let none = KeyModifiers::NONE;
     let mut q = String::new();
@@ -369,6 +371,7 @@ fn rows(pm: &str, guessed: &[apps::Guess]) -> Vec<Entry> {
 
 #[test]
 fn launcher_keys() {
+    crate::plugins::install_all();
     let all = rows("package:com.google.android.youtube.tv\npackage:org.videolan.vlc\npackage:org.xbmc.kodi\n", &[]);
     let list = tab_list(&all, AppTab::Known);
     // home, youtube, kodi, vlc (table order)
@@ -441,6 +444,7 @@ fn non_default_home_apps_go_to_other() {
 
 #[test]
 fn launcher_lists_other_tv_apps() {
+    crate::plugins::install_all();
     let g = |p: &str, k, c: Option<&str>| apps::Guess { package: p.into(), kind: k, component: c.map(Into::into) };
     let guessed = vec![
         g("nextapp.fx", apps::Kind::Player, Some("nextapp.fx/.ui.Launcher")),

@@ -31,7 +31,6 @@ static KEEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
 static KEPT: std::sync::Mutex<Option<Conn>> = std::sync::Mutex::new(None);
 
 /// Keep connections open (the ui), or close the kept one and stop keeping.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn keep_open(on: bool) {
     KEEP.store(on, std::sync::atomic::Ordering::Relaxed);
     if !on {
@@ -98,7 +97,6 @@ pub fn parse_progress(s: &str) -> Option<Progress> {
 
 /// A forwarded connection to one app's devtools server. Kept open, it makes
 /// repeated queries (a UI refreshing every second) cheap.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub struct Conn {
     pub pkg: String,
     fwd: crate::tv::Forward,
@@ -163,7 +161,6 @@ impl Conn {
 
     /// Move the page's video: by `delta` seconds, or to `fraction` of its length.
     /// Returns the new position.
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn seek(&self, to: SeekTo) -> Result<f64> {
         let expr = seek_expr(to);
         for (_, ws) in self.page_list()? {
@@ -181,7 +178,6 @@ impl Conn {
     /// seeked, ended, a new video's loadedmetadata) as it happens, until
     /// `go` says to stop (asked every second) or the page goes. Done with a
     /// binding (`Runtime.addBinding`) the page's listeners call.
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn watch(&self, on: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Result<()> {
         let Some(path) = self.page_list()?.into_iter().find_map(|(_, ws)| ws) else {
             return Err(Error::Unavailable("devtools: no page".into()));
@@ -239,13 +235,11 @@ const BINDING: &str = "tveeeEvent";
 
 /// Listen (once: earlier listeners are replaced) for media events from any
 /// video on the page; they don't bubble, so on the way down.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 const LISTEN_EXPR: &str = "(()=>{const T=['play','pause','seeked','ended','loadedmetadata'];\
 if(window.__tveee)for(const t of T)document.removeEventListener(t,window.__tveee,true);\
 window.__tveee=e=>{if(e.target&&e.target.tagName==='VIDEO'){try{tveeeEvent(e.type)}catch(_){}}};\
 for(const t of T)document.addEventListener(t,window.__tveee,true);return 'ok'})()";
 
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SeekTo {
     By(f64),
@@ -256,7 +250,6 @@ pub enum SeekTo {
 
 /// JS that seeks the longest video and returns its new position as a string
 /// ('' when there's no video, or no duration for a fractional seek).
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn seek_expr(to: SeekTo) -> String {
     let target = match to {
         SeekTo::By(d) => format!("v.currentTime+({d})"),

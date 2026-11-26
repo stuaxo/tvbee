@@ -414,7 +414,7 @@ pub fn type_text(tv: &Tv, text: &str) -> Result<()> {
             }
         }
     }
-    tv.shell(&["input", "text", &crate::plugins::input::escape_text(text)]).map(drop)
+    tv.shell(&["input", "text", &crate::builtin::input::escape_text(text)]).map(drop)
 }
 
 fn fallback(tv: &Tv, presses: &[(u32, bool)]) -> Result<()> {
@@ -427,14 +427,12 @@ fn fallback(tv: &Tv, presses: &[(u32, bool)]) -> Result<()> {
 /// A shell on the TV that stays open, for sending keys with as little delay
 /// as possible (the ui): no adb start-up or connection per key, and keys
 /// sent raw. Commands are written and not waited for.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub struct Session {
     tv: Tv,
     child: Option<std::process::Child>,
     map: Option<Map>,
 }
 
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 impl Session {
     pub fn new(tv: Tv) -> Session {
         Session { tv, child: None, map: None }
@@ -498,7 +496,7 @@ impl Session {
         let raw = if fast() { self.map().and_then(|m| m.text_command(text)) } else { None };
         match raw {
             Some(cmd) => self.send(&cmd),
-            None => self.send(&format!("input text {}", crate::plugins::input::escape_text(text))),
+            None => self.send(&format!("input text {}", crate::builtin::input::escape_text(text))),
         }
     }
 }

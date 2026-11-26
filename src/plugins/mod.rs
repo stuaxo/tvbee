@@ -1,23 +1,13 @@
 pub mod ambilight;
-pub mod apps;
-pub mod debloat;
-pub mod diagnose;
-pub mod guide;
-pub mod display;
-pub mod info;
 pub mod kodi;
-pub mod input;
-pub mod media;
-pub mod open;
 pub mod philips;
-pub mod power;
-pub mod search;
-pub mod tools;
 pub mod youtube;
 #[cfg(feature = "ui")]
 pub mod ui;
 
 use crate::plugin::Plugin;
+// the built-in plugins, from core
+pub use tveee_core::builtin::*;
 
 /// Commands of optional plugins left out of this build: (command, cargo feature).
 pub const NOT_BUILT: &[(&str, &str)] = &[
@@ -61,4 +51,18 @@ pub fn all() -> Vec<Plugin> {
         #[cfg(feature = "ui")]
         Plugin::builtin("ui", "interactive terminal remote (ratatui)", ui::actions),
     ]
+}
+
+/// Tests: every plugin's apps, providers and pairings, as main installs the
+/// enabled ones (call before looking any up).
+#[cfg(test)]
+pub fn install_all() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        crate::labels::ignore_cache();
+        let all = all();
+        apps::install(all.iter().flat_map(|p| (p.apps)()).collect());
+        crate::provider::install(all.iter().flat_map(|p| (p.providers)()).collect());
+        crate::pairing::install(all.iter().flat_map(|p| (p.pairings)()).collect());
+    });
 }

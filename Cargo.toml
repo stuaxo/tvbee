@@ -1,36 +1,60 @@
-[package]
-name = "tveee"
-version = "0.2.0"
+# The workspace: this package is the `tveee` binary (the command line, and the
+# plugin list); crates/ holds the core and the terminal remote, plugins/ the
+# vendor plugins.
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
 edition = "2024"
 # Debian 13's packaged Rust; the optional `ui` feature needs 1.88 (ratatui)
 rust-version = "1.85"
-description = "Command-line remote for Android TV over ADB (tested on Philips Android TV)"
 license = "GPL-3.0-or-later"
 authors = ["Stuart Axon"]
 repository = "https://github.com/stuaxo/tveee"
-readme = "README.md"
-keywords = ["android-tv", "adb", "remote", "cli", "tv"]
-categories = ["command-line-utilities"]
 
-[dependencies]
+[workspace.dependencies]
+tveee-core = { path = "crates/tveee-core" }
 # a local cache of what's read from the TV (guide, descriptions, ...); SQLite
 # bundled, so no system library is needed (a C compiler is, to build it)
 diesel = { version = "2.2", default-features = false, features = ["sqlite"] }
 libsqlite3-sys = { version = ">=0.17.2, <0.31.0", features = ["bundled"] }
 # reading the JSON TVs and apps answer with (JointSpace, Kodi, devtools)
 serde_json = { version = "1", default-features = false, features = ["std"] }
-ratatui = { version = "0.30.2", optional = true, features = ["unstable-rendered-line-info"] }
+ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 # the ui's preview panel: pictures in the terminal (sixel, kitty, iTerm2, or
 # unicode half-blocks), and JPEG decoding for YouTube's storyboard frames
-ratatui-image = { version = "11.1", optional = true, default-features = false, features = ["crossterm"] }
-image = { version = "0.25.6", optional = true, default-features = false, features = ["jpeg", "png"] }
+ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
+image = { version = "0.25.6", default-features = false, features = ["jpeg", "png"] }
+
+[package]
+name = "tveee"
+version = "0.2.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Command-line remote for Android TV over ADB (tested on Philips Android TV)"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["android-tv", "adb", "remote", "cli", "tv"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+tveee-core.workspace = true
+# the philips plugin reads its cache directly (until it is a crate of its own)
+diesel.workspace = true
+serde_json.workspace = true
+ratatui = { workspace = true, optional = true }
+ratatui-image = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
 
 [features]
 default = []
 # the engine front ends run on: what's on, actions, previews, on worker threads
-engine = ["dep:image"]
+engine = ["tveee-core/engine"]
 # `tveee ui`: interactive terminal remote (pulls in ratatui + crossterm)
-ui = ["engine", "dep:ratatui", "dep:ratatui-image"]
+ui = ["engine", "dep:ratatui", "dep:ratatui-image", "dep:image"]
 
 [profile.release]
 strip = true

@@ -41,7 +41,6 @@ pub struct Mem {
 }
 
 impl Mem {
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn used(&self) -> u64 {
         self.total.saturating_sub(self.available)
     }

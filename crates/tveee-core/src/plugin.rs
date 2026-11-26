@@ -10,11 +10,40 @@
 
 use crate::error::Result;
 use crate::actions::ActionDescriptor;
-use crate::plugins::apps::App;
+use crate::builtin::apps::App;
 use crate::registry::Command;
 use crate::tv::Tv;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// What the enabled plugins contribute of one kind (providers, apps, ...):
+/// set by main (`install`) before anything looks; empty until then. It can
+/// be set again (tests install every plugin's), the old list left as it was
+/// for anyone still holding it.
+pub struct Registry<T: 'static> {
+    slot: std::sync::RwLock<Option<&'static [T]>>,
+}
+
+impl<T: 'static> Registry<T> {
+    pub const fn new() -> Self {
+        Registry { slot: std::sync::RwLock::new(None) }
+    }
+
+    pub fn install(&self, items: Vec<T>) {
+        *self.slot.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::leak(items.into_boxed_slice()));
+    }
+
+    /// What was installed (None: nothing yet).
+    pub fn get(&self) -> Option<&'static [T]> {
+        *self.slot.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl<T: 'static> Default for Registry<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub enum Enable {
     Always,
@@ -308,7 +337,7 @@ mod tests {
     }
 
     fn some_apps() -> Vec<App> {
-        vec![crate::plugins::apps::app("x", "X", "com.x", crate::plugins::apps::Kind::Video)]
+        vec![crate::builtin::apps::app("x", "X", "com.x", crate::builtin::apps::Kind::Video)]
     }
 
     #[test]

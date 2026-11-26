@@ -9,7 +9,6 @@ use std::sync::Mutex;
 
 pub struct Opt {
     pub name: &'static str,
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub label: &'static str,
     pub help: &'static str,
     pub default: bool,

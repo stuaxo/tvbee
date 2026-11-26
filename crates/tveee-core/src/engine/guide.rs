@@ -20,8 +20,8 @@ impl GuideRow {
 }
 
 /// How far ahead the guide goes (← → move through it in GUIDE_STEP steps).
-pub(crate) const GUIDE_AHEAD: i64 = 24 * 3600;
-pub(crate) const GUIDE_STEP: i64 = 30 * 60;
+pub const GUIDE_AHEAD: i64 = 24 * 3600;
+pub const GUIDE_STEP: i64 = 30 * 60;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Guide {
@@ -40,16 +40,16 @@ pub struct Guide {
 }
 
 /// The first provider with both channels and a guide.
-pub(crate) fn live_provider() -> Option<&'static dyn crate::provider::Provider> {
+pub fn live_provider() -> Option<&'static dyn crate::provider::Provider> {
     crate::provider::all().iter().copied().find(|p| p.channels().is_some() && p.guide().is_some())
 }
 
-pub(crate) fn load_guide(tv: &Tv) -> Result<Guide> {
+pub fn load_guide(tv: &Tv) -> Result<Guide> {
     let Some(p) = live_provider() else { return Err(crate::error::Error::Failed("no live TV guide on this TV".into())) };
     let cx = crate::provider::Cx { tv };
     let (chans, guide) = (p.channels().expect("checked"), p.guide().expect("checked"));
     let (list, synced) = crate::favourites::channels(p, &cx)?;
-    let now = crate::plugins::guide::now();
+    let now = crate::builtin::guide::now();
     let current = chans.current(&cx).ok().flatten().map(|c| c.id);
     let news = synced.as_ref().and_then(|s| s.news(&list));
     let pending = synced.map(|s| s.pending).unwrap_or_default();

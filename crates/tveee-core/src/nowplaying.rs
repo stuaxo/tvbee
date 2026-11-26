@@ -6,8 +6,8 @@
 //! app itself (`plugins::apps::all`); this module only combines the clues.
 
 use crate::devtools::Progress;
-use crate::plugins::apps::{self, Kind};
-use crate::plugins::media::MediaInfo;
+use crate::builtin::apps::{self, Kind};
+use crate::builtin::media::MediaInfo;
 use crate::tv::Tv;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,14 +52,12 @@ impl Activity {
         Activity { what: what.into(), title: None, url: None, progress: None, fields: Vec::new() }
     }
 
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn field(&self, label: &str) -> Option<&Field> {
         self.fields.iter().find(|f| f.label == label)
     }
 
     /// The what line plus the top fields: what changing means something
     /// else is on (another app, or another channel).
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub fn headline(&self) -> String {
         let mut s = self.what.clone();
         for f in self.fields.iter().filter(|f| f.place == Place::Top) {
@@ -84,7 +82,7 @@ pub fn live_channel(tv: &Tv, pkg: &str) -> Option<crate::provider::Channel> {
 
 /// Live TV in `pkg`, on channel `ch`: what's on it now and next.
 pub fn live_on(tv: &Tv, pkg: &str, ch: &crate::provider::Channel) -> Option<Activity> {
-    use crate::plugins::guide::{hhmm, now, utc_offset};
+    use crate::builtin::guide::{hhmm, now, utc_offset};
     let p = crate::provider::for_package(pkg)?;
     let cx = crate::provider::Cx { tv };
     let ch = ch.clone();
@@ -208,7 +206,6 @@ fn namer(pkg: &str) -> Option<&'static Namer> {
 }
 
 /// Whether [`named`] can say more about `pkg` (it costs an adb call).
-#[cfg_attr(not(feature = "engine"), allow(dead_code))]
 pub fn has_namer(pkg: &str) -> bool {
     namer(pkg).is_some()
 }

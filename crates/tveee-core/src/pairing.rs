@@ -73,26 +73,16 @@ pub trait Pairing: Sync {
     }
 }
 
-static REGISTRY: std::sync::OnceLock<Vec<&'static dyn Pairing>> = std::sync::OnceLock::new();
-
-/// Before `install` (main installs first): none; in tests, every plugin's.
-#[cfg(not(test))]
-fn not_installed() -> Vec<&'static dyn Pairing> {
-    Vec::new()
-}
-#[cfg(test)]
-fn not_installed() -> Vec<&'static dyn Pairing> {
-    crate::plugins::all().iter().flat_map(|p| (p.pairings)()).collect()
-}
+static REGISTRY: crate::plugin::Registry<&'static dyn Pairing> = crate::plugin::Registry::new();
 
 /// Set the pairings of the enabled plugins (main does).
 pub fn install(pairings: Vec<&'static dyn Pairing>) {
-    let _ = REGISTRY.set(pairings);
+    REGISTRY.install(pairings);
 }
 
-/// Every pairing. Without [`install`] (tests) that's every plugin's.
+/// Every pairing of the enabled plugins (none before [`install`]).
 pub fn all() -> &'static [&'static dyn Pairing] {
-    REGISTRY.get_or_init(not_installed)
+    REGISTRY.get().unwrap_or_default()
 }
 
 pub fn by_id(id: &str) -> Option<&'static dyn Pairing> {
@@ -208,10 +198,4 @@ mod tests {
         assert_eq!(s.get("nope"), None);
     }
 
-    #[test]
-    fn registry_and_errors() {
-        assert!(by_id("jointspace").is_some());
-        let e = required_error("jointspace", "the channel list").to_string();
-        assert!(e.starts_with("the channel list needs tveee to be paired with") && e.contains("tveee pair jointspace"), "{e}");
-    }
 }

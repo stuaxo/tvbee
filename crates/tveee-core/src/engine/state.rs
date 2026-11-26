@@ -64,7 +64,7 @@ pub struct TvState {
 
 impl TvState {
     /// To start with: what was seen last run, if anything.
-    pub(crate) fn seeded(seen: Option<&LastSeen>) -> TvState {
+    pub fn seeded(seen: Option<&LastSeen>) -> TvState {
         TvState {
             snap: seen.map(last::seed),
             at: Instant::now(),
@@ -138,7 +138,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    pub(crate) fn new(actions: Sender<Action>, state: Arc<Mutex<Arc<TvState>>>) -> Handle {
+    pub fn new(actions: Sender<Action>, state: Arc<Mutex<Arc<TvState>>>) -> Handle {
         Handle { actions, state }
     }
 
@@ -178,7 +178,7 @@ impl Handle {
 
 /// Fold what the lanes say into the state, and tell the front end. Ends
 /// when the lanes have all gone (or the front end has).
-pub(crate) fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, lanes: &Receiver<Msg>, events: &Sender<CoreEvent>) {
+pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, lanes: &Receiver<Msg>, events: &Sender<CoreEvent>) {
     let update = |f: &mut dyn FnMut(&mut TvState)| f(Arc::make_mut(&mut lanes::lock(state)));
     for m in lanes {
         let event = match m {

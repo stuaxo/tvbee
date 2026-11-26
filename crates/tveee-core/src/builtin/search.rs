@@ -8,9 +8,9 @@ use crate::actions::ActionDescriptor;
 use crate::tv::Tv;
 use crate::Ctx;
 
-const SEARCH: &str = "android.intent.action.SEARCH";
+pub const SEARCH: &str = "android.intent.action.SEARCH";
 /// Google's assistant flavour of SEARCH (Kodi has it).
-const GMS_SEARCH: &str = "com.google.android.gms.actions.SEARCH_ACTION";
+pub const GMS_SEARCH: &str = "com.google.android.gms.actions.SEARCH_ACTION";
 const PLAY: &str = "android.media.action.MEDIA_PLAY_FROM_SEARCH";
 
 /// System packages that answer search intents but aren't apps you'd search in.
@@ -226,7 +226,6 @@ pub fn keys_search(tv: &Tv, app: &str, query: &str, dry: bool) -> Result<String>
 }
 
 /// How `pkg` would be searched: by intent/link, or only by typing keys.
-#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub fn method(all: &[Searchable], pkg: &str) -> &'static str {
     match all.iter().find(|s| s.package == pkg).map(|s| &s.way) {
         Some(Way::Link(_)) => "results link",
@@ -302,71 +301,4 @@ pub fn actions() -> Vec<ActionDescriptor> {
          Netflix, Prime and most streaming apps don't accept search from outside, so\n\
          only --keys can reach them, and only if the app answers the search key.",
     )]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const OUT: &str = "
-    com.android.cts.priv.ctsshim/.InstallPriority
-    com.android.vending/com.google.android.finsky.tvmainactivity.TvMainActivity
-    org.xbmc.kodi/.XBMCSearchableActivity
-    org.droidtv.zapster/.playpvr.activity.RecPlayActivity2
-    org.droidtv.zapster/.playtv.activity.SearchActivity
-    org.droidtv.zapster/.playtv.activity.EPGSearchActivity
-    com.mxtech.videoplayer.pro/.ActivityMediaList
-    com.mxtech.videoplayer.pro/.TVActivityMediaList
-    org.videolan.vlc/.StartActivity
-    com.google.android.tv.frameworkpackagestubs/.Stubs$MediaStub
-@@
-    org.xbmc.kodi/.XBMCSearchableActivity
-    com.example.voice/.Search
-@@
-    org.videolan.vlc/.StartActivity
-";
-
-    #[test]
-    fn finds_searchable_apps() {
-        let pm = "package:com.google.android.youtube.tv\npackage:org.videolan.vlc\n";
-        let all = parse_searchable(OUT, Some(pm));
-        let find = |p: &str| all.iter().find(|s| s.package == p).cloned();
-        assert!(find("com.google.android.gms").is_none() && find("com.android.cts.priv.ctsshim").is_none());
-        // the activity named for search wins in apps with several
-        assert_eq!(
-            find("org.droidtv.zapster").unwrap().way,
-            Way::Intent { action: SEARCH, component: "org.droidtv.zapster/.playtv.activity.SearchActivity".into() }
-        );
-        assert_eq!(
-            find("com.mxtech.videoplayer.pro").unwrap().way,
-            Way::Intent { action: SEARCH, component: "com.mxtech.videoplayer.pro/.TVActivityMediaList".into() }
-        );
-        assert_eq!(find("org.videolan.vlc").unwrap().play.as_deref(), Some("org.videolan.vlc/.StartActivity"));
-        assert_eq!(find("com.example.voice").unwrap().way, Way::Intent { action: GMS_SEARCH, component: "com.example.voice/.Search".into() });
-        // YouTube by link, only because it's installed
-        assert_eq!(find("com.google.android.youtube.tv").unwrap().way, Way::Link("https://www.youtube.com/results?search_query={q}"));
-        assert!(parse_searchable(OUT, Some("")).iter().all(|s| s.package != "com.google.android.youtube.tv"));
-    }
-
-    #[test]
-    fn builds_commands() {
-        let all = parse_searchable(OUT, Some("package:com.google.android.youtube.tv\n"));
-        let get = |p: &str| all.iter().find(|s| s.package == p).unwrap();
-        assert_eq!(
-            search_command(get("org.xbmc.kodi"), "star trek", false).unwrap(),
-            "am start -a android.intent.action.SEARCH -n 'org.xbmc.kodi/.XBMCSearchableActivity' --es query 'star trek'"
-        );
-        assert_eq!(
-            search_command(get("com.google.android.youtube.tv"), "cats & dogs", false).unwrap(),
-            "am start -a android.intent.action.VIEW -d 'https://www.youtube.com/results?search_query=cats%20%26%20dogs' -p 'com.google.android.youtube.tv'"
-        );
-        assert_eq!(
-            search_command(get("org.videolan.vlc"), "it's jazz", true).unwrap(),
-            "am start -a android.media.action.MEDIA_PLAY_FROM_SEARCH -n 'org.videolan.vlc/.StartActivity' --es query 'it'\\''s jazz'"
-        );
-        assert!(search_command(get("org.xbmc.kodi"), "x", true).is_err());
-        assert_eq!(url_encode("a b/c?é"), "a%20b%2Fc%3F%C3%A9");
-        // a real plus stays a plus, encoded
-        assert_eq!(url_encode("c++"), "c%2B%2B");
-    }
 }
