@@ -218,11 +218,13 @@ saves its login if it has a password.
 
 ## Plugins
 
-Commands are grouped by plugin in `tveee help`, Django-style. A plugin is a
-module in `src/plugins/` exporting `commands()`, registered in
-`src/plugins/mod.rs`; it can also add apps (`with_apps`) and ui menu items
-(`with_menu`). Built-in plugins are always on. Vendor plugins (e.g.
-`philips`) carry a detection check:
+Commands are grouped by plugin in `tveee help`, Django-style. A plugin
+contributes actions (commands, ui menu items, anything `tveee do` can run)
+and can add apps, content providers, pairings, panels and `diagnose` checks;
+plugins are listed in `src/plugins/mod.rs`. Built-in plugins are always on and
+live in the core crate (`crates/tveee-core/src/builtin/`). Vendor plugins are
+crates of their own (`plugins/philips`, `plugins/youtube`, `plugins/kodi`)
+and carry a detection check:
 
 - `TVEEE_PLUGINS=philips,-other` forces plugins on/off
 - otherwise the per-TV cache (`~/.cache/tveee/<ip>.plugins`) is used
@@ -242,7 +244,7 @@ their timings, and failures the ui otherwise only shows briefly, or not at
 all). For working on tveee without the TV: `TVEEE_MOCK_DIR=<dir>` with
 `TVEEE_MOCK=record` saves what the TV answers (adb, HTTP, HTTPS) in `<dir>`;
 without `TVEEE_MOCK=record`, tveee answers from there instead of asking the
-TV (use the same `TV_IP`; see `src/mock.rs`).
+TV (use the same `TV_IP`; see `crates/tveee-core/src/mock.rs`).
 
 These can also go in a `.env` file in the current directory, or in
 `~/.config/tveee/env` for every directory (see `.env.example`). Settings
@@ -258,9 +260,10 @@ crates beyond std.
 
       cargo install --path . --features ui
 
-  Without it, `tveee ui` says how to get it. Optional plugins are compiled in
-  with `#[cfg(feature = ...)]` in `src/plugins/mod.rs` and listed in
-  `NOT_BUILT` when left out.
+  Without it, `tveee ui` says how to get it. The remote is its own crate
+  (`crates/tveee-tui`); optional plugins are compiled in with
+  `#[cfg(feature = ...)]` in `src/plugins/mod.rs` and listed in `NOT_BUILT`
+  when left out.
 
 ## Not yet ported / planned
 - Recordings (list / stop) via the JointSpace API on `https://<tv>:1926/6/recordings/*`;
