@@ -1,23 +1,13 @@
-pub mod ambilight;
-pub mod apps;
-pub mod debloat;
-pub mod diagnose;
-pub mod guide;
-pub mod display;
-pub mod info;
-pub mod kodi;
-pub mod input;
-pub mod media;
-pub mod open;
-pub mod philips;
-pub mod power;
-pub mod search;
-pub mod tools;
-pub mod youtube;
+// the vendor plugins, crates of their own
+use tveee_plugin_kodi as kodi;
+use tveee_plugin_philips::{self as philips, ambilight};
+use tveee_plugin_youtube as youtube;
 #[cfg(feature = "ui")]
-pub mod ui;
+use tveee_tui as ui;
 
-use crate::plugin::Plugin;
+use tveee_core::plugin::Plugin;
+// the built-in plugins, from core
+pub use tveee_core::builtin::*;
 
 /// Commands of optional plugins left out of this build: (command, cargo feature).
 pub const NOT_BUILT: &[(&str, &str)] = &[
@@ -32,8 +22,8 @@ pub fn all() -> Vec<Plugin> {
         Plugin::builtin("debloat", "disabling unwanted system apps, reversibly", debloat::actions),
         Plugin::builtin("diagnose", "finding the TV and checking the setup", diagnose::actions),
         Plugin::builtin("guide", "programme guides and content providers", guide::actions),
-        Plugin::builtin("options", "tveee's own settings", crate::options::actions),
-        Plugin::builtin("pairing", "pairing tveee with services on the TV", crate::pairing::actions),
+        Plugin::builtin("options", "tveee's own settings", tveee_core::options::actions),
+        Plugin::builtin("pairing", "pairing tveee with services on the TV", tveee_core::pairing::actions),
         Plugin::builtin("display", "seeing the TV screen", display::actions),
         Plugin::builtin("info", "querying the TV's state", info::actions),
         Plugin::builtin("input", "remote-control keys, text, inputs and channels", input::actions),
@@ -61,4 +51,18 @@ pub fn all() -> Vec<Plugin> {
         #[cfg(feature = "ui")]
         Plugin::builtin("ui", "interactive terminal remote (ratatui)", ui::actions),
     ]
+}
+
+/// Tests: every plugin's apps, providers and pairings, as main installs the
+/// enabled ones (call before looking any up).
+#[cfg(test)]
+pub fn install_all() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tveee_core::labels::ignore_cache();
+        let all = all();
+        apps::install(all.iter().flat_map(|p| (p.apps)()).collect());
+        tveee_core::provider::install(all.iter().flat_map(|p| (p.providers)()).collect());
+        tveee_core::pairing::install(all.iter().flat_map(|p| (p.pairings)()).collect());
+    });
 }

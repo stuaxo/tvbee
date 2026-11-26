@@ -1917,12 +1917,60 @@ dependencies = [
 name = "tveee"
 version = "0.2.0"
 dependencies = [
+ "serde_json",
+ "tveee-core",
+ "tveee-plugin-kodi",
+ "tveee-plugin-philips",
+ "tveee-plugin-youtube",
+ "tveee-tui",
+]
+
+[[package]]
+name = "tveee-core"
+version = "0.2.0"
+dependencies = [
  "diesel",
  "image",
  "libsqlite3-sys",
+ "serde_json",
+]
+
+[[package]]
+name = "tveee-plugin-kodi"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "tveee-core",
+]
+
+[[package]]
+name = "tveee-plugin-philips"
+version = "0.2.0"
+dependencies = [
+ "diesel",
+ "serde_json",
+ "tveee-core",
+]
+
+[[package]]
+name = "tveee-plugin-youtube"
+version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "tveee-core",
+]
+
+[[package]]
+name = "tveee-tui"
+version = "0.2.0"
+dependencies = [
+ "image",
  "ratatui",
  "ratatui-image",
- "serde_json",
+ "tveee-core",
+ "tveee-plugin-kodi",
+ "tveee-plugin-philips",
+ "tveee-plugin-youtube",
 ]
 
 [[package]]
