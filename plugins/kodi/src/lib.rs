@@ -8,12 +8,12 @@
 //!
 //! No password set in Kodi: nothing to do. With one: `tveee pair kodi`.
 
-use crate::devtools::{Progress, SeekTo};
-use crate::error::{failed, Error, Result};
-use crate::more::Place;
-use crate::provider::{Outcome, Playing, Session};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
+use tveee_core::devtools::{Progress, SeekTo};
+use tveee_core::error::{failed, Error, Result};
+use tveee_core::more::Place;
+use tveee_core::provider::{Outcome, Playing, Session};
+use tveee_core::actions::ActionDescriptor;
+use tveee_core::tv::Tv;
 
 pub const PACKAGE: &str = "org.xbmc.kodi";
 const PAIRING: &str = "kodi";
@@ -77,7 +77,7 @@ fn quote(s: &str) -> String {
 /// Where Kodi's API is, and the login: saved by `tveee pair kodi`, else
 /// Kodi's defaults (port 8080, user kodi, no password).
 fn login(tv: &Tv) -> (u16, String, String) {
-    match crate::pairing::load(PAIRING, &tv.ip) {
+    match tveee_core::pairing::load(PAIRING, &tv.ip) {
         Some(s) => (
             s.get("port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT),
             s.get("user").unwrap_or(DEFAULT_USER).to_string(),
@@ -99,7 +99,7 @@ fn post(tv: &Tv, login: &(u16, String, String), body: &str) -> Result<String> {
     let (port, user, pass) = login;
     let url = format!("http://{}:{port}/jsonrpc", tv.ip);
     let auth = (!pass.is_empty()).then_some((user.as_str(), pass.as_str()));
-    let reply = crate::https::request(&crate::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: None, timeout_secs: 4 });
+    let reply = tveee_core::https::request(&tveee_core::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: None, timeout_secs: 4 });
     match reply {
         Ok((200, text)) => Ok(text),
         Ok((401, _)) => failed("Kodi wants a username and password: run 'tveee pair kodi'"),
@@ -134,13 +134,13 @@ pub fn ping(tv: &Tv) -> bool {
 }
 
 /// `tveee diagnose`: is its remote control on?
-pub fn diagnose(tv: &Tv) -> Vec<crate::plugin::Finding> {
+pub fn diagnose(tv: &Tv) -> Vec<tveee_core::plugin::Finding> {
     let (ok, detail) = if ping(tv) {
         (Some(true), "its remote control answers (position, exact seeking, artwork, places)")
     } else {
         (None, "installed, but its remote control doesn't answer (Kodi not running, or off: Settings > Services > Control > Allow remote control via HTTP; with a password, 'tveee pair kodi')")
     };
-    vec![crate::plugin::Finding { ok, what: "kodi", detail: detail.into() }]
+    vec![tveee_core::plugin::Finding { ok, what: "kodi", detail: detail.into() }]
 }
 
 /// Wait for Kodi's API to answer (Kodi starting), up to `secs`.
@@ -315,11 +315,11 @@ pub fn window_params(link: &str) -> Option<String> {
 
 /// Kodi in front, and its API answering (starting Kodi if need be).
 fn bring_up(tv: &Tv) -> Result<()> {
-    let _ = crate::plugins::apps::bring_to_front(tv, PACKAGE);
+    let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
     wait_ready(tv, 40)
 }
 
-impl crate::provider::Provider for Kodi {
+impl tveee_core::provider::Provider for Kodi {
     fn id(&self) -> &'static str {
         "kodi"
     }
@@ -332,10 +332,10 @@ impl crate::provider::Provider for Kodi {
     fn places(&self) -> &'static [Place] {
         PLACES
     }
-    fn player(&self) -> Option<&dyn crate::provider::Player> {
+    fn player(&self) -> Option<&dyn tveee_core::provider::Player> {
         Some(self)
     }
-    fn details(&self) -> Option<&dyn crate::provider::Details> {
+    fn details(&self) -> Option<&dyn tveee_core::provider::Details> {
         Some(self)
     }
     fn has_sessions(&self) -> bool {
@@ -346,7 +346,7 @@ impl crate::provider::Provider for Kodi {
         let saved = now(tv).map(|n| {
             let (playing, file) = n?;
             let at = playing.progress.map(|p| p.position.floor())?;
-            Some(Session { link: file?, said: format!("at {} in the same file", crate::nowplaying::clock(at)), resume: Some(at) })
+            Some(Session { link: file?, said: format!("at {} in the same file", tveee_core::nowplaying::clock(at)), resume: Some(at) })
         });
         match Outcome::from(saved) {
             Outcome::Handled(Some(s)) => Outcome::Handled(s),
@@ -356,7 +356,7 @@ impl crate::provider::Provider for Kodi {
     }
     fn restore_session(&self, tv: &Tv, target: &str, s: &Session) -> Outcome<()> {
         let restored = (|| {
-            crate::plugins::apps::start(tv, target)?;
+            tveee_core::builtin::apps::start(tv, target)?;
             wait_ready(tv, 40)?;
             let options = s.resume.map(|t| format!(r#","options":{{"resume":{}}}"#, time_json(t))).unwrap_or_default();
             call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}{options}}}"#, quote(&s.link))).map(drop)
@@ -383,13 +383,13 @@ impl crate::provider::Provider for Kodi {
         }
         let played = call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}}}"#, quote(link)));
         if played.is_ok() {
-            let _ = crate::plugins::apps::bring_to_front(tv, PACKAGE);
+            let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
         }
         played.map(drop).into()
     }
 }
 
-impl crate::provider::Player for Kodi {
+impl tveee_core::provider::Player for Kodi {
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {
         match Outcome::from(now(tv)) {
             Outcome::Handled(Some((p, _))) => Outcome::Handled(p),
@@ -416,7 +416,7 @@ impl crate::provider::Player for Kodi {
     fn picture(&self, tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {
         let art = match art.strip_prefix(FRAME).and_then(|a| a.split_once('\n')) {
             Some((path, artwork)) => {
-                if let Some(jpeg) = crate::frames::frame_of(std::path::Path::new(path), at.unwrap_or(0.0)) {
+                if let Some(jpeg) = tveee_core::frames::frame_of(std::path::Path::new(path), at.unwrap_or(0.0)) {
                     return Outcome::Handled(jpeg);
                 }
                 if artwork.is_empty() {
@@ -464,8 +464,8 @@ fn watch_notifications(tv: &Tv, on: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Res
         }
     };
     s.set_read_timeout(Some(std::time::Duration::from_secs(1)))?;
-    crate::tlog!("kodi: listening for notifications on port {TCP_PORT}");
-    let mut split = crate::ws::JsonSplitter::default();
+    tveee_core::tlog!("kodi: listening for notifications on port {TCP_PORT}");
+    let mut split = tveee_core::ws::JsonSplitter::default();
     let mut buf = [0u8; 8192];
     while go() {
         match s.read(&mut buf) {
@@ -486,7 +486,6 @@ fn watch_notifications(tv: &Tv, on: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Res
 
 impl Kodi {
     /// Kodi's picture `art` (an image:// address), fetched from it.
-    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     fn art_bytes(&self, tv: &Tv, art: &str) -> Result<Vec<u8>> {
         let r = call(tv, "Files.PrepareDownload", &format!(r#"{{"path":{}}}"#, quote(art)))?;
         let Some(path) = r.get("details").and_then(|d| str_of(d, "path")) else { return failed("Kodi didn't offer the picture") };
@@ -524,7 +523,7 @@ fn names(v: &Value, key: &str) -> Option<String> {
 }
 
 /// `tveee details` from a Kodi item (Player.GetItem's or Files.GetFileDetails').
-pub fn parse_details(item: &Value) -> crate::more::Details {
+pub fn parse_details(item: &Value) -> tveee_core::more::Details {
     let mut fields: Vec<(&'static str, String)> = Vec::new();
     let mut add = |k: &'static str, v: Option<String>| {
         if let Some(v) = v {
@@ -560,7 +559,7 @@ pub fn parse_details(item: &Value) -> crate::more::Details {
         .collect();
     add("cast", (!cast.is_empty()).then(|| cast.join(", ")));
     add("studio", names(item, "studio"));
-    add("length", num("runtime").map(crate::nowplaying::clock));
+    add("length", num("runtime").map(tveee_core::nowplaying::clock));
     if let Some(v) = item.pointer("/streamdetails/video/0") {
         let h = num_of(v, "height").unwrap_or(0.0) as u32;
         let codec = str_of(v, "codec").unwrap_or_default().to_uppercase();
@@ -586,12 +585,12 @@ pub fn parse_details(item: &Value) -> crate::more::Details {
         (Some(t), Some(p)) => Some(format!("{t}\n\n{p}")),
         (t, p) => p.or(t),
     };
-    crate::more::Details { fields, description, chapters: Vec::new(), links: Vec::new() }
+    tveee_core::more::Details { fields, description, chapters: Vec::new(), links: Vec::new() }
 }
 
-impl crate::provider::Details for Kodi {
+impl tveee_core::provider::Details for Kodi {
     // `link` is the file: what's playing if it's that, else what Kodi knows of the file
-    fn details(&self, tv: &Tv, link: &str) -> Result<crate::more::Details> {
+    fn details(&self, tv: &Tv, link: &str) -> Result<tveee_core::more::Details> {
         if let Some((id, _)) = player_id(tv)? {
             let r = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{DETAIL_FIELDS}}}"#))?;
             let item = r.get("item").cloned().unwrap_or_default();
@@ -677,7 +676,7 @@ fn play(tv: &Tv, q: &str) -> Result<String> {
             n => failed(format!("{n} things in Kodi's library match \"{q}\"; say which:\n{}", found.iter().map(found_line).collect::<Vec<_>>().join("\n"))),
         };
     };
-    let _ = crate::plugins::apps::bring_to_front(tv, PACKAGE);
+    let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
     if f.kind == "movie" {
         call(tv, "Player.Open", &format!(r#"{{"item":{{"movieid":{}}}}}"#, f.id))?;
         Ok(format!("playing {}", f.title))
@@ -736,19 +735,19 @@ fn notify(tv: &Tv, text: &str) -> Result<String> {
 /// what's missing.
 fn words(args: &[String], what: &str) -> Result<String> {
     match args.join(" ").trim() {
-        "" => crate::error::usage(format!("missing {what}")),
+        "" => tveee_core::error::usage(format!("missing {what}")),
         w => Ok(w.to_string()),
     }
 }
 
 /// What it can do: `tveee app kodi <action>`, `tveee do kodi.<action>`, the ui menu.
 pub fn actions() -> Vec<ActionDescriptor> {
-    use crate::actions::ActionDescriptor as A;
+    use tveee_core::actions::ActionDescriptor as A;
     vec![
         A::new("kodi.subtitles", "kodi", "kodi: next subtitles", |cx, a| match a.first().map(String::as_str) {
             None => subtitles(cx.tv, "next").map(Into::into),
             Some(how @ ("next" | "off" | "on" | "previous")) => subtitles(cx.tv, how).map(Into::into),
-            Some(other) => crate::error::usage(format!("subtitles: next, off, on or previous, not '{other}'")),
+            Some(other) => tveee_core::error::usage(format!("subtitles: next, off, on or previous, not '{other}'")),
         })
         .args("[next|off|on|previous]")
         .key('k'),
@@ -756,7 +755,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
         A::new("kodi.audio", "kodi", "kodi: next audio track", |cx, a| match a.first().map(String::as_str) {
             None => audio(cx.tv, "next").map(Into::into),
             Some(how @ ("next" | "previous")) => audio(cx.tv, how).map(Into::into),
-            Some(other) => crate::error::usage(format!("audio: next or previous, not '{other}'")),
+            Some(other) => tveee_core::error::usage(format!("audio: next or previous, not '{other}'")),
         })
         .args("[next|previous]")
         .key('a'),
@@ -764,7 +763,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             None => call(cx.tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is looking for new videos (its library scan)".into()),
             // the older spelling, `app kodi scan clean`
             Some("clean") => clean(cx.tv),
-            Some(other) => crate::error::usage(format!("scan: takes nothing (or 'clean'), not '{other}'")),
+            Some(other) => tveee_core::error::usage(format!("scan: takes nothing (or 'clean'), not '{other}'")),
         })
         .args("[clean]")
         .key('L'),
@@ -783,11 +782,11 @@ pub fn actions() -> Vec<ActionDescriptor> {
     ]
 }
 
-fn clean(tv: &Tv) -> Result<crate::actions::Output> {
+fn clean(tv: &Tv) -> Result<tveee_core::actions::Output> {
     call(tv, "VideoLibrary.Clean", "{}").map(|_| "Kodi is removing missing videos from its library".into())
 }
 
-pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
+pub fn providers() -> Vec<&'static dyn tveee_core::provider::Provider> {
     vec![&KODI]
 }
 
@@ -806,7 +805,7 @@ fn ask(prompt: &str, default: &str) -> Result<String> {
     Ok(if line.is_empty() { default.to_string() } else { line.to_string() })
 }
 
-impl crate::pairing::Pairing for KodiLogin {
+impl tveee_core::pairing::Pairing for KodiLogin {
     fn id(&self) -> &'static str {
         PAIRING
     }
@@ -823,24 +822,24 @@ impl crate::pairing::Pairing for KodiLogin {
     fn how(&self) -> &'static str {
         "type the port, username and password set in Kodi (Settings > Services > Control); only needed if it has a password"
     }
-    fn pair(&self, tv: &Tv) -> Result<crate::pairing::Saved> {
+    fn pair(&self, tv: &Tv) -> Result<tveee_core::pairing::Saved> {
         use std::io::IsTerminal;
         if !std::io::stdin().is_terminal() {
-            return crate::error::usage("pair kodi: run it in a terminal to type Kodi's login");
+            return tveee_core::error::usage("pair kodi: run it in a terminal to type Kodi's login");
         }
         println!("In Kodi: Settings > Services > Control > Allow remote control via HTTP (on).");
         let port = ask("Port", &DEFAULT_PORT.to_string())?;
         let user = ask("Username", DEFAULT_USER)?;
         let pass = ask("Password (empty if none)", "")?;
-        let Ok(port_n) = port.parse::<u16>() else { return crate::error::usage(format!("pair kodi: '{port}' isn't a port")) };
+        let Ok(port_n) = port.parse::<u16>() else { return tveee_core::error::usage(format!("pair kodi: '{port}' isn't a port")) };
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"JSONRPC.Ping"}"#;
         let reply = post(tv, &(port_n, user.clone(), pass.clone()), body)?;
         if !reply.contains("pong") {
             return failed(format!("pair kodi: Kodi answered oddly: {}", reply.trim()));
         }
-        Ok(crate::pairing::Saved(vec![("port".into(), port), ("user".into(), user), ("pass".into(), pass)]))
+        Ok(tveee_core::pairing::Saved(vec![("port".into(), port), ("user".into(), user), ("pass".into(), pass)]))
     }
-    fn check(&self, tv: &Tv, _saved: &crate::pairing::Saved) -> Option<String> {
+    fn check(&self, tv: &Tv, _saved: &tveee_core::pairing::Saved) -> Option<String> {
         Some(match now(tv) {
             Ok(Some((p, _))) => format!("check: Kodi is playing {}", p.title.unwrap_or_default()),
             Ok(None) => "check: Kodi answers (nothing playing)".into(),
@@ -849,7 +848,7 @@ impl crate::pairing::Pairing for KodiLogin {
     }
 }
 
-pub fn pairings() -> Vec<&'static dyn crate::pairing::Pairing> {
+pub fn pairings() -> Vec<&'static dyn tveee_core::pairing::Pairing> {
     vec![&KODI_LOGIN]
 }
 

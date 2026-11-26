@@ -6,11 +6,11 @@
 //! it (`mode manual` / `expert`: tveee, or a program such as Hyperion),
 //! which then sets the colours.
 
-use crate::error::{failed, usage, Result};
-use crate::plugins::philips::{js_get_paired, js_post};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
-use crate::Ctx;
+use tveee_core::error::{failed, usage, Result};
+use crate::{js_get_paired, js_post};
+use tveee_core::actions::ActionDescriptor;
+use tveee_core::tv::Tv;
+use tveee_core::Ctx;
 
 const CAT: &str = "philips";
 const WHAT: &str = "ambilight";
@@ -131,7 +131,7 @@ pub struct Light {
 /// `{"layer1":{"left":{"0":{"r":35,"g":40,"b":44},...},...}}`.
 pub fn parse_lights(json: &str) -> Vec<Light> {
     const SIDES: [&str; 4] = ["left", "top", "right", "bottom"];
-    let Some(v) = crate::http::json(json) else { return Vec::new() };
+    let Some(v) = tveee_core::http::json(json) else { return Vec::new() };
     let Some(layers) = v.as_object() else { return Vec::new() };
     let mut out = Vec::new();
     for (name, sides) in layers {
@@ -141,7 +141,7 @@ pub fn parse_lights(json: &str) -> Vec<Light> {
                 continue;
             }
             for (n, rgb) in lights.as_object().into_iter().flatten() {
-                let c = |k: &str| crate::http::number(rgb, k).map(|v| v.clamp(0.0, 255.0) as u8);
+                let c = |k: &str| tveee_core::http::number(rgb, k).map(|v| v.clamp(0.0, 255.0) as u8);
                 if let (Ok(n), Some(r), Some(g), Some(b)) = (n.parse(), c("r"), c("g"), c("b")) {
                     out.push(Light { layer, side: side.clone(), n, rgb: (r, g, b) });
                 }
@@ -182,31 +182,31 @@ pub fn lists_ambilight(system: &str) -> bool {
 /// needed). Asked once a run (when the TV answers).
 pub fn has_ambilight(tv: &Tv) -> bool {
     static KNOWN: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
-    if crate::pairing::by_id("jointspace").is_none() {
+    if tveee_core::pairing::by_id("jointspace").is_none() {
         return false;
     }
     let mut known = KNOWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(k) = *known {
         return k;
     }
-    let Ok((200, system)) = crate::http::get(&tv.ip, 1925, "/6/system") else { return false };
+    let Ok((200, system)) = tveee_core::http::get(&tv.ip, 1925, "/6/system") else { return false };
     let has = lists_ambilight(&system);
     *known = Some(has);
     has
 }
 
-/// The Ambilight panel front ends show (`crate::panel`).
-pub fn panels() -> Vec<crate::panel::Spec> {
-    vec![crate::panel::Spec { id: "ambilight", title: "ambilight", available: has_ambilight, read: panel }]
+/// The Ambilight panel front ends show (`tveee_core::panel`).
+pub fn panels() -> Vec<tveee_core::panel::Spec> {
+    vec![tveee_core::panel::Spec { id: "ambilight", title: "ambilight", available: has_ambilight, read: panel }]
 }
 
 /// Everything the panel shows, read in one go.
-pub fn panel(tv: &Tv) -> crate::panel::View {
-    use crate::panel::View;
+pub fn panel(tv: &Tv) -> tveee_core::panel::View {
+    use tveee_core::panel::View;
     if !has_ambilight(tv) {
         return View::Missing("no Ambilight here that tveee can control".into());
     }
-    if crate::pairing::load("jointspace", &tv.ip).is_none() {
+    if tveee_core::pairing::load("jointspace", &tv.ip).is_none() {
         return View::NeedsPairing { pairing: "jointspace", why: "tveee isn't paired with the TV yet, which Ambilight needs.".into() };
     }
     let (state, lights) = std::thread::scope(|sc| {
@@ -221,7 +221,7 @@ pub fn panel(tv: &Tv) -> crate::panel::View {
 
 /// The panel's lines (as `tveee ambilight` says them, but the lights), a row
 /// of colours per side, and the dialog's rows.
-pub fn shown(state: &State, lights: &[Light]) -> crate::panel::Shown {
+pub fn shown(state: &State, lights: &[Light]) -> tveee_core::panel::Shown {
     let info = state
         .lines()
         .iter()
@@ -231,14 +231,14 @@ pub fn shown(state: &State, lights: &[Light]) -> crate::panel::Shown {
             (k.to_string(), v.trim().to_string())
         })
         .collect();
-    let mut swatches: Vec<(String, Vec<crate::panel::Rgb>)> = Vec::new();
+    let mut swatches: Vec<(String, Vec<tveee_core::panel::Rgb>)> = Vec::new();
     for l in lights {
         match swatches.iter_mut().find(|(side, _)| *side == l.side) {
             Some((_, row)) => row.push(l.rgb),
             None => swatches.push((l.side.clone(), vec![l.rgb])),
         }
     }
-    crate::panel::Shown { info, swatches, rows: rows(state, lights) }
+    tveee_core::panel::Shown { info, swatches, rows: rows(state, lights) }
 }
 
 /// What the lights are doing.
@@ -297,21 +297,21 @@ pub fn state(tv: &Tv) -> Result<State> {
     });
     // power is the one every Ambilight TV has: its error is the one to show
     let power = power?;
-    let field = |json: &Result<String>, k: &str| json.as_ref().ok().and_then(|j| crate::http::text(&crate::http::json(j)?, k));
+    let field = |json: &Result<String>, k: &str| json.as_ref().ok().and_then(|j| tveee_core::http::text(&tveee_core::http::json(j)?, k));
     let on = |v: Option<String>| v.map(|p| p.eq_ignore_ascii_case("on"));
-    let layout = layout.ok().and_then(|l| crate::http::json(&l));
+    let layout = layout.ok().and_then(|l| tveee_core::http::json(&l));
     let sides = layout
         .as_ref()
         .map(|l| {
             ["left", "top", "right", "bottom"]
                 .iter()
-                .map(|k| (k.to_string(), crate::http::number(l, k).unwrap_or(0.0) as u32))
+                .map(|k| (k.to_string(), tveee_core::http::number(l, k).unwrap_or(0.0) as u32))
                 .filter(|(_, n)| *n > 0)
                 .collect()
         })
         .unwrap_or_default();
     Ok(State {
-        power: on(crate::http::json(&power).and_then(|v| crate::http::text(&v, "power"))).unwrap_or(false),
+        power: on(tveee_core::http::json(&power).and_then(|v| tveee_core::http::text(&v, "power"))).unwrap_or(false),
         mode: field(&mode, "current"),
         style: field(&config, "styleName"),
         setting: field(&config, "menuSetting"),
@@ -363,8 +363,8 @@ pub fn change(tv: &Tv, args: &[String]) -> Result<String> {
 /// The dialog's rows for `state` and `lights`: power, style, the style's
 /// settings, Ambilight+Hue (if there), and the lights (all, or each one),
 /// each option the `ambilight.change` it makes.
-pub fn rows(state: &State, lights: &[Light]) -> Vec<crate::panel::Row> {
-    use crate::panel::{Choice, Row, Run};
+pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
+    use tveee_core::panel::{Choice, Row, Run};
     const ID: &str = "ambilight.change";
     let mut out = vec![Row {
         name: "power",
@@ -490,7 +490,7 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
             set_style(tv, "FOLLOW_COLOR", Some(s), Some(label))?;
             format!("ambilight: {label}")
         }
-        ["mode"] => crate::http::json(&get(tv, "/6/ambilight/mode")?).and_then(|v| crate::http::text(&v, "current")).unwrap_or_default(),
+        ["mode"] => tveee_core::http::json(&get(tv, "/6/ambilight/mode")?).and_then(|v| tveee_core::http::text(&v, "current")).unwrap_or_default(),
         ["mode", m] => {
             if !MODES.iter().any(|(n, _)| n == m) {
                 return usage(format!("ambilight mode: one of {}", MODES.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")));
@@ -553,11 +553,11 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    use crate::actions::ActionDescriptor as A;
+    use tveee_core::actions::ActionDescriptor as A;
     let mut v = command_actions();
     v.extend([
         A::new("ambilight.power", WHAT, "ambilight on/off", |cx, _| {
-            let on = crate::http::json(&get(cx.tv, "/6/ambilight/power")?).and_then(|v| crate::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
+            let on = tveee_core::http::json(&get(cx.tv, "/6/ambilight/power")?).and_then(|v| tveee_core::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
             set_power(cx.tv, !on).map(Into::into)
         })
         .key('A'),
@@ -629,14 +629,14 @@ mod tests {
         let r = rows(&st, &lights);
         assert_eq!(r.iter().map(|r| r.name).collect::<Vec<_>>(), ["power", "style", "setting", "hue", "lights"]);
         assert_eq!((r[1].current, r[2].current), (Some(0), Some(2)));
-        let act = |args: &[&str]| crate::panel::Run::Act { id: "ambilight.change", args: args.iter().map(|a| a.to_string()).collect() };
+        let act = |args: &[&str]| tveee_core::panel::Run::Act { id: "ambilight.change", args: args.iter().map(|a| a.to_string()).collect() };
         // going back to video keeps vivid; sound starts at its default
         assert_eq!(r[1].options[0].run, act(&["style", "FOLLOW_VIDEO", "VIVID"]));
         assert_eq!(r[1].options[1].run, act(&["style", "FOLLOW_AUDIO", "ENERGY_ADAPTIVE_BRIGHTNESS"]));
         assert_eq!(r[4].options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(), ["all", "left 0"]);
         // a light shows its colour, and asks for a new one
         assert_eq!(r[4].options[1].colour, Some((1, 2, 3)));
-        assert!(matches!(&r[4].options[1].run, crate::panel::Run::Ask { args, .. } if args == &["one", "left", "0"]));
+        assert!(matches!(&r[4].options[1].run, tveee_core::panel::Run::Ask { args, .. } if args == &["one", "left", "0"]));
         // outside control: no style marked, no settings row; no Hue: no hue row
         let st = State { mode: Some("manual".into()), style: None, hue: None, ..st };
         let r = rows(&st, &[]);

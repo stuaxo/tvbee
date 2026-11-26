@@ -1,0 +1,14 @@
+[package]
+name = "tveee-plugin-kodi"
+version = "0.2.0"
+description = "tveee plugin: Kodi (JSON-RPC: what's playing, exact seeking, tracks, library, artwork)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tveee-core.workspace = true
+serde_json.workspace = true

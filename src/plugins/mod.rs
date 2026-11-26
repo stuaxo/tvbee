@@ -1,7 +1,7 @@
-pub mod ambilight;
-pub mod kodi;
-pub mod philips;
-pub mod youtube;
+// the vendor plugins, crates of their own
+use tveee_plugin_kodi as kodi;
+use tveee_plugin_philips::{self as philips, ambilight};
+use tveee_plugin_youtube as youtube;
 #[cfg(feature = "ui")]
 pub mod ui;
 

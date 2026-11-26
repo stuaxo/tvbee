@@ -2,7 +2,7 @@
 # plugin list); crates/ holds the core and the terminal remote, plugins/ the
 # vendor plugins.
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "plugins/*"]
 resolver = "3"
 
 [workspace.package]
@@ -15,6 +15,9 @@ repository = "https://github.com/stuaxo/tveee"
 
 [workspace.dependencies]
 tveee-core = { path = "crates/tveee-core" }
+tveee-plugin-philips = { path = "plugins/philips" }
+tveee-plugin-youtube = { path = "plugins/youtube" }
+tveee-plugin-kodi = { path = "plugins/kodi" }
 # a local cache of what's read from the TV (guide, descriptions, ...); SQLite
 # bundled, so no system library is needed (a C compiler is, to build it)
 diesel = { version = "2.2", default-features = false, features = ["sqlite"] }
@@ -42,8 +45,9 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 tveee-core.workspace = true
-# the philips plugin reads its cache directly (until it is a crate of its own)
-diesel.workspace = true
+tveee-plugin-philips.workspace = true
+tveee-plugin-youtube.workspace = true
+tveee-plugin-kodi.workspace = true
 serde_json.workspace = true
 ratatui = { workspace = true, optional = true }
 ratatui-image = { workspace = true, optional = true }

@@ -1,0 +1,15 @@
+[package]
+name = "tveee-plugin-philips"
+version = "0.2.0"
+description = "tveee plugin: Philips TVs (JointSpace API, Ambilight, the live TV guide, NetTV apps)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tveee-core.workspace = true
+serde_json.workspace = true
+diesel.workspace = true

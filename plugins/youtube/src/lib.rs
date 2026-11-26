@@ -2,19 +2,19 @@
 //! and commands that look inside the app.
 //!
 //! The YouTube TV app is a web app run by Google's Cobalt engine, which opens
-//! a devtools socket. tveee reads the page through it ([`crate::devtools`]):
+//! a devtools socket. tveee reads the page through it ([`tveee_core::devtools`]):
 //! the route (`tv#/watch?v=...`), the focused element, the video. Enabled when
 //! the app is installed.
 
-use crate::devtools;
-use crate::more::{Chapter, Details, Go, Link, Place};
-use crate::error::{failed, Result};
-use crate::provider::{Outcome, Playing};
+use tveee_core::devtools;
+use tveee_core::more::{Chapter, Details, Go, Link, Place};
+use tveee_core::error::{failed, Result};
+use tveee_core::provider::{Outcome, Playing};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
+use tveee_core::actions::ActionDescriptor;
+use tveee_core::tv::Tv;
 
 pub const PACKAGE: &str = "com.google.android.youtube.tv";
 
@@ -40,8 +40,8 @@ pub const PLACES: &[Place] = &[
     Place { id: "watchlater", label: "Watch later", link: "https://www.youtube.com/playlist?list=WL" },
 ];
 
-pub fn apps() -> Vec<crate::plugins::apps::App> {
-    use crate::plugins::apps::{app, Kind};
+pub fn apps() -> Vec<tveee_core::builtin::apps::App> {
+    use tveee_core::builtin::apps::{app, Kind};
     vec![app("youtube", "YouTube", PACKAGE, Kind::Video)]
 }
 
@@ -50,7 +50,7 @@ pub fn apps() -> Vec<crate::plugins::apps::App> {
 pub struct YouTube;
 pub static YOUTUBE: YouTube = YouTube;
 
-impl crate::provider::Provider for YouTube {
+impl tveee_core::provider::Provider for YouTube {
     fn id(&self) -> &'static str {
         "youtube"
     }
@@ -60,7 +60,7 @@ impl crate::provider::Provider for YouTube {
     fn hosts(&self) -> &'static [&'static str] {
         &[PACKAGE]
     }
-    fn player(&self) -> Option<&dyn crate::provider::Player> {
+    fn player(&self) -> Option<&dyn tveee_core::provider::Player> {
         Some(self)
     }
     // the TV app takes links, not the search intent
@@ -77,7 +77,7 @@ impl crate::provider::Provider for YouTube {
     // to home, then reopen). The app ignores changes to location.hash.
     fn open_here(&self, tv: &Tv, link: &str) -> Outcome<()> {
         // anything amiss: the usual way
-        if crate::plugins::info::focus_package(&tv.window_dump().unwrap_or_default()).as_deref() != Some(PACKAGE) {
+        if tveee_core::builtin::info::focus_package(&tv.window_dump().unwrap_or_default()).as_deref() != Some(PACKAGE) {
             return Outcome::Fallback;
         }
         match devtools::with_conn(tv, PACKAGE, |c| c.eval(&deep_link_expr(link))) {
@@ -89,18 +89,18 @@ impl crate::provider::Provider for YouTube {
         PLACES
     }
     // the video and how far in: restarting comes back to it
-    fn save_session(&self, tv: &Tv) -> Outcome<crate::provider::Session> {
+    fn save_session(&self, tv: &Tv) -> Outcome<tveee_core::provider::Session> {
         session(tv).map_or(Outcome::Fallback, Outcome::Handled)
     }
     fn has_sessions(&self) -> bool {
         true
     }
-    fn details(&self) -> Option<&dyn crate::provider::Details> {
+    fn details(&self) -> Option<&dyn tveee_core::provider::Details> {
         Some(self)
     }
 }
 
-impl crate::provider::Details for YouTube {
+impl tveee_core::provider::Details for YouTube {
     fn details(&self, _tv: &Tv, link: &str) -> Result<Details> {
         details(link)
     }
@@ -128,7 +128,7 @@ fn deep_link_expr(link: &str) -> String {
 
 // --- the player: what's playing, seeking, and a picture of it ----------------
 
-impl crate::provider::Player for YouTube {
+impl tveee_core::provider::Player for YouTube {
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {
         let pages = match devtools::with_conn(tv, PACKAGE, |c| c.pages()) {
             Ok(p) => p,
@@ -167,11 +167,11 @@ impl crate::provider::Player for YouTube {
     }
 }
 
-use crate::frames::{ffmpeg_jpeg, frame_of, program};
+use tveee_core::frames::{ffmpeg_jpeg, frame_of, program};
 
 /// Where small copies of videos and storyboard sheets are kept.
 fn previews_dir() -> Option<PathBuf> {
-    Some(crate::plugin::cache_path("x")?.parent()?.join("previews"))
+    Some(tveee_core::plugin::cache_path("x")?.parent()?.join("previews"))
 }
 
 /// How many copies of videos to keep.
@@ -197,7 +197,7 @@ pub fn stop_fetching() {
     if let Some((id, mut child)) = stopped {
         let _ = child.kill();
         let _ = child.wait();
-        crate::tlog!("youtube: stopped fetching {id}");
+        tveee_core::tlog!("youtube: stopped fetching {id}");
         let mut all = copies().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if all.get(&id).is_some_and(Option::is_none) {
             all.remove(&id);
@@ -262,7 +262,7 @@ pub fn local_copy(id: &str) -> Result<PathBuf> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()?;
-    crate::tlog!("youtube: fetching a small copy of {id}");
+    tveee_core::tlog!("youtube: fetching a small copy of {id}");
     *FETCHING.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id.to_string(), child));
     // wait for it, letting go of it between looks so it can be stopped
     let done = loop {
@@ -387,7 +387,7 @@ fn prune_sheets(dir: &std::path::Path) {
         .collect();
     for name in sheets_to_remove(&sheets) {
         let _ = std::fs::remove_file(dir.join(&name));
-        crate::tlog!("youtube: removed old storyboard sheet {name}");
+        tveee_core::tlog!("youtube: removed old storyboard sheet {name}");
     }
 }
 
@@ -415,7 +415,7 @@ pub fn storyboard_frame(id: &str, secs: f64) -> Option<Vec<u8>> {
     ffmpeg_jpeg(None, &sheet, &format!("crop={}:{}:{x}:{y}", board.width, board.height))
 }
 
-pub fn providers() -> Vec<&'static dyn crate::provider::Provider> {
+pub fn providers() -> Vec<&'static dyn tveee_core::provider::Provider> {
     vec![&YOUTUBE]
 }
 
@@ -447,20 +447,20 @@ pub fn parse_details(out: &str) -> Details {
         d.fields.push(("uploaded", format!("{}-{}-{}", &date[..4], &date[4..6], &date[6..])));
     }
     if let Some(v) = num("view_count") {
-        d.fields.push(("views", crate::more::count(v)));
+        d.fields.push(("views", tveee_core::more::count(v)));
     }
     if let Some(v) = num("like_count") {
-        d.fields.push(("likes", crate::more::count(v)));
+        d.fields.push(("likes", tveee_core::more::count(v)));
     }
     if let Some(v) = num("duration") {
-        d.fields.push(("length", crate::nowplaying::clock(v)));
+        d.fields.push(("length", tveee_core::nowplaying::clock(v)));
     }
-    let chapters = crate::http::json(get("chapters")).unwrap_or_default();
+    let chapters = tveee_core::http::json(get("chapters")).unwrap_or_default();
     d.chapters = chapters
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|o| Some(Chapter { start: crate::http::number(o, "start_time")?, title: crate::http::text(o, "title")? }))
+        .filter_map(|o| Some(Chapter { start: tveee_core::http::number(o, "start_time")?, title: tveee_core::http::text(o, "title")? }))
         .collect();
     d.description = text("description");
     // where to go from here: the channel, the chapters, links in the description
@@ -469,14 +469,14 @@ pub fn parse_details(out: &str) -> Details {
         d.links.push(Link { label: format!("channel: {}", text("channel").unwrap_or_default()), go: Go::Link(url) });
     }
     for (i, c) in d.chapters.iter().enumerate() {
-        d.links.push(Link { label: format!("chapter {}: {} ({})", i + 1, c.title, crate::nowplaying::clock(c.start)), go: Go::Seek(c.start) });
+        d.links.push(Link { label: format!("chapter {}: {} ({})", i + 1, c.title, tveee_core::nowplaying::clock(c.start)), go: Go::Seek(c.start) });
     }
-    d.links.extend(crate::more::description_links(d.description.as_deref().unwrap_or("")));
+    d.links.extend(tveee_core::more::description_links(d.description.as_deref().unwrap_or("")));
     d
 }
 
 fn cache_file(id: &str) -> Option<std::path::PathBuf> {
-    let base = crate::plugin::cache_path("x")?;
+    let base = tveee_core::plugin::cache_path("x")?;
     Some(base.parent()?.join("youtube").join(format!("{id}.txt")))
 }
 
@@ -491,7 +491,7 @@ pub fn details(link: &str) -> Result<Details> {
     if let Some(text) = cache.as_deref().and_then(fresh) {
         return Ok(parse_details(&text));
     }
-    let Some(ytdlp) = crate::tv::search_path("yt-dlp", std::env::var_os("PATH").as_deref()) else {
+    let Some(ytdlp) = tveee_core::tv::search_path("yt-dlp", std::env::var_os("PATH").as_deref()) else {
         return failed("youtube: details need yt-dlp (https://github.com/yt-dlp/yt-dlp), not found on PATH");
     };
     let mut cmd = std::process::Command::new(ytdlp);
@@ -515,20 +515,20 @@ pub fn details(link: &str) -> Result<Details> {
 }
 
 /// Where YouTube is: the video and how far in (or home), from its page.
-fn session(tv: &Tv) -> Option<crate::provider::Session> {
+fn session(tv: &Tv) -> Option<tveee_core::provider::Session> {
     let raw = devtools::with_conn(tv, PACKAGE, |c| c.eval("JSON.stringify({h:location.hash,t:(document.querySelector('video')||{}).currentTime||0})")).ok()?;
-    let v = crate::http::json(&raw)?;
-    let hash = crate::http::text(&v, "h")?;
+    let v = tveee_core::http::json(&raw)?;
+    let hash = tveee_core::http::text(&v, "h")?;
     Some(match video_id(&hash) {
         Some(id) => {
-            let t = crate::http::number(&v, "t").unwrap_or(0.0).floor() as u64;
-            crate::provider::Session {
+            let t = tveee_core::http::number(&v, "t").unwrap_or(0.0).floor() as u64;
+            tveee_core::provider::Session {
                 resume: None,
                 link: format!("https://www.youtube.com/watch?v={id}&t={t}s"),
-                said: format!("at {} in the same video", crate::nowplaying::clock(t as f64)),
+                said: format!("at {} in the same video", tveee_core::nowplaying::clock(t as f64)),
             }
         }
-        None => crate::provider::Session { link: "https://www.youtube.com/".into(), said: String::new(), resume: None },
+        None => tveee_core::provider::Session { link: "https://www.youtube.com/".into(), said: String::new(), resume: None },
     })
 }
 
