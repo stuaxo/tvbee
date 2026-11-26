@@ -1,7 +1,7 @@
-//! The panel (`crate::panel`: the Ambilight, on TVs with one) and its dialog.
+//! The panel (`tveee_core::panel`: the Ambilight, on TVs with one) and its dialog.
 
 use super::*;
-use crate::panel::{Row, Run, View};
+use tveee_core::panel::{Row, Run, View};
 
 /// A row whose options each ask for something (the lights: a colour):
 /// moving along it picks nothing.
@@ -17,7 +17,7 @@ impl App {
 
     /// Its heading ("ambilight").
     pub(super) fn panel_title(&self) -> &'static str {
-        self.panel_id().and_then(crate::panel::by_id).map_or("panel", |p| p.title)
+        self.panel_id().and_then(tveee_core::panel::by_id).map_or("panel", |p| p.title)
     }
 
     /// What it shows, as of the last refresh (None until read).

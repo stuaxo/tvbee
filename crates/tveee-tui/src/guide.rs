@@ -17,7 +17,7 @@ pub enum Seg {
 /// `spc` seconds a cell. A programme is `│Title` over the cells its time
 /// covers (`│HH:MM Title` if it starts off the ruler's half hours); one that started before the left edge shows `◂Title`. Runs
 /// of the programme starting at `focus` are flagged (to draw it marked).
-pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: usize, offset: i64, focus: Option<i64>) -> Vec<(Seg, String, bool)> {
+pub fn grid_row(events: &[tveee_core::provider::Event], start: i64, spc: i64, width: usize, offset: i64, focus: Option<i64>) -> Vec<(Seg, String, bool)> {
     let mut buf = vec![(' ', Seg::Gap, false); width];
     let end = start + spc * width as i64;
     let cell = |t: i64| (t - start).div_euclid(spc).clamp(0, width as i64) as usize;
@@ -32,7 +32,7 @@ pub fn grid_row(events: &[crate::provider::Event], start: i64, spc: i64, width: 
             // the ruler says the time on the hour and half hour; and a
             // narrow block keeps its room for the title
             if e.start % GUIDE_STEP != 0 && x1 - x0 >= MIN_FOR_TIME {
-                content.extend(format!("{} ", crate::plugins::guide::hhmm(e.start, offset)).chars().map(|c| (c, Seg::Time)));
+                content.extend(format!("{} ", tveee_core::builtin::guide::hhmm(e.start, offset)).chars().map(|c| (c, Seg::Time)));
             }
         } else {
             content.push(('◂', Seg::Edge));
@@ -116,8 +116,8 @@ pub fn split_tags(text: &str) -> (&str, Vec<&'static str>) {
 /// The details panel's text for programme `e` on channel `ch`, wrapped to
 /// `width`: title, then when/how long/channel/genre, then the description.
 /// `info`: None while it's being read, Some(None) if the guide has none.
-pub fn details_text(e: &crate::provider::Event, ch: &crate::provider::Channel, info: Option<Option<&str>>, width: usize, offset: i64) -> Vec<(String, Seg)> {
-    use crate::plugins::guide::{day_hhmm, hhmm};
+pub fn details_text(e: &tveee_core::provider::Event, ch: &tveee_core::provider::Channel, info: Option<Option<&str>>, width: usize, offset: i64) -> Vec<(String, Seg)> {
+    use tveee_core::builtin::guide::{day_hhmm, hhmm};
     let mins = (e.end - e.start) / 60;
     let length = if mins >= 60 { format!("{}h{:02}", mins / 60, mins % 60) } else { format!("{mins} min") };
     let (info, tags) = match info {
@@ -154,7 +154,7 @@ pub fn grid_ruler(start: i64, spc: i64, width: usize, now: i64, offset: i64) -> 
     let mut t = (start + GUIDE_STEP - 1).div_euclid(GUIDE_STEP) * GUIDE_STEP;
     while t < start + spc * width as i64 {
         let x = ((t - start) / spc) as usize;
-        for (i, c) in crate::plugins::guide::hhmm(t, offset).chars().enumerate() {
+        for (i, c) in tveee_core::builtin::guide::hhmm(t, offset).chars().enumerate() {
             if x + i < width {
                 buf[x + i] = c;
             }
@@ -233,7 +233,7 @@ impl App {
     /// Where the grid's left edge should be: the half hour before now, plus
     /// the steps taken.
     pub(super) fn guide_start(&self) -> i64 {
-        crate::plugins::guide::now().div_euclid(GUIDE_STEP) * GUIDE_STEP + self.guide_later * GUIDE_STEP
+        tveee_core::builtin::guide::now().div_euclid(GUIDE_STEP) * GUIDE_STEP + self.guide_later * GUIDE_STEP
     }
 
     /// Whether the guide is sliding (so frames should come quickly).
@@ -245,7 +245,7 @@ impl App {
     /// with scroll animations on, else straight there.
     pub(super) fn slide(&mut self, spc: i64) {
         let target = self.guide_start();
-        if !crate::options::get(crate::options::SCROLL_ANIMATION) {
+        if !tveee_core::options::get(tveee_core::options::SCROLL_ANIMATION) {
             self.guide_view = target;
             return;
         }
@@ -257,7 +257,7 @@ impl App {
 
     /// The time the guide shows.
     pub(super) fn guide_time(&self) -> i64 {
-        guide_time_at(crate::plugins::guide::now(), self.guide_later)
+        guide_time_at(tveee_core::builtin::guide::now(), self.guide_later)
     }
 
     /// Keys in the guide: typing filters, ↑/↓/page keys/home/end move, ←/→
@@ -377,7 +377,7 @@ impl App {
                 " guide ".to_string()
             }
             Some(Ok(g)) => {
-                let off = crate::plugins::guide::utc_offset();
+                let off = tveee_core::builtin::guide::utc_offset();
                 let fit = |s: &str, w: usize| -> String {
                     if s.chars().count() <= w { format!("{s:<w$}") } else { format!("{}…", s.chars().take(w.saturating_sub(1)).collect::<String>()) }
                 };
@@ -406,8 +406,8 @@ impl App {
                 let view = self.guide_view;
                 let t = self.guide_time();
                 let dim = Style::new().fg(Color::DarkGray);
-                let (ruler, marker) = grid_ruler(view, spc, grid_w, crate::plugins::guide::now(), off);
-                let mut head = vec![Span::styled(format!("  {}  ", fit(&format!("channel   {}", crate::plugins::guide::day_hhmm(view, off).split(' ').next().unwrap_or("")), ch_w)), dim)];
+                let (ruler, marker) = grid_ruler(view, spc, grid_w, tveee_core::builtin::guide::now(), off);
+                let mut head = vec![Span::styled(format!("  {}  ", fit(&format!("channel   {}", tveee_core::builtin::guide::day_hhmm(view, off).split(' ').next().unwrap_or("")), ch_w)), dim)];
                 match marker {
                     Some(m) => {
                         let r: Vec<char> = ruler.chars().collect();

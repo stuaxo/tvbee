@@ -210,7 +210,7 @@ pub(super) const HELP: &str = " everywhere
 impl App {
     /// Keys in the options dialog: ↑/↓ choose, Space/Enter toggle, Esc closes.
     pub(super) fn options_key(&mut self, i: usize, code: KeyCode) {
-        let n = crate::options::OPTIONS.len().max(1);
+        let n = tveee_core::options::OPTIONS.len().max(1);
         match code {
             KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') | KeyCode::Backspace => self.overlay = Overlay::None,
             KeyCode::Up => self.overlay = Overlay::Options((i + n - 1) % n),
@@ -222,9 +222,9 @@ impl App {
 
     /// Flip option `i` and save it.
     pub(super) fn toggle_option(&mut self, i: usize) {
-        let Some(o) = crate::options::OPTIONS.get(i) else { return };
-        let on = !crate::options::get(o.name);
-        self.note = match crate::options::set(o.name, on) {
+        let Some(o) = tveee_core::options::OPTIONS.get(i) else { return };
+        let on = !tveee_core::options::get(o.name);
+        self.note = match tveee_core::options::set(o.name, on) {
             Ok(()) => format!("{}: {}", o.label, if on { "on" } else { "off" }),
             Err(e) => format!("couldn't save the option: {e}"),
         };
@@ -278,8 +278,8 @@ impl App {
 
     pub(super) fn draw_options(&mut self, f: &mut Frame, sel: usize) {
         let mut text = Vec::new();
-        for (i, o) in crate::options::OPTIONS.iter().enumerate() {
-            let tick = if crate::options::get(o.name) { "[x]" } else { "[ ]" };
+        for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
+            let tick = if tveee_core::options::get(o.name) { "[x]" } else { "[ ]" };
             let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), Style::new().fg(Color::DarkGray))]);
             text.push(if i == sel { line.reversed() } else { line });
         }
@@ -287,7 +287,7 @@ impl App {
         text.push(Line::from("↑/↓ choose  space/⏎/click toggle  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray));
         let r = popup(f, " options ", text, Color::Blue);
         self.hits.push((r, Hit::Popup));
-        for i in 0..crate::options::OPTIONS.len() {
+        for i in 0..tveee_core::options::OPTIONS.len() {
             let y = r.y + 1 + u16::try_from(i).unwrap_or(0);
             self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::OptionItem(i)));
         }

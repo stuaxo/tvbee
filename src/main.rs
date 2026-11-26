@@ -6,17 +6,7 @@ mod plugins;
 #[cfg(test)]
 mod plugin_tests;
 
-// core's modules where the plugins here look for them (`crate::tv`, ...)
-// until they're crates of their own
-#[allow(unused_imports)]
-pub(crate) use tveee_core::{
-    actions, crypto, devtools, dotenv, error, favourites, frames, http, https, keys, labels, lineups, log, mdns, mock, more,
-    nowplaying, options, pairing, panel, plugin, provider, registry, store, tlog, tv, watch, ws, Ctx,
-};
-#[cfg(feature = "engine")]
-#[allow(unused_imports)]
-pub(crate) use tveee_core::{engine, preview};
-
+use tveee_core::{actions, dotenv, error, nowplaying, pairing, panel, plugin, provider, registry, tv, Ctx};
 use error::Error;
 use plugin::Mode;
 use registry::Command;

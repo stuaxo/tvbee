@@ -7,7 +7,7 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-# Debian 13's packaged Rust; the optional `ui` feature needs 1.88 (ratatui)
+# Debian 13's packaged Rust; the optional `ui` feature needs 1.90 (crates/tveee-tui)
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
 authors = ["Stuart Axon"]
@@ -15,6 +15,7 @@ repository = "https://github.com/stuaxo/tveee"
 
 [workspace.dependencies]
 tveee-core = { path = "crates/tveee-core" }
+tveee-tui = { path = "crates/tveee-tui" }
 tveee-plugin-philips = { path = "plugins/philips" }
 tveee-plugin-youtube = { path = "plugins/youtube" }
 tveee-plugin-kodi = { path = "plugins/kodi" }
@@ -49,16 +50,14 @@ tveee-plugin-philips.workspace = true
 tveee-plugin-youtube.workspace = true
 tveee-plugin-kodi.workspace = true
 serde_json.workspace = true
-ratatui = { workspace = true, optional = true }
-ratatui-image = { workspace = true, optional = true }
-image = { workspace = true, optional = true }
+tveee-tui = { workspace = true, optional = true }
 
 [features]
 default = []
 # the engine front ends run on: what's on, actions, previews, on worker threads
 engine = ["tveee-core/engine"]
 # `tveee ui`: interactive terminal remote (pulls in ratatui + crossterm)
-ui = ["engine", "dep:ratatui", "dep:ratatui-image", "dep:image"]
+ui = ["engine", "dep:tveee-tui"]
 
 [profile.release]
 strip = true

@@ -1917,14 +1917,12 @@ dependencies = [
 name = "tveee"
 version = "0.2.0"
 dependencies = [
- "image",
- "ratatui",
- "ratatui-image",
  "serde_json",
  "tveee-core",
  "tveee-plugin-kodi",
  "tveee-plugin-philips",
  "tveee-plugin-youtube",
+ "tveee-tui",
 ]
 
 [[package]]
@@ -1960,6 +1958,19 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "tveee-core",
+]
+
+[[package]]
+name = "tveee-tui"
+version = "0.2.0"
+dependencies = [
+ "image",
+ "ratatui",
+ "ratatui-image",
+ "tveee-core",
+ "tveee-plugin-kodi",
+ "tveee-plugin-philips",
+ "tveee-plugin-youtube",
 ]
 
 [[package]]

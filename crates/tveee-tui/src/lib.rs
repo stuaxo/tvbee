@@ -1,17 +1,17 @@
-//! `tveee ui`: an interactive terminal remote (ratatui). Only built with the
-//! `ui` cargo feature.
+//! `tveee ui`: an interactive terminal remote (ratatui), a front end on the
+//! core's engine. The `tveee` binary has it with its `ui` cargo feature.
 //!
 //! The screen shows what is on (as `nowplaying`) plus the volume, and keys
 //! control playback and volume. All TV traffic happens on a worker thread so
 //! the screen never waits on adb; the worker keeps one devtools connection
 //! open, which makes refreshing every second and exact seeking cheap.
 
-use crate::error::Result;
-use crate::actions::{ActionDescriptor, Params};
-use crate::nowplaying::{self, Activity, bar, progress_bar};
-use crate::plugins::apps::list_name;
-use crate::plugins::{apps, info, search};
-use crate::Ctx;
+use tveee_core::error::Result;
+use tveee_core::actions::{ActionDescriptor, Params};
+use tveee_core::nowplaying::{self, Activity, bar, progress_bar};
+use tveee_core::builtin::apps::list_name;
+use tveee_core::builtin::{apps, info, search};
+use tveee_core::Ctx;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -32,7 +32,7 @@ mod drawing;
 #[cfg(test)]
 mod tests;
 
-pub use crate::engine::*;
+use tveee_core::engine::*;
 pub use self::keymap::*;
 pub use self::guide::*;
 pub use self::preview::*;
@@ -266,8 +266,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     app.apply_overlay(next, action, actions);
                 } else if let (Overlay::Apps { .. }, KeyCode::Char('#')) = (app.overlay, k.code) {
                     // package names in the launcher, or not (remembered)
-                    let on = !crate::options::get(crate::options::SHOW_PACKAGES);
-                    app.note = match crate::options::set(crate::options::SHOW_PACKAGES, on) {
+                    let on = !tveee_core::options::get(tveee_core::options::SHOW_PACKAGES);
+                    app.note = match tveee_core::options::set(tveee_core::options::SHOW_PACKAGES, on) {
                         Ok(()) => if on { "showing package names" } else { "package names hidden" }.into(),
                         Err(e) => e.to_string(),
                     };
@@ -353,12 +353,12 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         match a.as_str() {
             "--no-mouse" => mouse = false,
             "--no-settle" => settle = false,
-            _ => return crate::error::usage(format!("usage: tveee ui [--no-mouse] [--no-settle]  (unexpected '{a}')")),
+            _ => return tveee_core::error::usage(format!("usage: tveee ui [--no-mouse] [--no-settle]  (unexpected '{a}')")),
         }
     }
     use std::io::IsTerminal;
     if !std::io::stdout().is_terminal() {
-        return crate::error::usage("ui needs a terminal");
+        return tveee_core::error::usage("ui needs a terminal");
     }
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App {
@@ -490,7 +490,7 @@ impl App {
             }
             CoreEvent::PreviewNote(n) => {
                 if !n.is_empty() && n != self.preview_note {
-                    crate::tlog!("preview: {n}");
+                    tveee_core::tlog!("preview: {n}");
                 }
                 self.preview_note = n;
             }
@@ -586,7 +586,7 @@ impl App {
             }
             // the pairing the panel says it needs
             Input::Pair => match self.panel_view() {
-                Some(&crate::panel::View::NeedsPairing { pairing, .. }) => {
+                Some(&tveee_core::panel::View::NeedsPairing { pairing, .. }) => {
                     self.note = "asking the TV to pair...".into();
                     let _ = actions.send(Action::PairStart(pairing));
                 }
@@ -636,7 +636,7 @@ impl App {
         }
         match (was, next, action) {
             (_, _, Some(Action::Run { id, args })) => {
-                self.note = format!("{}...", crate::actions::find(&self.menu, id).map_or(id, |m| m.title));
+                self.note = format!("{}...", tveee_core::actions::find(&self.menu, id).map_or(id, |m| m.title));
                 // with text typed (e.g. "open a link"): something new should come up
                 if !args.is_empty() {
                     self.settle(self.note.clone(), None);

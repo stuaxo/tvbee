@@ -1,3 +1,19 @@
+/// Every vendor plugin's apps and providers, as the binary installs them
+/// (call before looking any up).
+fn install_all() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tveee_core::labels::ignore_cache();
+        let mut apps = tveee_plugin_philips::apps();
+        apps.extend(tveee_plugin_youtube::apps());
+        tveee_core::builtin::apps::install(apps);
+        let mut providers = tveee_plugin_philips::providers();
+        providers.extend(tveee_plugin_kodi::providers());
+        providers.extend(tveee_plugin_youtube::providers());
+        tveee_core::provider::install(providers);
+    });
+}
+
 #[test]
 fn guide_sub_headers() {
     use GuideItem::{Header, Row};
@@ -19,15 +35,15 @@ fn guide_sub_headers() {
 #[test]
 fn guide_filters_and_moves() {
     let row = |id: u32, n: &str, name: &str, now: &str, fav: bool| GuideRow {
-        channel: crate::provider::Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: fav, delivery: None, dvb: None },
-        events: vec![crate::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None, info: None }],
+        channel: tveee_core::provider::Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: fav, delivery: None, dvb: None },
+        events: vec![tveee_core::provider::Event { channel: id, title: now.into(), start: 0, end: 1, genre: None, info: None }],
     };
     let rows = [
         row(159, "1", "BBC ONE Lon", "Countryfile", true),
         row(158, "2", "BBC TWO", "Race Across the World", false),
         row(156, "4", "Channel 4", "50 First Dates", false),
         row(143, "18", "More 4", "Come Dine with Me", true),
-        GuideRow { channel: crate::provider::Channel { radio: true, ..row(12, "722", "BBC Essex", "Dotun Adebayo", false).channel }, events: Vec::new() },
+        GuideRow { channel: tveee_core::provider::Channel { radio: true, ..row(12, "722", "BBC Essex", "Dotun Adebayo", false).channel }, events: Vec::new() },
     ];
     let ids = |tab, q| guide_shown(&rows, tab, q, 0).iter().map(|r| r.channel.id).collect::<Vec<_>>();
     assert_eq!(ids(GuideTab::All, ""), [159, 158, 156, 143, 12]);
@@ -47,7 +63,7 @@ fn guide_filters_and_moves() {
     assert_eq!(guide_move(&[159, 143], 158, KeyCode::Char('x')), 159); // filtered away: first
     assert_eq!(guide_move(&[], 158, KeyCode::Down), 158);
     // later in the day: what's on then, and after it
-    let ev = |title: &str, start, end| crate::provider::Event { channel: 1, title: title.into(), start, end, genre: None, info: None };
+    let ev = |title: &str, start, end| tveee_core::provider::Event { channel: 1, title: title.into(), start, end, genre: None, info: None };
     let day = GuideRow { channel: rows[0].channel.clone(), events: vec![ev("Apple", 0, 100), ev("Banana", 100, 200), ev("Cherry", 250, 300)] };
     let titles = |t| { let (a, b) = day.at(t); (a.map(|e| e.title.clone()), b.map(|e| e.title.clone())) };
     assert_eq!(titles(50), (Some("Apple".into()), Some("Banana".into())));
@@ -209,7 +225,7 @@ fn keys_by_mode() {
     assert_eq!(k(KeyCode::Char('x'), Mode::Player), Input::Nothing);
 }
 
-fn ok(_: &crate::actions::Cx, _: &[String]) -> Result<crate::actions::Output> {
+fn ok(_: &tveee_core::actions::Cx, _: &[String]) -> Result<tveee_core::actions::Output> {
     Ok(Default::default())
 }
 
@@ -299,7 +315,7 @@ fn searchables() -> Vec<search::Searchable> {
 
 #[test]
 fn search_box_targets() {
-    crate::plugins::install_all();
+    install_all();
     let s = searchables();
     // the app in front first, then the searchable ones
     let t = search_targets(Some("com.netflix.ninja"), &s);
@@ -315,7 +331,7 @@ fn search_box_targets() {
 
 #[test]
 fn search_box_keys() {
-    crate::plugins::install_all();
+    install_all();
     let t = search_targets(Some("com.netflix.ninja"), &searchables());
     let none = KeyModifiers::NONE;
     let mut q = String::new();
@@ -371,7 +387,7 @@ fn rows(pm: &str, guessed: &[apps::Guess]) -> Vec<Entry> {
 
 #[test]
 fn launcher_keys() {
-    crate::plugins::install_all();
+    install_all();
     let all = rows("package:com.google.android.youtube.tv\npackage:org.videolan.vlc\npackage:org.xbmc.kodi\n", &[]);
     let list = tab_list(&all, AppTab::Known);
     // home, youtube, kodi, vlc (table order)
@@ -444,7 +460,7 @@ fn non_default_home_apps_go_to_other() {
 
 #[test]
 fn launcher_lists_other_tv_apps() {
-    crate::plugins::install_all();
+    install_all();
     let g = |p: &str, k, c: Option<&str>| apps::Guess { package: p.into(), kind: k, component: c.map(Into::into) };
     let guessed = vec![
         g("nextapp.fx", apps::Kind::Player, Some("nextapp.fx/.ui.Launcher")),

@@ -3,9 +3,9 @@ use tveee_plugin_kodi as kodi;
 use tveee_plugin_philips::{self as philips, ambilight};
 use tveee_plugin_youtube as youtube;
 #[cfg(feature = "ui")]
-pub mod ui;
+use tveee_tui as ui;
 
-use crate::plugin::Plugin;
+use tveee_core::plugin::Plugin;
 // the built-in plugins, from core
 pub use tveee_core::builtin::*;
 
@@ -22,8 +22,8 @@ pub fn all() -> Vec<Plugin> {
         Plugin::builtin("debloat", "disabling unwanted system apps, reversibly", debloat::actions),
         Plugin::builtin("diagnose", "finding the TV and checking the setup", diagnose::actions),
         Plugin::builtin("guide", "programme guides and content providers", guide::actions),
-        Plugin::builtin("options", "tveee's own settings", crate::options::actions),
-        Plugin::builtin("pairing", "pairing tveee with services on the TV", crate::pairing::actions),
+        Plugin::builtin("options", "tveee's own settings", tveee_core::options::actions),
+        Plugin::builtin("pairing", "pairing tveee with services on the TV", tveee_core::pairing::actions),
         Plugin::builtin("display", "seeing the TV screen", display::actions),
         Plugin::builtin("info", "querying the TV's state", info::actions),
         Plugin::builtin("input", "remote-control keys, text, inputs and channels", input::actions),
@@ -59,10 +59,10 @@ pub fn all() -> Vec<Plugin> {
 pub fn install_all() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        crate::labels::ignore_cache();
+        tveee_core::labels::ignore_cache();
         let all = all();
         apps::install(all.iter().flat_map(|p| (p.apps)()).collect());
-        crate::provider::install(all.iter().flat_map(|p| (p.providers)()).collect());
-        crate::pairing::install(all.iter().flat_map(|p| (p.pairings)()).collect());
+        tveee_core::provider::install(all.iter().flat_map(|p| (p.providers)()).collect());
+        tveee_core::pairing::install(all.iter().flat_map(|p| (p.pairings)()).collect());
     });
 }

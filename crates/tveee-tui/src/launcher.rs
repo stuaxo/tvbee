@@ -122,7 +122,7 @@ impl App {
         let pkg = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
         let all = self.st.apps_list();
         let list = tab_list(all, tab);
-        let show_pkgs = crate::options::get(crate::options::SHOW_PACKAGES);
+        let show_pkgs = tveee_core::options::get(tveee_core::options::SHOW_PACKAGES);
         // the tab labels, with counts
         let labels: Vec<(AppTab, String)> = [AppTab::Known, AppTab::Other]
             .into_iter()

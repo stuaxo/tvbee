@@ -1,0 +1,24 @@
+[package]
+name = "tveee-tui"
+version = "0.2.0"
+description = "tveee's terminal remote (tveee ui), on the core's engine"
+edition.workspace = true
+# ratatui needs 1.88, ratatui-image's quantette 1.90 (the rest of tveee
+# builds with Debian 13's 1.85)
+rust-version = "1.90"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tveee-core = { workspace = true, features = ["engine"] }
+ratatui.workspace = true
+ratatui-image.workspace = true
+image.workspace = true
+
+# the tests use real plugins' apps and providers (YouTube's search link, ...)
+[dev-dependencies]
+tveee-plugin-philips.workspace = true
+tveee-plugin-youtube.workspace = true
+tveee-plugin-kodi.workspace = true
