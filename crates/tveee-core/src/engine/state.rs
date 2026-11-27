@@ -244,6 +244,10 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
                 CoreEvent::Changed(Change::Info)
             }
             Msg::Guide(g) => {
+                if let Err(e) = &g {
+                    // the ui shows it short: the whole of it goes here
+                    crate::tlog!("guide FAILED: {e}");
+                }
                 let news = g.as_ref().ok().and_then(|g| g.news.clone());
                 update(&mut |st| (st.guide, st.guide_loading) = (Some(Arc::new(g.clone())), false));
                 if events.send(CoreEvent::Changed(Change::Guide)).is_err() {

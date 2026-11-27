@@ -174,8 +174,22 @@ impl App {
             let line = Line::from(format!(" {dot} {:<wide$}  {extra:<12}{on:<10}{pkg_col}", e.name));
             rows.push((if i == sel { line.reversed() } else { line }, Some(i)));
         }
-        // scroll so the highlighted row stays in view
-        let room = usize::from(f.area().height.saturating_sub(11)).max(3);
+        // the hints, fitted to the terminal's width
+        let hint_w = usize::from(f.area().width.saturating_sub(4));
+        let hints_for = |more: &str| -> Vec<String> {
+            [
+                format!("↑/↓ choose  ⏎ open (or to front)  space actions  / search{more}"),
+                "● running  ⊘ always running: Android won't let it close".to_string(),
+                "letter = jump  tab/←/→ switch  # package names  click / right-click  esc closes   F1 guide  F3 remote".to_string(),
+            ]
+            .iter()
+            .flat_map(|h| super::drawing::wrap_keep(h, hint_w, 0))
+            .collect()
+        };
+        // scroll so the highlighted row stays in view (room for the hints,
+        // with "(scrolls)" if it comes to that)
+        let hint_rows = hints_for("  (scrolls)").len();
+        let room = usize::from(f.area().height).saturating_sub(8 + hint_rows).max(3);
         let at = rows.iter().position(|(_, i)| *i == Some(sel)).unwrap_or(0);
         let start = at.saturating_sub(room.saturating_sub(1)).min(rows.len().saturating_sub(room));
         let scrolls = rows.len() > room;
@@ -190,10 +204,7 @@ impl App {
         let mut text = vec![tab_line, Line::default()];
         text.extend(shown);
         text.push(Line::default());
-        let more = if scrolls { "  (scrolls)" } else { "" };
-        text.push(Line::from(format!("↑/↓ choose  ⏎ open (or to front)  space actions  / search{more}")).fg(Color::DarkGray));
-        text.push(Line::from("● running  ⊘ always running: Android won't let it close").fg(Color::DarkGray));
-        text.push(Line::from("letter = jump  tab/←/→ switch  # package names  click / right-click  esc closes   F1 guide  F3 remote").fg(Color::DarkGray));
+        text.extend(hints_for(if scrolls { "  (scrolls)" } else { "" }).into_iter().map(|h| Line::from(h).fg(Color::DarkGray)));
         let r = popup(f, " launch an app ", text, Color::Green);
         if behind {
             // under another pop-up: dim, and not clickable

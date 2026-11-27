@@ -604,7 +604,7 @@ impl App {
                     Mode::Player => "player mode: arrows seek and change volume".into(),
                 };
             }
-            Input::ToggleHelp => self.overlay = Overlay::Help,
+            Input::ToggleHelp => self.overlay = Overlay::Help(0),
             Input::ToggleInfo => self.info = !self.info,
             Input::ToggleAmbilight if self.panel_id().is_none() => {
                 self.note = "no Ambilight here that tveee can control".into();
@@ -851,7 +851,7 @@ impl App {
             (Overlay::Logs(_), Some(Hit::Popup)) => {}
             (Overlay::Logs(_), _) => self.overlay = Overlay::None,
             // a click elsewhere closes the pop-up (cancelling a confirmation)
-            (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
+            (Overlay::Help(_) | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
                 self.apply_overlay(Overlay::None, None, actions)
             }
             (Overlay::None, Some(Hit::Input(i))) => return self.apply(i, actions),

@@ -1,0 +1,21 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 188
+expression: s
+---
+┌ keys - ↑/↓ scroll, any other key closes ───── 1-14 of 70 ┐
+│ everywhere                                               │
+│   space p  play/pause                                    │
+│   ⌫        back                                          │
+│   h        home                                          │
+│   [ ]      seek -/+ 60s                                  │
+│   0-9      jump to 0%-90%                                │
+│   + -      volume                                        │
+│   m        mute/unmute                                   │
+│   r        refresh                                       │
+│   tab      switch mode                                   │
+│   .        more (power, mirror, ...)                     │
+│   : ctrl+p commands: everything tveee can do, found by   │
+│            typing a few letters                          │
+│            (the ui's own too: the log of what tveee did  │
+└──────────────────────────────────────────────────────────┘
