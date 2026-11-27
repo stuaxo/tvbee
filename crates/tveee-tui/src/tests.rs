@@ -596,3 +596,13 @@ fn palette_keys() {
     assert_eq!(input_for(KeyCode::Char('p'), KeyModifiers::CONTROL, Mode::Remote), Input::OpenPalette);
     assert_eq!(input_for(KeyCode::Char(':'), KeyModifiers::NONE, Mode::Remote), Input::Do(Action::Text(":".into())));
 }
+
+#[test]
+fn quick_keys() {
+    let k = |c| input_for(KeyCode::Char(c), KeyModifiers::NONE, Mode::Player);
+    assert_eq!(k('F'), Input::Do(Action::Run { id: "apps.free", args: vec![] }));
+    assert_eq!(k('S'), Input::Do(Action::Run { id: "power.sleep", args: vec![] }));
+    assert_eq!(k('R'), Input::RestartFront);
+    // typed into the TV in remote mode
+    assert_eq!(input_for(KeyCode::Char('F'), KeyModifiers::NONE, Mode::Remote), Input::Do(Action::Text("F".into())));
+}

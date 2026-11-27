@@ -3,6 +3,7 @@ source: crates/tveee-tui/src/snapshots.rs
 expression: "screen(&mut app(kodi_paused()), CORNER)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
+│load 4.82▲ │ 310 MB [F]ree │ [:] commands                 │
 │what     Paused in Kodi                                   │
 │title    Episode 3 (Off-Road)                             │
 │progress ━━━━━━━━━━━━━┃───────── 27:56 / 48:47 (57%)      │
@@ -12,9 +13,8 @@ expression: "screen(&mut app(kodi_paused()), CORNER)"
 │                                                          │
 │                                                          │
 │                                                          │
-│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-│
-│ m  mute   ⌫  back   h  home   tab  remote   i  info      │
-│ v  preview   a  apps   /  search   g  guide   ,  options │
-│ .  more   ?  help   q  quit                              │
+│                                                          │
+│                                                          │
+│ space  play   ←     →     :  cmds   ?  help   q  quit    │
 │                                                          │
 └──────────────────────────────────────────────────────────┘

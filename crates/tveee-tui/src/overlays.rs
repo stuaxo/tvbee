@@ -203,6 +203,8 @@ pub(super) const HELP: &str = " everywhere
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
    : ctrl+p commands: everything tveee can do, found by typing a few letters
+   F        free memory (force-stop idle apps)   S  sleep   R  restart the app
+            in front, coming back where it was (YouTube, Kodi)
    i        system info      a      launch an app (space there: front / restart / close)
    l        Ambilight panel (TVs with one; P there pairs if needed)
    L        change the Ambilight: power, style and setting, Hue, any light's colour

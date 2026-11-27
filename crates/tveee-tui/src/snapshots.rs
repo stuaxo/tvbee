@@ -67,6 +67,11 @@ fn kodi_paused() -> TvState {
         power: Some("Awake".into()),
         focus: Some("org.xbmc.kodi/org.xbmc.kodi.Main".into()),
         kind: Some("player".into()),
+        system: tveee_core::builtin::info::System {
+            load: Some((4.82, 3.10, 2.40)),
+            mem: Some(tveee_core::builtin::info::Mem { total: 1_374_208, free: 60_000, available: 317_440, swap_total: 524_288, swap_free: 200_000 }),
+            ..Default::default()
+        },
         ..Snapshot::default()
     });
     st

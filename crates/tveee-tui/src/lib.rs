@@ -404,6 +404,9 @@ pub fn actions() -> Vec<ActionDescriptor> {
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
          \x20 :  commands (or Ctrl-P): everything tveee can do, found by typing a\n\
          \x20    few letters of it\n\
+         \x20 F  free memory   S  sleep   R  restart the app in front, where it was\n\
+         \x20 The top line: the TV's load and free memory, [F]ree, [l] the Ambilight,\n\
+         \x20 [:] commands (click them too). A small pane keeps one row of keys.\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
          \x20 l  Ambilight panel (Philips TVs that have it): state and each light's\n\
          \x20    colour; L (or clicking it) changes power, style, Hue and any light's\n\
@@ -621,6 +624,19 @@ impl App {
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
             Input::OpenPalette => self.open_palette(),
+            Input::RestartFront => match self.st.snap.as_ref().and_then(front_pkg) {
+                Some(pkg) if !apps::passes_through(&pkg) => {
+                    self.note = format!("restarting {}...", app_name(&pkg));
+                    self.settle(self.note.clone(), Some(pkg.clone()));
+                    let _ = actions.send(Action::Restart { target: pkg.clone(), pkg });
+                }
+                _ => self.note = "nothing in front to restart".into(),
+            },
+            // free and sleep: what they're doing, till they say
+            Input::Do(Action::Run { id, args }) => {
+                self.note = format!("{}...", tveee_core::actions::find(&self.actions, id).map_or(id, |a| a.title));
+                let _ = actions.dispatch(id, args);
+            }
             Input::OpenApps => {
                 // start on the app that's in front, if it's in the list
                 let pkg = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f));
