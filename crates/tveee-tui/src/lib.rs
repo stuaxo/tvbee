@@ -61,8 +61,11 @@ struct App {
     actions: Vec<ActionDescriptor>,
     /// Where the clickable things were drawn last frame.
     hits: Vec<(ratatui::layout::Rect, Hit)>,
-    /// Show the system panel (memory, storage, ...).
-    info: bool,
+    /// Show the system panel (memory, storage, ...): None until `i` is
+    /// pressed (then shown when the screen is wide, see `wide`).
+    info: Option<bool>,
+    /// Whether the last frame was wide enough for the side column.
+    wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
     /// What has been typed into the open prompt.
@@ -472,7 +475,8 @@ impl App {
             menu: actions.iter().filter(|a| a.key.is_some()).copied().collect(),
             actions,
             hits: Vec::new(),
-            info: false,
+            info: None,
+            wide: false,
             apps_tab: AppTab::Known,
             prompt: String::new(),
             search_targets: Vec::new(),
@@ -605,7 +609,7 @@ impl App {
                 };
             }
             Input::ToggleHelp => self.overlay = Overlay::Help(0),
-            Input::ToggleInfo => self.info = !self.info,
+            Input::ToggleInfo => self.info = Some(!self.info_shown()),
             Input::ToggleAmbilight if self.panel_id().is_none() => {
                 self.note = "no Ambilight here that tveee can control".into();
             }

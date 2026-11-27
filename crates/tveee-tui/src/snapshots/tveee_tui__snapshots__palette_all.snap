@@ -5,16 +5,16 @@ expression: "screen(&mut a, DESKTOP)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
 │load 4.82▲ │ 310 MB [F]ree │ [:] commands                                                                             │
-│what     Paused in Kodi                                                                                               │
-│title    Episode 3 (Off-Road)                                                                                         │
-│progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┃─────────────────────────────────── 27:56 / 48:47 (57%)      │
-│audio    AAC-LC  AAC                                                                                                  │
-│                                                                                                                      │
-│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
-│                         ┌ commands ──────────────────────────────────────────────────── 19 ┐                         │
-│                         │> █                                                               │                         │
-│                         │────────────────────────────────────────────────────────────────  │                         │
-│                         │ kodi: next subtitles                                      kodi   │                         │
+│what     Paused in Kodi                                                ┌ system - i hides ───────────────────────────┐│
+│title    Episode 3 (Off-Road)                                          │power    Awake                               ││
+│progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │app      [player] org.xbmc.kodi              ││
+│audio    AAC-LC  AAC                                                   │memory   1032/1342 MB used, 310 MB free      ││
+│                                                                       │1342 MB                                      ││
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │                                             ││
+│                         ┌ commands ──────────────────────────────────────────────────── 19 ┐                        ││
+│                         │> █                                                               │12 MB                   ││
+│                         │────────────────────────────────────────────────────────────────  │40                      ││
+│                         │ kodi: next subtitles                                      kodi   │────────────────────────┘│
 │                         │ kodi: next audio track                                    kodi   │                         │
 │                         │ kodi: find in the library…                                kodi   │                         │
 │                         │ volume…                                                  media   │                         │
