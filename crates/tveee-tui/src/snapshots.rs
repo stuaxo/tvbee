@@ -473,7 +473,7 @@ fn palette_over_the_log() {
     let (tx, _rx) = std::sync::mpsc::channel();
     let h = Handle::new(tx, Arc::new(Mutex::new(Arc::new(kodi_paused()))));
     let mut a = app_with(kodi_paused(), actions());
-    a.overlay = Overlay::Logs(0);
+    a.overlay = Overlay::Logs { at: None, from: None };
     // : opens the commands over the log, which stays drawn under them
     assert!(a.palette_wanted(KeyCode::Char(':'), KeyModifiers::NONE));
     a.palette_over();
@@ -482,7 +482,7 @@ fn palette_over_the_log() {
     assert!(s.contains("commands") && s.contains("log"), "{s}");
     // Esc: back to the log
     a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
-    assert_eq!(a.overlay, Overlay::Logs(0));
+    assert_eq!(a.overlay, Overlay::Logs { at: None, from: None });
     // over the guide, its filter kept: : is typed there, ^P opens them
     a.overlay = Overlay::Guide { tab: GuideTab::All, at: 0 };
     a.prompt = "bbc".into();
@@ -497,4 +497,50 @@ fn palette_over_the_log() {
     a.open_palette();
     a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::None);
+}
+
+#[test]
+fn log_select_and_save() {
+    tveee_core::log::keep_recent();
+    let mark = format!("log-test-{}", std::process::id());
+    for i in 0..5 {
+        tveee_core::tlog!("{mark} line {i}");
+    }
+    let (first, lines) = tveee_core::log::recent_numbered();
+    let n0 = first + lines.iter().position(|l| l.contains(&format!("{mark} line 0"))).expect("logged");
+    let mut a = app(kodi_paused());
+    a.overlay = Overlay::Logs { at: Some(n0), from: None };
+    // shift+↓ twice: three lines selected, from line 0
+    a.logs_key(Some(n0), None, KeyCode::Down, KeyModifiers::SHIFT);
+    let Overlay::Logs { at, from } = a.overlay else { panic!() };
+    a.logs_key(at, from, KeyCode::Down, KeyModifiers::SHIFT);
+    assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: Some(n0) });
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("3 lines selected"), "{s}");
+    let (first, lines) = tveee_core::log::recent_numbered();
+    let picked = super::logview::lines_between(first, &lines, n0, n0 + 2);
+    assert!(picked.contains(&format!("{mark} line 0")) && picked.contains(&format!("{mark} line 2")) && !picked.contains(&format!("{mark} line 3")), "{picked}");
+    // esc lets go of the selection, then closes
+    a.logs_key(Some(n0 + 2), Some(n0), KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: None });
+    // s: a file name asked for (one offered), saved, back to the log
+    a.logs_key(Some(n0 + 2), None, KeyCode::Char('s'), KeyModifiers::NONE);
+    assert_eq!(a.overlay, Overlay::SaveLog);
+    assert!(a.prompt.starts_with("tveee-log-") && a.prompt.ends_with(".txt"), "{}", a.prompt);
+    let path = std::env::temp_dir().join(format!("{mark}.txt"));
+    let _ = std::fs::remove_file(&path);
+    a.prompt = path.display().to_string();
+    a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
+    let saved = std::fs::read_to_string(&path).expect("saved");
+    assert!(saved.contains(&format!("{mark} line 4")), "{saved}");
+    assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: None });
+    // again, the same name: asked before writing over it
+    a.logs_key(Some(n0 + 2), None, KeyCode::Char('s'), KeyModifiers::NONE);
+    a.prompt = path.display().to_string();
+    a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(a.overlay, Overlay::SaveLog);
+    assert!(a.note.contains("again writes over it"), "{}", a.note);
+    a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
+    assert!(a.note.starts_with("saved"), "{}", a.note);
+    let _ = std::fs::remove_file(&path);
 }

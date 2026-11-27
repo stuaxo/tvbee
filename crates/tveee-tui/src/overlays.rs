@@ -22,7 +22,11 @@ pub enum Overlay {
     /// `App::prompt`).
     Palette(usize),
     /// The log, scrolled up this many lines from the end.
-    Logs(usize),
+    /// The log: line `at` (by its number) highlighted, or None following
+    /// the newest; `from`: where a selection starts.
+    Logs { at: Option<usize>, from: Option<usize> },
+    /// Typing the file to save the log to (the name is `App::prompt`).
+    SaveLog,
     /// The app launcher: which tab, and the highlighted app in it.
     Apps { tab: AppTab, sel: usize },
     /// Typing what action `id` needs (the text is `App::prompt`).
@@ -149,14 +153,9 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         Overlay::Prompt(id) => (Overlay::Prompt(id), None),
         // handled by App::palette_key
         Overlay::Palette(sel) => (Overlay::Palette(sel), None),
-        Overlay::Logs(up) => match code {
-            KeyCode::Up => (Overlay::Logs(up + 1), None),
-            KeyCode::Down => (Overlay::Logs(up.saturating_sub(1)), None),
-            KeyCode::PageUp => (Overlay::Logs(up + 10), None),
-            KeyCode::PageDown => (Overlay::Logs(up.saturating_sub(10)), None),
-            KeyCode::End => (Overlay::Logs(0), None),
-            _ => (Overlay::None, None),
-        },
+        // handled by App::logs_key / save_log_key
+        Overlay::Logs { at, from } => (Overlay::Logs { at, from }, None),
+        Overlay::SaveLog => (Overlay::SaveLog, None),
         Overlay::Search(i) => (Overlay::Search(i), None),
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
@@ -408,7 +407,8 @@ impl App {
             Overlay::Search(at) => self.draw_search(f, at),
             Overlay::Prompt(id) => self.draw_prompt(f, id),
             Overlay::Palette(sel) => self.draw_palette(f, sel),
-            Overlay::Logs(up) => self.draw_logs(f, up),
+            Overlay::Logs { at, from } => self.draw_logs(f, at, from),
+            Overlay::SaveLog => self.draw_save_log(f),
             Overlay::Ambilight { row, col } => self.draw_ambi_dialog(f, row, col),
             Overlay::AmbiColour { row, col } => self.draw_ambi_colour(f, row, col),
             Overlay::Pin => self.draw_pin(f),
@@ -575,33 +575,6 @@ impl App {
     }
 
     /// The log's last lines, in most of the screen.
-    pub(super) fn draw_logs(&mut self, f: &mut Frame, up: usize) {
-        let area = f.area();
-        let r = ratatui::layout::Rect {
-            x: area.x + area.width / 20,
-            y: area.y + area.height / 10,
-            width: area.width - area.width / 10,
-            height: area.height - area.height / 5,
-        };
-        let lines = tveee_core::log::recent();
-        let room = usize::from(r.height.saturating_sub(2));
-        let up = up.min(lines.len().saturating_sub(room));
-        let end = lines.len() - up;
-        let shown: Vec<Line> = if lines.is_empty() {
-            vec![Line::from("nothing logged yet").italic()]
-        } else {
-            lines[end.saturating_sub(room)..end].iter().map(|l| Line::from(l.clone())).collect()
-        };
-        f.render_widget(ratatui::widgets::Clear, r);
-        let title = format!(" log - {} lines (TVEEE_LOG=<file> keeps them) ", lines.len());
-        let block = Block::bordered()
-            .title(title)
-            .title_bottom(Line::from(" ↑↓ pgup/pgdn scroll  end: newest  any other key closes ").right_aligned())
-            .border_style(Style::new().fg(Color::DarkGray));
-        f.render_widget(Paragraph::new(shown).block(block), r);
-        self.hits.push((r, Hit::Popup));
-    }
-
     pub(super) fn draw_pin(&mut self, f: &mut Frame) {
         let text = vec![
             Line::from("Type the PIN the TV is showing:"),

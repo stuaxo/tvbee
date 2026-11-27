@@ -89,6 +89,26 @@ pub fn copy(url: &str) -> String {
     }
 }
 
+/// Copy `text` (lines: their breaks kept, anything else that could start
+/// an escape taken out) as [`copy`] does; `what` names it in what's said.
+pub fn copy_text(text: &str, what: &str) -> String {
+    let text = text.lines().map(clean).collect::<Vec<_>>().join("\n");
+    let mut out = std::io::stdout();
+    let _ = out.write_all(osc52_raw(&text).as_bytes());
+    let _ = out.flush();
+    let tools: &[&[&str]] = &[&["wl-copy"], &["xclip", "-selection", "clipboard"], &["xsel", "-b", "-i"], &["pbcopy"], &["clip.exe"]];
+    if desktop() && tools.iter().any(|t| pipe(t, &text)) {
+        format!("copied {what}")
+    } else {
+        format!("copied {what} (through the terminal: if it allows that)")
+    }
+}
+
+/// [`osc52`] for text already cleaned (its line breaks kept).
+fn osc52_raw(text: &str) -> String {
+    format!("\x1b]52;c;{}\x07", tveee_core::crypto::base64(text.as_bytes()))
+}
+
 /// Open `url` in this computer's browser. Only web links: anything else
 /// (smb://, file://) is better copied.
 pub fn open(url: &str) -> String {

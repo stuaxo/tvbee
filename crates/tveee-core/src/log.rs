@@ -26,6 +26,10 @@ pub const RECENT: usize = 400;
 
 static KEEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static LINES: Mutex<std::collections::VecDeque<String>> = Mutex::new(std::collections::VecDeque::new());
+/// How many lines have been kept since the start (the oldest kept is
+/// number TOTAL - its length): a line's number stays the same while newer
+/// ones push older ones out.
+static TOTAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Keep the last [`RECENT`] lines in memory from now on (a front end
 /// showing them).
@@ -36,6 +40,14 @@ pub fn keep_recent() {
 /// The lines kept, oldest first (none unless [`keep_recent`] was called).
 pub fn recent() -> Vec<String> {
     LINES.lock().map(|l| l.iter().cloned().collect()).unwrap_or_default()
+}
+
+/// The lines kept, oldest first, and the number of the first (counting
+/// every line kept since the start; see [`recent`]).
+pub fn recent_numbered() -> (usize, Vec<String>) {
+    let Ok(l) = LINES.lock() else { return (0, Vec::new()) };
+    let total = TOTAL.load(std::sync::atomic::Ordering::Relaxed);
+    (total.saturating_sub(l.len()), l.iter().cloned().collect())
 }
 
 /// Whether there's a log to write to (a file, or lines kept in memory).
@@ -62,6 +74,7 @@ pub fn write(args: std::fmt::Arguments) {
                 l.pop_front();
             }
             l.push_back(text.trim_end().to_string());
+            TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
     if let Some(Ok(mut f)) = file().map(Mutex::lock) {

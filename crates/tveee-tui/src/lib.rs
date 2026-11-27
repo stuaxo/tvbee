@@ -31,6 +31,7 @@ mod overlays;
 mod palette;
 mod drawing;
 mod links;
+mod logview;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -68,6 +69,16 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// The log as it was before saving it was asked for (back to it after).
+    log_back: Option<Overlay>,
+    /// The file name ⏎ was pressed for that's there already (⏎ again
+    /// writes over it).
+    save_confirm: Option<String>,
+    /// The log's top line shown (by number), so the view only moves as far
+    /// as keeps the highlight in it.
+    log_top: Option<usize>,
+    /// A drag over the log's lines started (it selects).
+    log_drag: bool,
     /// tveee's options as this app reads them: None, the saved ones; tests
     /// give each app its own (never the real file, nor each other's).
     opts: Option<Vec<(String, bool)>>,
@@ -298,6 +309,10 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
+                } else if let Overlay::Logs { at, from } = app.overlay {
+                    app.logs_key(at, from, k.code, k.modifiers);
+                } else if let Overlay::SaveLog = app.overlay {
+                    app.save_log_key(k.code, k.modifiers);
                 } else if let Overlay::Options(i) = app.overlay {
                     app.options_key(i, k.code);
                 } else if let Overlay::Guide { tab, at } = app.overlay {
@@ -372,6 +387,19 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                 }
             }
             Event::Mouse(m) => match m.kind {
+                // the log's lines: shift+click selects to there; a drag selects
+                MouseEventKind::Down(MouseButton::Left) if matches!((app.overlay, app.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) => {
+                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
+                        app.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
+                        app.log_drag = true;
+                    }
+                }
+                MouseEventKind::Drag(MouseButton::Left) if app.log_drag => {
+                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
+                        app.log_click(n, true);
+                    }
+                }
+                MouseEventKind::Up(MouseButton::Left) => app.log_drag = false,
                 MouseEventKind::Down(MouseButton::Left) => {
                     if app.click(m.column, m.row, actions) {
                         return Ok(());
@@ -494,6 +522,10 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            log_back: None,
+            save_confirm: None,
+            log_top: None,
+            log_drag: false,
             opts: None,
             system_watching: false,
             under: None,
@@ -683,7 +715,7 @@ impl App {
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
             Input::OpenPalette => self.open_palette(),
-            Input::ShowLogs => self.overlay = Overlay::Logs(0),
+            Input::ShowLogs => self.overlay = Overlay::Logs { at: None, from: None },
             Input::ToggleUrl => match self.url() {
                 Some(_) => self.url_full = !self.url_full,
                 None => self.note = "no link for what's on".into(),
@@ -886,8 +918,11 @@ impl App {
             (Overlay::AppActions { tab, sel, .. }, _) => self.overlay = Overlay::Apps { tab, sel },
             (Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), Some(Hit::Popup)) => {}
             // the log: a click inside does nothing, outside closes it
-            (Overlay::Logs(_), Some(Hit::Popup)) => {}
-            (Overlay::Logs(_), _) => self.overlay = Overlay::None,
+            (Overlay::Logs { .. }, Some(Hit::LogLine(n))) => self.log_click(n, false),
+            (Overlay::Logs { .. }, Some(Hit::Popup)) => {}
+            (Overlay::Logs { .. }, _) => self.overlay = Overlay::None,
+            (Overlay::SaveLog, Some(Hit::Popup)) => {}
+            (Overlay::SaveLog, _) => self.overlay = self.log_back.take().unwrap_or(Overlay::None),
             // a click elsewhere closes the pop-up (cancelling a confirmation)
             (Overlay::Help(_) | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
                 let palette = matches!(self.overlay, Overlay::Palette(_));
@@ -926,7 +961,12 @@ impl App {
     fn scroll(&mut self, up: bool, actions: &Handle) {
         match self.overlay {
             // the wheel scrolls the log, three lines a notch
-            Overlay::Logs(n) => self.overlay = Overlay::Logs(if up { n + 3 } else { n.saturating_sub(3) }),
+            Overlay::Logs { .. } => {
+                for _ in 0..3 {
+                    let Overlay::Logs { at, from } = self.overlay else { break };
+                    self.logs_key(at, from, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE);
+                }
+            }
             Overlay::Menu(_) => {
                 let code = if up { KeyCode::Up } else { KeyCode::Down };
                 let (next, action) = overlay_key(self.overlay, code, &self.menu);
