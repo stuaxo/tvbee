@@ -314,8 +314,24 @@ impl App {
 
     /// Whether vendor plugin `p` is ticked: its saved choice, else whether
     /// it's on now.
-    pub(super) fn plugin_ticked(p: &tveee_core::plugin::PluginState) -> bool {
-        tveee_core::options::plugin(p.name).unwrap_or(p.enabled)
+    pub(super) fn plugin_ticked(&self, p: &tveee_core::plugin::PluginState) -> bool {
+        self.plugin_opt(p.name).unwrap_or(p.enabled)
+    }
+
+    /// Option `name` (see [`App::opts`]).
+    pub(super) fn opt(&self, name: &str) -> bool {
+        match &self.opts {
+            None => tveee_core::options::get(name),
+            Some(v) => v.iter().rev().find(|(k, _)| k == name).map(|(_, on)| *on).unwrap_or_else(|| tveee_core::options::OPTIONS.iter().any(|o| o.name == name && o.default)),
+        }
+    }
+
+    /// The choice saved for vendor plugin `name` (see [`App::opts`]).
+    pub(super) fn plugin_opt(&self, name: &str) -> Option<bool> {
+        match &self.opts {
+            None => tveee_core::options::plugin(name),
+            Some(v) => v.iter().rev().find(|(k, _)| *k == format!("plugin.{name}")).map(|(_, on)| *on),
+        }
     }
 
     /// Save vendor plugin row `i`'s choice (None: back to checking the TV).
@@ -332,7 +348,7 @@ impl App {
     /// plugin's tick (saved as its choice).
     pub(super) fn toggle_option(&mut self, i: usize) {
         if self.options_plugins {
-            let Some(on) = self.vendor_plugins().get(i).map(|p| Self::plugin_ticked(p)) else { return };
+            let Some(on) = self.vendor_plugins().get(i).map(|p| self.plugin_ticked(p)) else { return };
             self.plugin_choice(i, Some(!on));
             return;
         }
@@ -423,8 +439,8 @@ impl App {
             // the rows start under that heading
             let first_row_shift = 1;
             for (i, p) in vendor.iter().enumerate() {
-                let choice = tveee_core::options::plugin(p.name);
-                let ticked = Self::plugin_ticked(p);
+                let choice = self.plugin_opt(p.name);
+                let ticked = self.plugin_ticked(p);
                 let tick = if ticked { "[x]" } else { "[ ]" };
                 let note = match choice {
                     None => "  (auto)".to_string(),

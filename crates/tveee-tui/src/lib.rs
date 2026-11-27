@@ -68,6 +68,12 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// tveee's options as this app reads them: None, the saved ones; tests
+    /// give each app its own (never the real file, nor each other's).
+    opts: Option<Vec<(String, bool)>>,
+    /// The engine has been told the system panel is showing (it reads the
+    /// system figures while it is).
+    system_watching: bool,
     /// The options dialog's tab: its options, or the plugins.
     options_plugins: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
@@ -483,6 +489,8 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            opts: None,
+            system_watching: false,
             options_plugins: false,
             plugins: Vec::new(),
             prompt: String::new(),

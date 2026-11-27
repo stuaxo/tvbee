@@ -348,6 +348,12 @@ impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
         self.hits.clear();
         self.links.clear();
+        // the system figures are read only while something shows them
+        let wanted = self.info_shown();
+        if wanted != self.system_watching {
+            let _ = self.engine.send(Action::WatchSystem(wanted));
+            self.system_watching = wanted;
+        }
         let outer = Block::bordered()
             .title(Line::from(format!(" tveee ui - {} ", self.ip)).bold())
             .title(
@@ -532,7 +538,8 @@ impl App {
 
     /// The top line ([`spine`]), each part clickable.
     pub(super) fn draw_spine(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let system = self.st.snap.as_ref().map(|s| &s.system);
+        // load and memory only when they're wanted (else they aren't read)
+        let system = self.st.snap.as_ref().map(|s| &s.system).filter(|_| self.opt(tveee_core::options::SHOW_LOAD));
         let panel = self.panel_id().map(|_| self.panel_title());
         let mut x = area.x;
         let sep = Span::styled(" │ ", Style::new().fg(Color::DarkGray));
