@@ -15,7 +15,7 @@ pub struct Command {
     pub long: &'static str,
     pub aliases: &'static [&'static str],
     /// The app it brings to the front, if it does (it takes `--no-front`).
-    pub fronts: Option<&'static str>,
+    pub fronts: Option<crate::builtin::apps::Front>,
     pub run: Run,
 }
 
@@ -131,7 +131,7 @@ pub fn help_for(c: &Command) -> String {
         out.push_str(&format!("\n{}\n", c.long));
     }
     if let Some(app) = c.fronts {
-        out.push_str(&format!("\n{}: leave what's on the screen alone (it brings {app} to the front first)\n", crate::actions::NO_FRONT));
+        out.push_str(&format!("\n{}: leave what's on the screen alone (it brings {} to the front first)\n", crate::actions::NO_FRONT, app.name()));
     }
     if !c.aliases.is_empty() {
         out.push_str(&format!("\naliases: {}\n", c.aliases.join(" ")));
