@@ -241,6 +241,10 @@ pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: 
 /// paused for a moment while a video loads): then it's Watching or Paused,
 /// not Browsing, with the session's title.
 pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing, sessions: &[MediaInfo]) -> Activity {
+    if p.idle {
+        // the app says nothing plays (its media session may linger)
+        return Activity::just(format!("Browsing {}", apps::by_package(pkg).map_or(pkg, |x| x.name)));
+    }
     let what = a.as_ref().map_or_else(
         || format!("Watching {}", apps::by_package(pkg).map_or(pkg, |x| x.name)),
         |a| a.what.clone(),
@@ -310,6 +314,7 @@ mod tests {
             link: None,
             art_moves: false,
             extra: vec![("video", "1080p H264".into())],
+            idle: false,
         };
         let a = merge_playing("org.xbmc.kodi", session, p.clone(), &[]);
         assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching Kodi", Some("A Very Nuanced Character")));
@@ -333,6 +338,12 @@ mod tests {
         let a = merge_playing(YT, browsing.clone(), at(false), std::slice::from_ref(&s));
         assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching YouTube", Some("Never Gonna Give You Up (Rick Astley)")));
         assert_eq!(merge_playing(YT, browsing.clone(), at(true), std::slice::from_ref(&s)).what, "Paused in YouTube");
+        // the app says nothing plays: its session's leftovers don't count
+        let paused = MediaInfo { package: "org.xbmc.kodi".into(), state: Some(2), title: Some("Dirty Cash".into()), subtitle: None };
+        let session = activity_with("org.xbmc.kodi", Some(("Kodi".into(), Kind::Video)), std::slice::from_ref(&paused));
+        assert_eq!(session.as_ref().map(|a| a.what.as_str()), Some("Paused in Kodi"));
+        let idle = merge_playing("org.xbmc.kodi", session, Playing { idle: true, ..Playing::default() }, &[paused]);
+        assert_eq!((idle.what.as_str(), idle.title), ("Browsing Kodi", None));
         // the title comes and goes for a moment: kept while the link is the same
         let mut on = merge_playing(YT, None, at(false), &[]);
         on.title = Some("Never Gonna Give You Up".into());

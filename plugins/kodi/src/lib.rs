@@ -96,14 +96,21 @@ fn off() -> Error {
 
 /// POST `body` to Kodi's JSON-RPC; returns the reply.
 fn post(tv: &Tv, login: &(u16, String, String), body: &str) -> Result<String> {
+    post_within(tv, login, body, 4)
+}
+
+/// [`post`], waiting up to `secs` for the answer. No answer: Kodi is off,
+/// or (it answers a ping) just slow, which is said as such.
+fn post_within(tv: &Tv, login: &(u16, String, String), body: &str, secs: u32) -> Result<String> {
     let (port, user, pass) = login;
     let url = format!("http://{}:{port}/jsonrpc", tv.ip);
     let auth = (!pass.is_empty()).then_some((user.as_str(), pass.as_str()));
-    let reply = tveee_core::https::request(&tveee_core::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: None, timeout_secs: 4 });
+    let reply = tveee_core::https::request(&tveee_core::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: None, timeout_secs: secs });
     match reply {
         Ok((200, text)) => Ok(text),
         Ok((401, _)) => failed("Kodi wants a username and password: run 'tveee pair kodi'"),
         Ok((code, _)) => failed(format!("Kodi answered HTTP {code}")),
+        Err(_) if !body.contains("JSONRPC.Ping") && ping(tv) => failed(format!("Kodi didn't answer within {secs}s (it's running: a slow share or a big library?)")),
         Err(_) => Err(off()),
     }
 }
@@ -210,7 +217,7 @@ pub fn parse_playing(item: &Value, props: &Value) -> Playing {
         extra.push(("subtitles", s));
     }
     let link = None;
-    Playing { title, subtitle, progress, link, art, art_moves: false, extra }
+    Playing { title, subtitle, progress, link, art, art_moves: false, extra, idle: false }
 }
 
 /// What Kodi is playing, its file (for sessions), and the player's
@@ -291,9 +298,14 @@ pub fn tracks_said(props: &Value) -> String {
     said
 }
 
-/// After Player.Open: wait for the video to start (up to `secs`), then put
-/// the tracks back. Best effort: the video plays either way.
-fn put_back(tv: &Tv, tracks: &Tracks, secs: u64) {
+/// After Player.Open: wait for the video to start (up to `secs`), bring it
+/// to the front, and put the tracks back. Best effort: the video plays
+/// either way.
+///
+/// Opened just after Kodi starts, the video plays behind the home screen
+/// with Kodi's busy spinner left over it (seen live): GUI.SetFullscreen
+/// brings the video up, and the spinner goes.
+fn put_back(tv: &Tv, tracks: Option<&Tracks>, secs: u64) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
     let id = loop {
         if let Ok(Some((id, kind))) = player_id(tv) {
@@ -302,12 +314,15 @@ fn put_back(tv: &Tv, tracks: &Tracks, secs: u64) {
             }
         }
         if std::time::Instant::now() >= deadline {
-            tveee_core::tlog!("kodi: the video didn't start, tracks not put back");
+            tveee_core::tlog!("kodi: the video didn't start; not brought to the front, tracks not put back");
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     };
-    for (method, params) in tracks.calls(id) {
+    if let Err(e) = call(tv, "GUI.SetFullscreen", r#"{"fullscreen":true}"#) {
+        tveee_core::tlog!("kodi: GUI.SetFullscreen: {e}");
+    }
+    for (method, params) in tracks.map(|t| t.calls(id)).unwrap_or_default() {
         if let Err(e) = call(tv, method, &params) {
             tveee_core::tlog!("kodi: {method}: {e}");
         }
@@ -447,9 +462,7 @@ impl tveee_core::provider::Provider for Kodi {
             wait_ready(tv, 40)?;
             let options = s.resume.map(|t| format!(r#","options":{{"resume":{}}}"#, time_json(t))).unwrap_or_default();
             call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}{options}}}"#, quote(&s.link)))?;
-            if let Some(tracks) = Tracks::from_extra(&s.extra) {
-                put_back(tv, &tracks, 20);
-            }
+            put_back(tv, Tracks::from_extra(&s.extra).as_ref(), 20);
             Ok(())
         })();
         // started, but its remote control never answered: that's a failure,
@@ -484,7 +497,9 @@ impl tveee_core::provider::Player for Kodi {
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {
         match Outcome::from(now(tv)) {
             Outcome::Handled(Some((p, _, _))) => Outcome::Handled(p),
-            Outcome::Handled(None) | Outcome::Fallback => Outcome::Fallback,
+            // its API answers: nothing is playing, whatever the media session says
+            Outcome::Handled(None) => Outcome::Handled(Playing { idle: true, ..Playing::default() }),
+            Outcome::Fallback => Outcome::Fallback,
             Outcome::Failed(e) => Outcome::Failed(e),
         }
     }
@@ -844,7 +859,9 @@ pub fn rpc_request(args: &[String]) -> Result<(String, String)> {
 
 fn rpc(tv: &Tv, args: &[String]) -> Result<String> {
     let (method, params) = rpc_request(args)?;
-    let result = call(tv, &method, &params)?;
+    // anything goes here, slow ones too (a directory on a network share)
+    let body = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"{method}","params":{params}}}"#);
+    let result = result_of(&post_within(tv, &login(tv), &body, 30)?, &method)?;
     Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
 }
 
