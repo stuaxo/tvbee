@@ -200,6 +200,10 @@ Env: TV_IP (default 192.168.1.19); also read from ./.env or ~/.config/tveee/env
 ```
 <!-- commands:end -->
 
+Commands that bring an app to the front first (`channel` brings live TV
+forward, since its keys only work there; `app kodi play` brings Kodi) take
+`--no-front` to leave what's on the screen alone; their help says which.
+
 Not listed above: `ui` (built with `--features ui`), and commands from plugins
 that are enabled when the TV has what they're for: `jointspace` and `ambilight`
 (`philips`; Ambilight: power, styles, each light's colour, handing the lights

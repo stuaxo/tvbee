@@ -14,6 +14,8 @@ pub struct Command {
     pub desc: &'static str,
     pub long: &'static str,
     pub aliases: &'static [&'static str],
+    /// The app it brings to the front, if it does (it takes `--no-front`).
+    pub fronts: Option<&'static str>,
     pub run: Run,
 }
 
@@ -25,7 +27,7 @@ impl Command {
         desc: &'static str,
         run: fn(&Ctx, &[String]) -> Result<()>,
     ) -> Self {
-        Command { category, name, usage, desc, long: "", aliases: &[], run: Run::Terminal(run) }
+        Command { category, name, usage, desc, long: "", aliases: &[], fronts: None, run: Run::Terminal(run) }
     }
 
     pub fn long(mut self, long: &'static str) -> Self {
@@ -121,10 +123,15 @@ pub fn usage_text(cmds: &[Command]) -> String {
 }
 
 pub fn help_for(c: &Command) -> String {
-    let mut out = format!("usage: tveee {} {}\n\n{}\n", c.name, c.usage, c.desc)
+    let flag = if c.fronts.is_some() { format!(" [{}]", crate::actions::NO_FRONT) } else { String::new() };
+    let mut out = format!("usage: tveee {} {}{flag}\n\n{}\n", c.name, c.usage, c.desc)
+        .replace("  [", " [")
         .replace(" \n\n", "\n\n");
     if !c.long.is_empty() {
         out.push_str(&format!("\n{}\n", c.long));
+    }
+    if let Some(app) = c.fronts {
+        out.push_str(&format!("\n{}: leave what's on the screen alone (it brings {app} to the front first)\n", crate::actions::NO_FRONT));
     }
     if !c.aliases.is_empty() {
         out.push_str(&format!("\naliases: {}\n", c.aliases.join(" ")));

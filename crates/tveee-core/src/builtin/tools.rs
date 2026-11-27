@@ -106,7 +106,7 @@ fn do_action(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(id) = args.first() else {
         let mut all: Vec<_> = c.actions.iter().collect();
         all.sort_by_key(|a| a.id);
-        let call = |a: &crate::actions::ActionDescriptor| format!("{} {}", a.id, a.args).trim_end().to_string();
+        let call = |a: &crate::actions::ActionDescriptor| a.call_line(a.id);
         let width = all.iter().map(|a| call(a).len()).max().unwrap_or(0);
         for a in all {
             println!("{:<width$}  {}", call(a), a.title);
@@ -114,7 +114,7 @@ fn do_action(c: &Ctx, args: &[String]) -> Result<()> {
         return Ok(());
     };
     match crate::actions::find(&c.actions, id) {
-        Some(a) => a.run.call(c, &args[1..]),
+        Some(a) => a.run.call(a.fronts, c, &args[1..]),
         None => {
             // one of a plugin's that isn't enabled?
             let all = (c.all)();

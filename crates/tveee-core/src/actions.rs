@@ -17,6 +17,28 @@ use crate::Ctx;
 /// What an action gets to work with.
 pub struct Cx<'a> {
     pub tv: &'a Tv,
+    /// It may bring its app to the front (see
+    /// [`ActionDescriptor::brings_to_front`]): false after `--no-front` on
+    /// the command line. Always true in the ui.
+    pub front: bool,
+}
+
+/// The command line's flag for an action that brings its app to the front:
+/// leave what's in front alone.
+pub const NO_FRONT: &str = "--no-front";
+
+/// `args` without [`NO_FRONT`], and whether the app may come to the front.
+/// Only for an action that brings one forward (`fronts`): others get their
+/// arguments as they are.
+pub fn front_flag(fronts: Option<&str>, args: &[String]) -> (bool, Vec<String>) {
+    if fronts.is_none() {
+        return (true, args.to_vec());
+    }
+    // not after "--": that's the action's own
+    let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    let no = args[..end].iter().any(|a| a == NO_FRONT);
+    let rest = args.iter().enumerate().filter(|(i, a)| *i >= end || *a != NO_FRONT).map(|(_, a)| a.clone()).collect();
+    (!no, rest)
 }
 
 /// What an action did, to show (status line, or stdout for the CLI).
@@ -53,12 +75,15 @@ pub enum Run {
 
 impl Run {
     /// Run it from the command line: what a [`Run::Do`] action says goes to
-    /// stdout (when it says anything).
-    pub fn call(self, c: &Ctx, args: &[String]) -> Result<()> {
+    /// stdout (when it says anything). `fronts`: the app it brings to the
+    /// front, if it does (then `--no-front` is taken out and kept from it).
+    pub fn call(self, fronts: Option<&str>, c: &Ctx, args: &[String]) -> Result<()> {
+        let (front, args) = front_flag(fronts, args);
+        let args = &args[..];
         match self {
             Run::Terminal(f) => f(c, args),
             Run::Do(f) => {
-                let out = f(&Cx { tv: &c.tv }, args)?;
+                let out = f(&Cx { tv: &c.tv, front }, args)?;
                 if !out.text.is_empty() {
                     println!("{}", out.text);
                 }
@@ -109,17 +134,20 @@ pub struct ActionDescriptor {
     /// tracks): the ui offers it on the now-playing card only then. None:
     /// whatever plays.
     pub media: Option<&'static str>,
+    /// The app it brings to the front ("live TV"): the command line takes
+    /// `--no-front` to leave what's in front alone.
+    pub fronts: Option<&'static str>,
     pub run: Run,
 }
 
 impl ActionDescriptor {
     pub const fn new(id: &'static str, category: &'static str, title: &'static str, run: Do) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, run: Run::Do(run) }
+        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, fronts: None, run: Run::Do(run) }
     }
 
     /// A command-line action that prints for itself (see [`Terminal`]).
     pub const fn terminal(id: &'static str, category: &'static str, title: &'static str, run: Terminal) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, run: Run::Terminal(run) }
+        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, fronts: None, run: Run::Terminal(run) }
     }
 
     /// Reachable as `tveee <name>`, `desc` its one-line help.
@@ -137,6 +165,21 @@ impl ActionDescriptor {
     }
 
     /// Other names for the command (after [`Self::cli`]).
+    /// How it's called, for listings: "<id or word> <args> [--no-front]".
+    pub fn call_line(&self, name: &str) -> String {
+        let flag = if self.fronts.is_some() { format!(" [{NO_FRONT}]") } else { String::new() };
+        format!("{name} {}{flag}", self.args).replace("  [", " [").trim().to_string()
+    }
+
+    /// It brings `app` to the front first (as the TV needs, or to show
+    /// what it did): the command line takes `--no-front` to leave what's in
+    /// front alone, and its help says so. A [`Run::Do`] action reads
+    /// [`Cx::front`].
+    pub const fn brings_to_front(mut self, app: &'static str) -> Self {
+        self.fronts = Some(app);
+        self
+    }
+
     /// Only offered on the ui's now-playing card while `media` plays
     /// ("video", "audio").
     pub const fn while_playing(mut self, media: &'static str) -> Self {
@@ -177,7 +220,7 @@ impl ActionDescriptor {
     /// this way (it needs the command line's context).
     pub fn run(&self, tv: &Tv, args: &[String]) -> Result<Output> {
         match self.run {
-            Run::Do(f) => f(&Cx { tv }, args),
+            Run::Do(f) => f(&Cx { tv, front: true }, args),
             Run::Terminal(_) => crate::error::failed(format!("{} only runs from the command line", self.title)),
         }
     }
@@ -185,7 +228,7 @@ impl ActionDescriptor {
     /// Its command, if the command line has one.
     pub fn command(&self) -> Option<Command> {
         let c = self.cli?;
-        Some(Command { category: self.category, name: c.name, usage: c.usage, desc: c.desc, long: c.long, aliases: c.aliases, run: self.run })
+        Some(Command { category: self.category, name: c.name, usage: c.usage, desc: c.desc, long: c.long, aliases: c.aliases, fronts: self.fronts, run: self.run })
     }
 }
 
@@ -206,6 +249,23 @@ pub fn suggest(actions: &[ActionDescriptor], id: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn no_front_flag() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // an action that brings its app forward: the flag is taken out
+        assert_eq!(front_flag(Some("live TV"), &a(&["up"])), (true, a(&["up"])));
+        assert_eq!(front_flag(Some("live TV"), &a(&["--no-front", "up"])), (false, a(&["up"])));
+        assert_eq!(front_flag(Some("live TV"), &a(&["up", "--no-front"])), (false, a(&["up"])));
+        // after "--" it's the action's own
+        assert_eq!(front_flag(Some("Kodi"), &a(&["--", "--no-front"])), (true, a(&["--", "--no-front"])));
+        // one that doesn't: left as it is
+        assert_eq!(front_flag(None, &a(&["--no-front"])), (true, a(&["--no-front"])));
+        let d = ActionDescriptor::new("x.go", "x", "go", said).args("<where>").brings_to_front("X");
+        assert_eq!(d.call_line("go"), "go <where> [--no-front]");
+        assert_eq!(ActionDescriptor::new("x.say", "x", "say it", said).call_line("say"), "say");
+    }
+
     use super::*;
 
     fn said(_: &Cx, args: &[String]) -> Result<Output> {

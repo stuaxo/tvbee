@@ -674,10 +674,10 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let own = own_actions(c, &pkg);
     if let Some(first) = args.get(1).filter(|a| !a.starts_with("--")) {
         if let Some((_, a)) = own.iter().find(|(word, _)| word == first) {
-            return a.run.call(c, &args[2..]);
+            return a.run.call(a.fronts, c, &args[2..]);
         }
         if !own.is_empty() {
-            let words: Vec<_> = own.iter().map(|(w, a)| format!("{w} {}", a.args).trim_end().to_string()).collect();
+            let words: Vec<_> = own.iter().map(|(w, a)| a.call_line(w)).collect();
             return usage(format!("app: {app}'s actions are: {}", words.join(" | ")));
         }
     }
@@ -701,7 +701,7 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
             if !own.is_empty() {
                 println!("  its own actions:");
                 for (word, a) in &own {
-                    println!("    {:<34} {}", format!("{word} {}", a.args).trim_end(), a.title);
+                    println!("    {:<34} {}", a.call_line(word), a.title);
                 }
             }
             Ok(())
