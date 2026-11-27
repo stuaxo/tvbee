@@ -16,6 +16,8 @@ use tveee_core::actions::ActionDescriptor;
 use tveee_core::tv::Tv;
 
 pub const PACKAGE: &str = "org.xbmc.kodi";
+
+pub mod addons;
 const PAIRING: &str = "kodi";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_USER: &str = "kodi";
@@ -913,6 +915,35 @@ pub fn actions() -> Vec<ActionDescriptor> {
         A::new("kodi.notify", "kodi", "kodi: show a notification", |cx, a| notify(cx.tv, &words(a, "a message")?).map(Into::into))
             .args("<text>")
             .text("Show in Kodi:", "a line of text"),
+        A::new("kodi.addons", "kodi", "kodi: list add-ons", |cx, a| addons::list_cmd(cx.tv, a).map(Into::into))
+            .cli("kodi-addons", "[installed|available] [words]", "list Kodi's add-ons, or those you can install")
+            .long(
+                "Lists Kodi's plugins (video, music, pictures and programs add-ons):\n\
+                 those installed, or with 'available' those its repositories offer.\n\
+                 Words narrow it down (name, id or what it says it is):\n\
+                 \n\
+                 \x20 tveee kodi-addons\n\
+                 \x20 tveee kodi-addons available radio\n\
+                 \n\
+                 tveee kodi-addon <name> opens one's page in Kodi; tveee kodi-install\n\
+                 <name> installs it.",
+            )
+            .args("[installed|available] [words]")
+            .text("Kodi add-ons (available, or words):", "available radio"),
+        A::new("kodi.addon", "kodi", "kodi: open an add-on's page", |cx, a| addons::page_cmd(cx.tv, &words(a, "an add-on's name")?).map(Into::into))
+            .cli("kodi-addon", "<name or id>", "open a Kodi add-on's page (installed or not)")
+            .args("<name or id>")
+            .text("Open the Kodi add-on:", "an add-on's name or id"),
+        A::new("kodi.install", "kodi", "kodi: install an add-on", |cx, a| addons::install_cmd(cx.tv, &words(a, "an add-on's name")?).map(Into::into))
+            .cli("kodi-install", "<name or id>", "install a Kodi add-on from its repositories")
+            .long(
+                "Installs a Kodi add-on (see 'tveee kodi-addons available'), by name or\n\
+                 id. Kodi's API can't install, so tveee opens the add-on's page in Kodi\n\
+                 and presses Install there, then waits until Kodi has it. If Kodi asks\n\
+                 anything else on the way, it's left on the TV's screen and said.",
+            )
+            .args("<name or id>")
+            .text("Install in Kodi:", "an add-on's name or id"),
         A::new("kodi.rpc", "kodi", "kodi: call its JSON-RPC API", |cx, a| rpc(cx.tv, a).map(Into::into))
             .cli("kodi-rpc", "<method> [json params]", "call Kodi's JSON-RPC API and print the result")
             .long(
