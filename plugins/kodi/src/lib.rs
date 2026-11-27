@@ -175,6 +175,16 @@ fn player_id(tv: &Tv) -> Result<Option<(u32, String)>> {
 const ITEM_FIELDS: &str = r#"["title","showtitle","season","episode","artist","album","year","file","art","thumbnail","fanart","streamdetails"]"#;
 const PLAYER_FIELDS: &str = r#"["time","totaltime","speed","currentaudiostream","currentsubtitle","subtitleenabled"]"#;
 
+/// What kind of thing a Kodi player plays, from its type.
+pub fn media_of(kind: &str) -> Option<&'static str> {
+    match kind {
+        "video" => Some("video"),
+        "audio" => Some("audio"),
+        "picture" => Some("picture"),
+        _ => None,
+    }
+}
+
 /// What's playing, from Player.GetItem's and Player.GetProperties' results.
 pub fn parse_playing(item: &Value, props: &Value) -> Playing {
     let item = item.get("item").unwrap_or(item);
@@ -220,17 +230,18 @@ pub fn parse_playing(item: &Value, props: &Value) -> Playing {
         extra.push(("subtitles", s));
     }
     let link = None;
-    Playing { title, subtitle, progress, link, art, art_moves: false, extra, idle: false }
+    Playing { title, subtitle, progress, link, art, art_moves: false, extra, idle: false, media: None }
 }
 
 /// What Kodi is playing, its file (for sessions), and the player's
 /// properties (its tracks, for sessions).
 fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>, Value)>> {
-    let Some((id, _)) = player_id(tv)? else { return Ok(None) };
+    let Some((id, kind)) = player_id(tv)? else { return Ok(None) };
     let item = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{ITEM_FIELDS}}}"#))?;
     let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":{PLAYER_FIELDS}}}"#))?;
     let file = item.get("item").and_then(|i| str_of(i, "file"));
     let mut playing = parse_playing(&item, &props);
+    playing.media = media_of(&kind);
     // the file is the link (`tveee details`), unless it has a login in it:
     // it's shown
     playing.link = file.clone().filter(|f| !has_login(f));
@@ -887,15 +898,17 @@ pub fn actions() -> Vec<ActionDescriptor> {
             Some(other) => tveee_core::error::usage(format!("subtitles: next, off, on or previous, not '{other}'")),
         })
         .args("[next|off|on|previous]")
-        .key('k'),
-        A::new("kodi.subtitles.off", "kodi", "kodi: subtitles off", |cx, _| subtitles(cx.tv, "off").map(Into::into)).key('K'),
+        .key('k')
+        .while_playing("video"),
+        A::new("kodi.subtitles.off", "kodi", "kodi: subtitles off", |cx, _| subtitles(cx.tv, "off").map(Into::into)).key('K').while_playing("video"),
         A::new("kodi.audio", "kodi", "kodi: next audio track", |cx, a| match a.first().map(String::as_str) {
             None => audio(cx.tv, "next").map(Into::into),
             Some(how @ ("next" | "previous")) => audio(cx.tv, how).map(Into::into),
             Some(other) => tveee_core::error::usage(format!("audio: next or previous, not '{other}'")),
         })
         .args("[next|previous]")
-        .key('a'),
+        .key('a')
+        .while_playing("video"),
         A::new("kodi.scan", "kodi", "kodi: look for new videos (library scan)", |cx, a| match a.first().map(String::as_str) {
             None => call(cx.tv, "VideoLibrary.Scan", "{}").map(|_| "Kodi is looking for new videos (its library scan)".into()),
             // the older spelling, `app kodi scan clean`
