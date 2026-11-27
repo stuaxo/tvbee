@@ -30,6 +30,8 @@ pub enum Input {
     OpenMenu,
     /// The command palette: every action, found by typing.
     OpenPalette,
+    /// The log: what tveee did lately.
+    ShowLogs,
     /// Restart the app in front, coming back where it was if it can.
     RestartFront,
     OpenApps,

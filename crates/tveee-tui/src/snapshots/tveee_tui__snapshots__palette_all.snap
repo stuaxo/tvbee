@@ -10,10 +10,7 @@ expression: "screen(&mut a, DESKTOP)"
 │audio    AAC-LC  AAC                                                                                                  │
 │                                                                                                                      │
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│                         ┌ commands ───────────────────────────────────────────────────── 6 ┐                         │
+│                         ┌ commands ──────────────────────────────────────────────────── 16 ┐                         │
 │                         │> █                                                               │                         │
 │                         │────────────────────────────────────────────────────────────────  │                         │
 │                         │ kodi: next subtitles                                      kodi   │                         │
@@ -22,12 +19,15 @@ expression: "screen(&mut a, DESKTOP)"
 │                         │ volume…                                                  media   │                         │
 │                         │ sleep (standby)                                          power   │                         │
 │                         │ power off…                                               power   │                         │
+│                         │ ui: show the log (what tveee did lately)                    ui   │                         │
+│                         │ ui: all keys (help)                                         ui   │                         │
+│                         │ ui: live TV guide                                           ui   │                         │
+│                         │ ui: launch an app                                           ui   │                         │
+│                         │ ui: search the app in front                                 ui   │                         │
+│                         │ ui: options                                                 ui   │                         │
 │                         │                                                                  │                         │
 │                         │type to find  ↑/↓ choose  ⏎ run  esc close   …: asks first        │                         │
 │                         └──────────────────────────────────────────────────────────────────┘                         │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

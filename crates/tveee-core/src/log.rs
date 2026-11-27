@@ -3,6 +3,9 @@
 //! calls with how long they took, and things that went wrong that are
 //! otherwise only a status line (or nothing) in the ui. Off by default: the
 //! `tlog!` calls then cost a check of a flag.
+//!
+//! An interactive front end can also keep the last lines in memory
+//! ([`keep_recent`], [`recent`]) to show them, with or without a file.
 
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
@@ -18,9 +21,26 @@ fn file() -> Option<&'static Mutex<std::fs::File>> {
     .as_ref()
 }
 
-/// Whether there's a log to write to.
+/// How many lines [`recent`] keeps.
+pub const RECENT: usize = 400;
+
+static KEEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LINES: Mutex<std::collections::VecDeque<String>> = Mutex::new(std::collections::VecDeque::new());
+
+/// Keep the last [`RECENT`] lines in memory from now on (a front end
+/// showing them).
+pub fn keep_recent() {
+    KEEP.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The lines kept, oldest first (none unless [`keep_recent`] was called).
+pub fn recent() -> Vec<String> {
+    LINES.lock().map(|l| l.iter().cloned().collect()).unwrap_or_default()
+}
+
+/// Whether there's a log to write to (a file, or lines kept in memory).
 pub fn on() -> bool {
-    file().is_some()
+    KEEP.load(std::sync::atomic::Ordering::Relaxed) || file().is_some()
 }
 
 /// A log line: the time, the thread, then `msg`.
@@ -32,12 +52,19 @@ pub fn line(now: std::time::Duration, thread: &str, msg: &str) -> String {
 }
 
 pub fn write(args: std::fmt::Arguments) {
-    let Some(f) = file() else { return };
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     let t = std::thread::current();
     let name = t.name().map_or_else(|| format!("{:?}", t.id()), str::to_string);
     let text = line(now, &name, &args.to_string());
-    if let Ok(mut f) = f.lock() {
+    if KEEP.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Ok(mut l) = LINES.lock() {
+            if l.len() >= RECENT {
+                l.pop_front();
+            }
+            l.push_back(text.trim_end().to_string());
+        }
+    }
+    if let Some(Ok(mut f)) = file().map(Mutex::lock) {
         let _ = f.write_all(text.as_bytes());
     }
 }

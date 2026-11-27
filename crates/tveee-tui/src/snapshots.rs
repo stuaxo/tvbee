@@ -119,3 +119,11 @@ fn palette_asks_for_arguments() {
     a.overlay = Overlay::Prompt("media.volume");
     insta::assert_snapshot!(screen(&mut a, CORNER));
 }
+
+#[test]
+fn palette_lists_the_ui_too() {
+    let mut a = app_with(kodi_paused(), actions());
+    a.open_palette();
+    a.prompt = "log".into();
+    insta::assert_snapshot!(screen(&mut a, CORNER));
+}

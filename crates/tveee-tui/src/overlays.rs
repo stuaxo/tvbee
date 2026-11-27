@@ -21,6 +21,8 @@ pub enum Overlay {
     /// The command palette, with the highlighted match (what's typed is
     /// `App::prompt`).
     Palette(usize),
+    /// The log, scrolled up this many lines from the end.
+    Logs(usize),
     /// The app launcher: which tab, and the highlighted app in it.
     Apps { tab: AppTab, sel: usize },
     /// Typing what action `id` needs (the text is `App::prompt`).
@@ -141,6 +143,14 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         Overlay::Prompt(id) => (Overlay::Prompt(id), None),
         // handled by App::palette_key
         Overlay::Palette(sel) => (Overlay::Palette(sel), None),
+        Overlay::Logs(up) => match code {
+            KeyCode::Up => (Overlay::Logs(up + 1), None),
+            KeyCode::Down => (Overlay::Logs(up.saturating_sub(1)), None),
+            KeyCode::PageUp => (Overlay::Logs(up + 10), None),
+            KeyCode::PageDown => (Overlay::Logs(up.saturating_sub(10)), None),
+            KeyCode::End => (Overlay::Logs(0), None),
+            _ => (Overlay::None, None),
+        },
         Overlay::Search(i) => (Overlay::Search(i), None),
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
@@ -203,6 +213,7 @@ pub(super) const HELP: &str = " everywhere
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
    : ctrl+p commands: everything tveee can do, found by typing a few letters
+            (the ui's own too: the log of what tveee did lately, help, ...)
    F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
    F        free memory (force-stop idle apps)   S  sleep   R  restart the app
             in front, coming back where it was (YouTube, Kodi)
@@ -282,6 +293,7 @@ impl App {
             Overlay::Search(at) => self.draw_search(f, at),
             Overlay::Prompt(id) => self.draw_prompt(f, id),
             Overlay::Palette(sel) => self.draw_palette(f, sel),
+            Overlay::Logs(up) => self.draw_logs(f, up),
             Overlay::Ambilight { row, col } => self.draw_ambi_dialog(f, row, col),
             Overlay::AmbiColour { row, col } => self.draw_ambi_colour(f, row, col),
             Overlay::Pin => self.draw_pin(f),
@@ -382,6 +394,34 @@ impl App {
             Line::from("⏎ go   esc cancel   paste works   ctrl-u clears").fg(Color::DarkGray),
         ];
         let r = popup(f, &format!(" {} ", it.title), text, Color::Yellow);
+        self.hits.push((r, Hit::Popup));
+    }
+
+    /// The log's last lines, in most of the screen.
+    pub(super) fn draw_logs(&mut self, f: &mut Frame, up: usize) {
+        let area = f.area();
+        let r = ratatui::layout::Rect {
+            x: area.x + area.width / 20,
+            y: area.y + area.height / 10,
+            width: area.width - area.width / 10,
+            height: area.height - area.height / 5,
+        };
+        let lines = tveee_core::log::recent();
+        let room = usize::from(r.height.saturating_sub(2));
+        let up = up.min(lines.len().saturating_sub(room));
+        let end = lines.len() - up;
+        let shown: Vec<Line> = if lines.is_empty() {
+            vec![Line::from("nothing logged yet").italic()]
+        } else {
+            lines[end.saturating_sub(room)..end].iter().map(|l| Line::from(l.clone())).collect()
+        };
+        f.render_widget(ratatui::widgets::Clear, r);
+        let title = format!(" log - {} lines (TVEEE_LOG=<file> keeps them) ", lines.len());
+        let block = Block::bordered()
+            .title(title)
+            .title_bottom(Line::from(" ↑↓ pgup/pgdn scroll  end: newest  any other key closes ").right_aligned())
+            .border_style(Style::new().fg(Color::DarkGray));
+        f.render_widget(Paragraph::new(shown).block(block), r);
         self.hits.push((r, Hit::Popup));
     }
 

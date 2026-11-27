@@ -98,6 +98,8 @@ struct App {
     /// Descriptions asked for; `want_info` is the next to ask for.
     infos_asked: std::collections::HashSet<(u32, i64)>,
     want_info: Option<(u32, i64)>,
+    /// Something asked to quit (the palette's ui: quit).
+    quit: bool,
 }
 
 /// An action under way waits this long for its next step: each change on
@@ -242,6 +244,9 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
         }
         // what was asked for may have changed it at once (a star, loading)
         app.st = app.engine.state();
+        if app.quit {
+            return Ok(());
+        }
         if dirty || app.animating() || drawn.is_none_or(|d| d.elapsed() >= TICK) {
             term.draw(|f| app.draw(f))?;
             drawn = Some(Instant::now());
@@ -375,6 +380,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     if !std::io::stdout().is_terminal() {
         return tveee_core::error::usage("ui needs a terminal");
     }
+    // the log pop-up's lines, kept from the start
+    tveee_core::log::keep_recent();
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
@@ -479,6 +486,7 @@ impl App {
             details_of: None,
             infos_asked: std::collections::HashSet::new(),
             want_info: None,
+            quit: false,
         }
     }
 }
@@ -633,6 +641,7 @@ impl App {
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
             Input::OpenPalette => self.open_palette(),
+            Input::ShowLogs => self.overlay = Overlay::Logs(0),
             Input::RestartFront => match self.st.snap.as_ref().and_then(front_pkg) {
                 Some(pkg) if !apps::passes_through(&pkg) => {
                     self.note = format!("restarting {}...", app_name(&pkg));
@@ -819,6 +828,9 @@ impl App {
             (Overlay::AppActions { .. }, Some(Hit::Popup)) => {}
             (Overlay::AppActions { tab, sel, .. }, _) => self.overlay = Overlay::Apps { tab, sel },
             (Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), Some(Hit::Popup)) => {}
+            // the log: a click inside does nothing, outside closes it
+            (Overlay::Logs(_), Some(Hit::Popup)) => {}
+            (Overlay::Logs(_), _) => self.overlay = Overlay::None,
             // a click elsewhere closes the pop-up (cancelling a confirmation)
             (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
                 self.apply_overlay(Overlay::None, None, actions)
@@ -852,6 +864,8 @@ impl App {
     /// Mouse wheel: volume, or the menu highlight while the menu is open.
     fn scroll(&mut self, up: bool, actions: &Handle) {
         match self.overlay {
+            // the wheel scrolls the log, three lines a notch
+            Overlay::Logs(n) => self.overlay = Overlay::Logs(if up { n + 3 } else { n.saturating_sub(3) }),
             Overlay::Menu(_) => {
                 let code = if up { KeyCode::Up } else { KeyCode::Down };
                 let (next, action) = overlay_key(self.overlay, code, &self.menu);

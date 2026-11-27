@@ -9,28 +9,54 @@ use tveee_core::actions::Run;
 /// How many matches the palette lists at once.
 const ROWS: usize = 12;
 
-/// The actions matching `query`, best first, as indices into `actions`.
-/// Only those that can run here: ones that print for themselves need the
-/// command line. An empty query lists them all, in the plugins' order.
-pub fn palette_matches(actions: &[ActionDescriptor], query: &str) -> Vec<usize> {
-    let runnable = actions.iter().enumerate().filter(|(_, a)| matches!(a.run, Run::Do(_)));
+/// What the ui itself can do, listed in the palette with the plugins'
+/// actions (as ui: ...).
+pub const UI: &[(&str, Input)] = &[
+    ("ui: show the log (what tveee did lately)", Input::ShowLogs),
+    ("ui: all keys (help)", Input::ToggleHelp),
+    ("ui: live TV guide", Input::OpenGuide),
+    ("ui: launch an app", Input::OpenApps),
+    ("ui: search the app in front", Input::OpenSearch),
+    ("ui: options", Input::OpenOptions),
+    ("ui: preview on/off", Input::TogglePreview),
+    ("ui: system info on/off", Input::ToggleInfo),
+    ("ui: remote / player mode", Input::ToggleMode),
+    ("ui: quit", Input::Quit),
+];
+
+/// A palette entry: a plugin's action (index into the actions), or
+/// something the ui does (index into [`UI`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Item {
+    Action(usize),
+    Ui(usize),
+}
+
+/// What matches `query`, best first. Only actions that can run here (ones
+/// that print for themselves need the command line). An empty query lists
+/// the plugins' actions in their order, then the ui's.
+pub fn palette_matches(actions: &[ActionDescriptor], query: &str) -> Vec<Item> {
+    // (what's searched: the title as shown, and the id `tveee do` knows)
+    let all = actions
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| matches!(a.run, Run::Do(_)))
+        .map(|(i, a)| (Item::Action(i), format!("{} {}", a.title, a.id)))
+        .chain(UI.iter().enumerate().map(|(i, (title, _))| (Item::Ui(i), title.to_string())));
     let query = query.trim();
     if query.is_empty() {
-        return runnable.map(|(i, _)| i).collect();
+        return all.map(|(item, _)| item).collect();
     }
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut buf = Vec::new();
-    let mut scored: Vec<(u32, usize)> = runnable
-        .filter_map(|(i, a)| {
-            // the title as shown, and the id `tveee do` knows it by
-            let hay = format!("{} {}", a.title, a.id);
-            pattern.score(Utf32Str::new(&hay, &mut buf), &mut matcher).map(|s| (s, i))
-        })
+    let mut scored: Vec<(u32, usize, Item)> = all
+        .enumerate()
+        .filter_map(|(order, (item, hay))| pattern.score(Utf32Str::new(&hay, &mut buf), &mut matcher).map(|s| (s, order, item)))
         .collect();
-    // best first; equal scores keep the plugins' order
+    // best first; equal scores keep the order
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    scored.into_iter().map(|(_, i)| i).collect()
+    scored.into_iter().map(|(_, _, item)| item).collect()
 }
 
 impl App {
@@ -40,7 +66,7 @@ impl App {
     }
 
     /// What's listed now, for what's been typed.
-    fn palette_list(&self) -> Vec<usize> {
+    fn palette_list(&self) -> Vec<Item> {
         palette_matches(&self.actions, &self.prompt)
     }
 
@@ -52,11 +78,19 @@ impl App {
             KeyCode::Esc => self.overlay = Overlay::None,
             KeyCode::Up => self.overlay = Overlay::Palette(sel.checked_sub(1).unwrap_or(n.saturating_sub(1))),
             KeyCode::Down => self.overlay = Overlay::Palette(if sel + 1 >= n { 0 } else { sel + 1 }),
-            KeyCode::Enter => {
-                let Some(&i) = self.palette_list().get(sel) else { return };
-                let (next, action) = choose(&self.actions[i]);
-                self.apply_overlay(next, action, actions);
-            }
+            KeyCode::Enter => match self.palette_list().get(sel) {
+                Some(&Item::Action(i)) => {
+                    let (next, action) = choose(&self.actions[i]);
+                    self.apply_overlay(next, action, actions);
+                }
+                Some(&Item::Ui(i)) => {
+                    self.overlay = Overlay::None;
+                    if self.apply(UI[i].1.clone(), actions) {
+                        self.quit = true;
+                    }
+                }
+                None => {}
+            },
             KeyCode::Backspace => {
                 self.prompt.pop();
                 self.overlay = Overlay::Palette(0);
@@ -83,11 +117,15 @@ impl App {
         text.push(Line::from("─".repeat(width)).fg(Color::DarkGray));
         // a window of ROWS around the highlight
         let first = sel.saturating_sub(ROWS - 1).min(list.len().saturating_sub(ROWS));
-        for (row, &i) in list.iter().enumerate().skip(first).take(ROWS) {
-            let a = &self.actions[i];
-            let more = if needs_input(a) || a.confirm.is_some() { "…" } else { "" };
-            let left = format!("{}{more}", a.title);
-            let right = a.category;
+        for (row, &item) in list.iter().enumerate().skip(first).take(ROWS) {
+            let (left, right) = match item {
+                Item::Action(i) => {
+                    let a = &self.actions[i];
+                    let more = if needs_input(a) || a.confirm.is_some() { "…" } else { "" };
+                    (format!("{}{more}", a.title), a.category)
+                }
+                Item::Ui(i) => (UI[i].0.to_string(), "ui"),
+            };
             let gap = width.saturating_sub(left.chars().count() + right.chars().count() + 2);
             let line = Line::from(vec![
                 Span::raw(format!(" {left}")),
@@ -133,9 +171,20 @@ mod tests {
     #[test]
     fn finds_by_a_few_letters() {
         let a = actions();
-        let titles = |q| palette_matches(&a, q).into_iter().map(|i| a[i].id).collect::<Vec<_>>();
+        let titles = |q| {
+            palette_matches(&a, q)
+                .into_iter()
+                .filter_map(|i| match i {
+                    Item::Action(i) => Some(a[i].id),
+                    Item::Ui(_) => None,
+                })
+                .collect::<Vec<_>>()
+        };
         // everything that can run here, in order; not what prints for itself
         assert_eq!(titles(""), ["kodi.subtitles", "kodi.audio", "power.off", "media.volume"]);
+        // and the ui's own, after them
+        assert_eq!(palette_matches(&a, "").last(), Some(&Item::Ui(UI.len() - 1)));
+        assert_eq!(palette_matches(&a, "show the log").first(), Some(&Item::Ui(0)));
         assert_eq!(titles("subs"), ["kodi.subtitles"]);
         assert_eq!(titles("aud"), ["kodi.audio"]);
         assert_eq!(titles("pwr off"), ["power.off"]);
