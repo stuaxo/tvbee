@@ -18,6 +18,7 @@ use tveee_core::tv::Tv;
 pub const PACKAGE: &str = "org.xbmc.kodi";
 
 pub mod addons;
+pub mod sideload;
 const PAIRING: &str = "kodi";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_USER: &str = "kodi";
@@ -934,16 +935,47 @@ pub fn actions() -> Vec<ActionDescriptor> {
             .cli("kodi-addon", "<name or id>", "open a Kodi add-on's page (installed or not)")
             .args("<name or id>")
             .text("Open the Kodi add-on:", "an add-on's name or id"),
-        A::new("kodi.install", "kodi", "kodi: install an add-on", |cx, a| addons::install_cmd(cx.tv, &words(a, "an add-on's name")?).map(Into::into))
-            .cli("kodi-install", "<name or id>", "install a Kodi add-on from its repositories")
+        A::new("kodi.install", "kodi", "kodi: install an add-on", |cx, a| {
+            let what = words(a, "an add-on's name, or a zip file")?;
+            let path = std::path::Path::new(&what);
+            if what.to_lowercase().ends_with(".zip") || path.is_file() {
+                sideload::install_zip(cx.tv, path).map(Into::into)
+            } else {
+                addons::install_cmd(cx.tv, &what).map(Into::into)
+            }
+        })
+        .cli("kodi-install", "<name, id or file.zip>", "install a Kodi add-on: from its repositories, or a zip here")
+        .long(
+            "Installs a Kodi add-on:\n\
+             \n\
+             \x20 tveee kodi-install <name or id>   from Kodi's repositories (see\n\
+             \x20                                   'tveee kodi-addons available')\n\
+             \x20 tveee kodi-install <file.zip>     from a zip file on this computer\n\
+             \n\
+             From the repositories: Kodi's API can't install, so tveee opens the\n\
+             add-on's page in Kodi and presses Install there, then waits until Kodi\n\
+             has it (and what it needs). If Kodi asks anything else on the way, it's\n\
+             left on the TV's screen and said.\n\
+             \n\
+             From a zip: no Kodi screens. tveee checks the zip (one folder, named\n\
+             after the add-on, with its addon.xml) and what it needs, copies it into\n\
+             Kodi's add-ons over adb, and restarts Kodi (back where it was) so it\n\
+             finds it. What it needs from Kodi's repositories is said first, to\n\
+             install by name. Installing a zip again updates it. An add-on runs with\n\
+             Kodi's access to the TV: install zips you trust.",
+        )
+        .args("<name, id or file.zip>")
+        .text("Install in Kodi:", "an add-on's name or id, or a zip file's path"),
+        A::new("kodi.uninstall", "kodi", "kodi: uninstall an add-on", |cx, a| sideload::uninstall(cx.tv, &words(a, "an add-on's id")?).map(Into::into))
+            .cli("kodi-uninstall", "<id>", "uninstall a Kodi add-on (restarts Kodi)")
             .long(
-                "Installs a Kodi add-on (see 'tveee kodi-addons available'), by name or\n\
-                 id. Kodi's API can't install, so tveee opens the add-on's page in Kodi\n\
-                 and presses Install there, then waits until Kodi has it. If Kodi asks\n\
-                 anything else on the way, it's left on the TV's screen and said.",
+                "Takes an add-on out of Kodi's add-ons folder over adb and restarts\n\
+                 Kodi (back where it was). Not when another add-on needs it. Its\n\
+                 settings (in Kodi's userdata) stay, for if it comes back.",
             )
-            .args("<name or id>")
-            .text("Install in Kodi:", "an add-on's name or id"),
+            .args("<id>")
+            .text("Uninstall from Kodi:", "an add-on's id (plugin.video....)")
+            .confirm("Take this add-on off Kodi? Kodi restarts."),
         A::new("kodi.rpc", "kodi", "kodi: call its JSON-RPC API", |cx, a| rpc(cx.tv, a).map(Into::into))
             .cli("kodi-rpc", "<method> [json params]", "call Kodi's JSON-RPC API and print the result")
             .long(
