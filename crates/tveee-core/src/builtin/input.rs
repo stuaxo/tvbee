@@ -133,7 +133,7 @@ fn channel(c: &Cx, args: &[String]) -> Result<Output> {
     if !matches!(arg, Some("up" | "down")) && number.is_none() {
         return usage("usage: tveee channel up|down|<number>");
     }
-    let first = live_tv_in_front(c.tv)?;
+    let first = if c.front { live_tv_in_front(c.tv)? } else { String::new() };
     let said = match (arg, number) {
         (Some("up"), _) => c.tv.key(166).map(|()| "channel up".to_string())?,
         (Some("down"), _) => c.tv.key(167).map(|()| "channel down".to_string())?,
@@ -192,7 +192,7 @@ pub fn actions() -> Vec<A> {
         A::terminal("input.list", CAT, "list inputs", inputs)
             .cli("inputs", "[--all]", "list the TV's input sources")
             .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
-        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]),
+        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).args("up|down|<number>").brings_to_front("live TV"),
         input_item!("input.tuner", 't', "TV tuner", 170),
         input_item!("input.hdmi1", '1', "HDMI 1", 243),
         input_item!("input.hdmi2", '2', "HDMI 2", 244),

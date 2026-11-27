@@ -787,8 +787,9 @@ pub fn best_match<'a>(found: &'a [Found], q: &str) -> Option<&'a Found> {
     })
 }
 
-/// Play a film, or open a TV show's episodes, by title.
-fn play(tv: &Tv, q: &str) -> Result<String> {
+/// Play a film, or open a TV show's episodes, by title; Kodi to the front
+/// first unless `front` is false.
+fn play(tv: &Tv, q: &str, front: bool) -> Result<String> {
     let found = search_library(tv, q)?;
     let Some(f) = best_match(&found, q) else {
         return match found.len() {
@@ -796,7 +797,9 @@ fn play(tv: &Tv, q: &str) -> Result<String> {
             n => failed(format!("{n} things in Kodi's library match \"{q}\"; say which:\n{}", found.iter().map(found_line).collect::<Vec<_>>().join("\n"))),
         };
     };
-    let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
+    if front {
+        let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
+    }
     if f.kind == "movie" {
         call(tv, "Player.Open", &format!(r#"{{"item":{{"movieid":{}}}}}"#, f.id))?;
         Ok(format!("playing {}", f.title))
@@ -921,8 +924,9 @@ pub fn actions() -> Vec<ActionDescriptor> {
             .args("<words>")
             .key('F')
             .text("Find in Kodi:", "a film or show's title"),
-        A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?).map(Into::into))
+        A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?, cx.front).map(Into::into))
             .args("<words>")
+            .brings_to_front("Kodi")
             .text("Play in Kodi:", "a film or show's title"),
         A::new("kodi.clean", "kodi", "kodi: forget videos that are gone (library clean)", |cx, _| clean(cx.tv))
             .confirm("Remove the videos Kodi can't find any more from its library?"),
