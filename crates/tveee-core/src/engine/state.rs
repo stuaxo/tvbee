@@ -38,6 +38,8 @@ pub struct TvState {
     pub at: Instant,
     /// `snap` is what was last seen in an earlier run, not read yet.
     pub seeded: bool,
+    /// When that was (unix seconds), while `seeded`.
+    pub seen_at: Option<i64>,
     /// Why the last refresh or action failed; cleared by the next refresh.
     pub error: Option<String>,
     /// The launcher's rows; None until read.
@@ -69,6 +71,7 @@ impl TvState {
             snap: seen.map(last::seed),
             at: Instant::now(),
             seeded: seen.is_some(),
+            seen_at: seen.map(|l| l.at),
             error: None,
             apps: None,
             searchable: None,

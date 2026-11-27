@@ -1,5 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 89
 expression: "screen(&mut app(kodi_paused()), DESKTOP)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -33,7 +34,7 @@ expression: "screen(&mut app(kodi_paused()), DESKTOP)"
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   ⌫  back   h  home   tab  remote   i  info      │
-│ v  preview   a  apps   /  search   g  guide   ,  options   .  more   ?  help   q  quit                               │
+│                                                                                                                      │
+│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit      │
 │                                                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

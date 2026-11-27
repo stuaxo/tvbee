@@ -1,0 +1,40 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 251
+expression: s
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
+│[F]ree memory │ [:] commands                                                                                          │
+│what     Watching YouTube  (5 min ago; reading the TV...)                                                             │
+│title    A video from last time                                                                                       │
+│                                                                                                                      │
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ space  play/pause   ←  rew   →  ffw   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit        │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
