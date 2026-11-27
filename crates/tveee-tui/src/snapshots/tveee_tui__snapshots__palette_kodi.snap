@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 116
+assertion_line: 117
 expression: "screen(&mut a, DESKTOP)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -15,13 +15,13 @@ expression: "screen(&mut a, DESKTOP)"
 │                                                                       │swap     ━━━┃── 316/512 MB                   ││
 │                                                                       │load     4.82 3.10 2.40                      ││
 │                                                                       └─────────────────────────────────────────────┘│
-│                                                                                                                      │
-│                         ┌ commands ───────────────────────────────────────────────────── 3 ┐                         │
+│                         ┌ commands ───────────────────────────────────────────────────── 4 ┐                         │
 │                         │> kodi█                                                           │                         │
 │                         │────────────────────────────────────────────────────────────────  │                         │
 │                         │ kodi: next subtitles                                      kodi   │                         │
 │                         │ kodi: next audio track                                    kodi   │                         │
 │                         │ kodi: find in the library…                                kodi   │                         │
+│                         │ ui: music visualiser: show or hide it (Kodi)                ui   │                         │
 │                         │                                                                  │                         │
 │                         │type to find  ↑/↓ choose  ⏎ run  esc close   …: asks first        │                         │
 │                         └──────────────────────────────────────────────────────────────────┘                         │

@@ -118,6 +118,8 @@ pub enum Action {
     Watch(crate::provider::Channel),
     /// Make a channel a favourite (true) or not.
     Favourite(crate::provider::Channel, bool),
+    /// Show or hide the app in front's music visualiser (switch).
+    Visualiser,
     Refresh,
 }
 

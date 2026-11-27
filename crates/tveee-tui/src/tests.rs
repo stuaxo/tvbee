@@ -130,6 +130,7 @@ fn guide_filters_and_moves() {
     assert_eq!(guide_time_at(1_800, 2), 5_400);
     assert_eq!(textwrap("needs tveee to be paired", 12), ["needs tveee", "to be paired"]);
     assert_eq!(input_for(KeyCode::Char('g'), KeyModifiers::NONE, Mode::Player), Input::OpenGuide);
+    assert_eq!(input_for(KeyCode::Char('z'), KeyModifiers::NONE, Mode::Player), Input::ToggleVisualiser);
 }
 
 

@@ -172,6 +172,7 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
     seek         jump to a position (time or percent of the way through)
     stop         media stop
     unmute       unmute (no-op if not muted)
+    visualiser   show or hide the music visualiser (Kodi, while it plays music)
     vol          change volume
 
 [options]

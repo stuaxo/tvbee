@@ -292,6 +292,16 @@ pub struct Playing {
 /// An app tveee can ask what it's playing and tell what to do, through an
 /// API of its own (Kodi's JSON-RPC).
 pub trait Player: Sync {
+    /// Whether it has a music visualiser ([`Player::visualiser`]): the ui
+    /// offers it while music plays.
+    fn has_visualiser(&self) -> bool {
+        false
+    }
+    /// Show its music visualiser (`Some(true)`), go back from it
+    /// (`Some(false)`) or switch (None); returns whether it's showing now.
+    fn visualiser(&self, _tv: &crate::tv::Tv, _want: Option<bool>) -> Outcome<bool> {
+        Outcome::Fallback
+    }
     /// What's playing (fall back: nothing, or the app can't say).
     fn playing(&self, tv: &crate::tv::Tv) -> Outcome<Playing>;
     /// Move what's playing; returns the new position in seconds.

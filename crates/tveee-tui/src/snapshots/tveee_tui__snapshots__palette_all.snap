@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 114
+assertion_line: 115
 expression: "screen(&mut a, DESKTOP)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -11,7 +11,7 @@ expression: "screen(&mut a, DESKTOP)"
 │audio    AAC-LC  AAC                                                   │memory   1032/1342 MB used, 310 MB free      ││
 │do        .k  next subtitles   .a  next audio track   /  search        │1342 MB                                      ││
 │                                                                       │                                             ││
-│volume   ━━━━━━━━━━━━━━━━┌ commands ──────────────────────────────────────────────────── 19 ┐                        ││
+│volume   ━━━━━━━━━━━━━━━━┌ commands ──────────────────────────────────────────────────── 20 ┐                        ││
 │                         │> █                                                               │12 MB                   ││
 │                         │────────────────────────────────────────────────────────────────  │40                      ││
 │                         │ kodi: next subtitles                                      kodi   │────────────────────────┘│
@@ -23,9 +23,9 @@ expression: "screen(&mut a, DESKTOP)"
 │                         │ ui: show the log (what tveee did lately)                    ui   │                         │
 │                         │ ui: all keys (help)                                         ui   │                         │
 │                         │ ui: live TV guide                                           ui   │                         │
+│                         │ ui: music visualiser: show or hide it (Kodi)                ui   │                         │
 │                         │ ui: launch an app                                           ui   │                         │
 │                         │ ui: search the app in front                                 ui   │                         │
-│                         │ ui: options                                                 ui   │                         │
 │                         │                                                                  │                         │
 │                         │type to find  ↑/↓ choose  ⏎ run  esc close   …: asks first        │                         │
 │                         └──────────────────────────────────────────────────────────────────┘                         │
