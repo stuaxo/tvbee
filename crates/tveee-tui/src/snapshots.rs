@@ -436,6 +436,19 @@ fn options_plugins_tab_desktop() {
     assert_eq!(a.overlay, Overlay::Options(1));
     a.options_key(1, KeyCode::Tab);
     assert!(!a.options_plugins);
+#[test]
+fn palette_pages_and_ends() {
+    let mut a = app_with(kodi_paused(), actions());
+    let h = Handle::new(std::sync::mpsc::channel().0, Arc::new(Mutex::new(Arc::new(TvState::seeded(None)))));
+    let n = a.palette_list().len();
+    assert!(n > 10, "enough to page through: {n}");
+    a.overlay = Overlay::Palette(0);
+    a.palette_key(0, KeyCode::End, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(n - 1));
+    a.palette_key(n - 1, KeyCode::PageUp, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(n - 1 - super::listnav::PAGE));
+    a.palette_key(3, KeyCode::Home, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(0));
 }
 
 #[test]

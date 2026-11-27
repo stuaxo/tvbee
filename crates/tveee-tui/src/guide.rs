@@ -191,16 +191,7 @@ pub fn guide_tab_pick(ids: &[u32], at: u32, current: Option<u32>) -> u32 {
 pub fn guide_move(ids: &[u32], at: u32, code: KeyCode) -> u32 {
     let n = ids.len();
     let Some(i) = ids.iter().position(|&c| c == at) else { return ids.first().copied().unwrap_or(at) };
-    let to = match code {
-        KeyCode::Up => i.checked_sub(1).unwrap_or(n - 1),
-        KeyCode::Down => (i + 1) % n,
-        KeyCode::PageUp => i.saturating_sub(10),
-        KeyCode::PageDown => (i + 10).min(n - 1),
-        KeyCode::Home => 0,
-        KeyCode::End => n - 1,
-        _ => i,
-    };
-    ids[to]
+    ids[super::listnav::step(i, n, code).unwrap_or(i)]
 }
 
 impl App {

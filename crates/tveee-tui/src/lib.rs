@@ -32,6 +32,7 @@ mod palette;
 mod drawing;
 mod links;
 mod logview;
+mod listnav;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

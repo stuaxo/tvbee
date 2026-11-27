@@ -135,12 +135,17 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
             KeyCode::Down => (Overlay::Help(top.saturating_add(1)), None),
             KeyCode::PageUp => (Overlay::Help(top.saturating_sub(10)), None),
             KeyCode::PageDown => (Overlay::Help(top.saturating_add(10)), None),
+            KeyCode::Home => (Overlay::Help(0), None),
+            // drawing stops it at the last page
+            KeyCode::End => (Overlay::Help(usize::MAX / 2), None),
             _ => (Overlay::None, None),
         },
         Overlay::Menu(sel) => match code {
             KeyCode::Esc | KeyCode::Char('.') | KeyCode::Char('q') | KeyCode::Backspace => (Overlay::None, None),
-            KeyCode::Up => (Overlay::Menu(sel.checked_sub(1).unwrap_or(items.len().saturating_sub(1))), None),
-            KeyCode::Down => (Overlay::Menu(if sel + 1 >= items.len() { 0 } else { sel + 1 }), None),
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(sel, items.len(), c).unwrap_or(sel);
+                (Overlay::Menu(to), None)
+            }
             KeyCode::Enter => pick_item(sel),
             KeyCode::Char(c) => match items.iter().position(|it| it.key == Some(c)) {
                 Some(i) => pick_item(i),
@@ -248,6 +253,7 @@ pub(super) const HELP: &str = " everywhere
    0-9      jump to 0%-90%   + -    volume
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
+   lists    ↑ ↓ one, pgup pgdn a page, home end the first and last
    : ctrl+p commands: everything tveee can do, found by typing a few letters
             (the ui's own too: the log of what tveee did lately, help, ...)
    F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
@@ -304,8 +310,10 @@ impl App {
                 self.options_plugins = !self.options_plugins;
                 self.overlay = Overlay::Options(0);
             }
-            KeyCode::Up => self.overlay = Overlay::Options((i + n - 1) % n),
-            KeyCode::Down => self.overlay = Overlay::Options((i + 1) % n),
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(i, n, c).unwrap_or(i);
+                self.overlay = Overlay::Options(to)
+            }
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
             KeyCode::Char('a') if self.options_plugins => self.plugin_choice(i, None),
             _ => {}
