@@ -588,6 +588,60 @@ fn host(url: &str) -> &str {
     rest.split('/').next().unwrap_or(rest).trim_start_matches("www.")
 }
 
+/// The lines `tveee list` prints for `l`: its heading, then each item
+/// numbered from 1, the highlighted one marked, folders ending in "/".
+pub fn list_lines(l: &crate::provider::ContextList, app: &str) -> Vec<String> {
+    let w = l.items.iter().map(|i| i.label.chars().count() + usize::from(i.folder)).max().unwrap_or(0).min(48);
+    let mut out = vec![format!("{} ({app}, {} {})", l.title, l.items.len(), if l.items.len() == 1 { "item" } else { "items" })];
+    for (n, i) in l.items.iter().enumerate() {
+        let mark = if l.at == Some(n) { if l.kind == "folder" { "›" } else { "▶" } } else { " " };
+        let name = format!("{}{}", i.label, if i.folder { "/" } else { "" });
+        let meta = i.meta.as_deref().map(|m| format!("  {m}")).unwrap_or_default();
+        out.push(format!("{mark} {:>3}  {name:<w$}{meta}", n + 1).trim_end().to_string());
+    }
+    out
+}
+
+/// `tveee list [app] [N]`: the list the app shows (Kodi's folder), or
+/// choose item N from it.
+fn list_cmd(c: &crate::actions::Cx, args: &[String]) -> Result<crate::actions::Output> {
+    let tv = c.tv;
+    // `list kodi` names an app (its list can be read behind another);
+    // otherwise it's the app in front
+    let named = args.first().and_then(|a| {
+        super::apps::all().iter().find(|x| x.alias == Some(a.as_str()) && crate::provider::for_package(x.package()).is_some_and(|p| p.player().is_some()))
+    });
+    let (pkg, rest) = match named {
+        Some(a) => (a.package().to_string(), &args[1..]),
+        None => (current(tv)?.0, args),
+    };
+    let name = super::apps::by_package(&pkg).map_or(pkg.clone(), |a| super::apps::list_name(a.name));
+    let Some(player) = crate::provider::for_package(&pkg).and_then(|p| p.player()) else {
+        return failed(format!("list: tveee can't read lists in {name}"));
+    };
+    let Some(l) = player.list(tv).or_fallback()? else {
+        return Ok(format!("{name} isn't showing a list").into());
+    };
+    match rest {
+        [] => {
+            let mut lines = list_lines(&l, &name);
+            lines.push("(tveee list N: choose one)".into());
+            Ok(lines.join("\n").into())
+        }
+        [n] => {
+            let Some(item) = n.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|i| l.items.get(i)) else {
+                return crate::error::usage(format!("list: choose 1 to {}, not {n}", l.items.len()));
+            };
+            let said = match player.go(tv, &item.go).or_fallback()? {
+                Some(said) => said,
+                None => go(tv, &pkg, &item.go)?,
+            };
+            Ok(format!("{}: {said}", item.label).into())
+        }
+        _ => crate::error::usage("usage: tveee list [app] [N]"),
+    }
+}
+
 fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let tv = &c.tv;
     // `goto <app> ...` names an app; otherwise it's the app in front
@@ -689,6 +743,18 @@ pub fn actions() -> Vec<ActionDescriptor> {
              the channel, upload date, views, likes, length, chapters and description.\n\
              \x20 --full   the whole description, not just its first lines",
         ),
+        ActionDescriptor::new("info.list", CAT, "the list the app shows (Kodi's folder), or choose from it", list_cmd)
+            .cli("list", "[app] [N]", "the list the app in front shows, or choose item N from it")
+            .long(
+                "Prints the list the app in front is showing, numbered, the highlighted one\n\
+                 marked (›): in Kodi, the folder or add-on listing on its screen, as Kodi\n\
+                 shows it. Reading it doesn't change what's on the screen.\n\
+                 \n\
+                 \x20 tveee list          the app in front's list\n\
+                 \x20 tveee list kodi     Kodi's, even behind another app\n\
+                 \x20 tveee list 3        choose item 3: a folder opens, anything else plays",
+            )
+            .args("[app] [N]"),
         ActionDescriptor::terminal("info.goto", CAT, "go to a place in an app, or a link from what's on", goto_cmd).cli("goto", "[app] [place|channel|chapter N|N]", "go to a place in an app, or a link from what's on").long(
             "With nothing more, lists where you can go: the app's places (YouTube: home,\n\
              subscriptions, history, library, watchlater) and, for what's on, its channel,\n\
@@ -717,6 +783,18 @@ mod tests {
     use super::*;
 
     const DUMP: &str = "  mCurrentFocus=Window{eeb8591 u0 org.droidtv.nettvbrowser/org.droidtv.nettvbrowser.BrowserNetTvActivity}\n";
+
+    #[test]
+    fn list_printed() {
+        use crate::provider::{ContextList, ListItem};
+        let item = |label: &str, folder, meta: Option<&str>| ListItem { label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
+        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], at: Some(1) };
+        let lines = list_lines(&l, "Kodi");
+        assert_eq!(lines[0], "Artists (Kodi, 3 items)");
+        assert_eq!(lines[1], "    1  Portishead/");
+        assert_eq!(lines[2], "›   2  Radiohead/       9 albums");
+        assert_eq!(lines[3], "    3  Exit Music.flac");
+    }
 
     #[test]
     fn parses_focus() {

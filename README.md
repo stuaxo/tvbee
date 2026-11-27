@@ -147,6 +147,7 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
 [info]
     details      more about what's on: channel, chapters, description
     goto         go to a place in an app, or a link from what's on
+    list         the list the app in front shows, or choose item N from it
     logs         recent logcat, optionally filtered
     now          print the foreground window only
     nowplaying   what's on: app, title, progress bar and link (alias: np)

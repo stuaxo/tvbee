@@ -289,6 +289,36 @@ pub struct Playing {
     pub media: Option<&'static str>,
 }
 
+/// A list from the app in front to choose from: what Kodi is showing (a
+/// folder, an add-on's listing), later a playing queue, a video's chapters
+/// and links. One column, like the guide without its times.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ContextList {
+    /// Its heading: the folder's name, "Chapters", ...
+    pub title: String,
+    /// What it lists ("folder", "tracks", "chapters"): for buttons and
+    /// `tveee list`.
+    pub kind: &'static str,
+    /// What it is, to tell when it's become another list (a folder's path):
+    /// its items only need reading again when this changes.
+    pub key: String,
+    pub items: Vec<ListItem>,
+    /// The highlighted (or playing) item, if the app says.
+    pub at: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListItem {
+    pub label: String,
+    /// More about it, to the right: a duration, a year, a count.
+    pub meta: Option<String>,
+    /// A folder (choosing it opens another list) rather than something to
+    /// play.
+    pub folder: bool,
+    /// What choosing it does.
+    pub go: crate::more::Go,
+}
+
 /// An app tveee can ask what it's playing and tell what to do, through an
 /// API of its own (Kodi's JSON-RPC).
 pub trait Player: Sync {
@@ -300,6 +330,16 @@ pub trait Player: Sync {
     /// Show its music visualiser (`Some(true)`), go back from it
     /// (`Some(false)`) or switch (None); returns whether it's showing now.
     fn visualiser(&self, _tv: &crate::tv::Tv, _want: Option<bool>) -> Outcome<bool> {
+        Outcome::Fallback
+    }
+    /// The list on its screen to choose from, if there is one (fall back:
+    /// the app can't say, or it isn't showing a list).
+    fn list(&self, _tv: &crate::tv::Tv) -> Outcome<ContextList> {
+        Outcome::Fallback
+    }
+    /// Choose an item from [`Player::list`] (fall back: do it the usual way
+    /// for a [`crate::more::Go`]).
+    fn go(&self, _tv: &crate::tv::Tv, _to: &crate::more::Go) -> Outcome<String> {
         Outcome::Fallback
     }
     /// What's playing (fall back: nothing, or the app can't say).
