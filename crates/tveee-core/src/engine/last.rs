@@ -46,7 +46,7 @@ pub fn parse(text: &str) -> Option<LastSeen> {
     (!l.what.is_empty() && l.at > 0).then_some(l)
 }
 
-fn now() -> i64 {
+pub fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
@@ -56,10 +56,25 @@ pub fn load(ip: &str) -> Option<LastSeen> {
     (now() - l.at < MAX_AGE).then_some(l)
 }
 
-/// Keep what a snapshot shows (not while in standby: there's nothing to see).
+/// Keep what a snapshot shows (in standby, just that: so the next start
+/// says so at once).
 pub fn of(s: &Snapshot) -> Option<LastSeen> {
-    let a = s.activity.as_ref().filter(|_| !s.standby)?;
+    if s.standby {
+        let what = s.activity.as_ref().map_or_else(|| "In standby".to_string(), |a| a.what.clone());
+        return Some(LastSeen { what, title: None, volume: s.volume, at: now() });
+    }
+    let a = s.activity.as_ref()?;
     Some(LastSeen { what: a.what.clone(), title: a.title.clone(), volume: s.volume, at: now() })
+}
+
+/// How long ago `at` (unix seconds) was, said briefly: "just now",
+/// "5 min ago", "3 h ago".
+pub fn ago(at: i64) -> String {
+    match now() - at {
+        s if s < 60 => "just now".into(),
+        s if s < 3600 => format!("{} min ago", s / 60),
+        s => format!("{} h ago", s / 3600),
+    }
 }
 
 pub fn save(ip: &str, l: &LastSeen) {

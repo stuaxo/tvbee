@@ -92,6 +92,7 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
                 button("⌫", "delete", Do(Key(KEY_DEL))),
                 button("home", "home", Do(Key(KEY_HOME))),
                 button("tab", "player mode", ToggleMode),
+                button("^p", "cmds", Input::OpenPalette),
                 button("^c", "quit", Quit),
                 button("", "play/pause", Do(PlayPause)),
                 button("", "vol+", Do(Volume(1))),
@@ -120,6 +121,7 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
         button("g", "guide", Input::OpenGuide),
         button(",", "options", Input::OpenOptions),
         button(".", "more", OpenMenu),
+        button(":", "cmds", Input::OpenPalette),
         button("?", "help", ToggleHelp),
         button("q", "quit", Quit),
     ]);
@@ -127,6 +129,35 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
         b.retain(|x| x.label != "ambilight");
     }
     b
+}
+
+/// What goes first when the keys don't fit one row, by label: the least
+/// used first (they're all still keys, in the help and the palette).
+const DROP_FIRST: &[&str] = &[
+    // remote mode's click-only buttons
+    "help", "more", "options", "guide", "search", "apps", "preview", "ambilight", "info", "vol-", "vol+", "play/pause",
+    // then remote mode's keys, the obvious ones last
+    "back", "home", "delete", "ok", "right", "left", "down", "up",
+];
+
+/// `bs` cut down to one row of `width`: the least used go first (see
+/// [`DROP_FIRST`]); playback, the mode, commands, help and quit stay.
+pub(super) fn one_row(mut bs: Vec<Button>, width: u16) -> Vec<Button> {
+    let fits = |bs: &[Button]| flow(bs, width).iter().all(|(r, _)| *r == 0);
+    // player mode's own order of going: the panels, then the rest
+    let player_first = ["preview", "options", "info", "ambilight", "more", "back", "home", "search", "apps", "guide", "mute"];
+    let order: Vec<&str> = player_first.iter().chain(DROP_FIRST).copied().collect();
+    for label in order {
+        if fits(&bs) {
+            break;
+        }
+        // a click-only button (remote mode) before a key with the same name
+        let at = bs.iter().rposition(|b| b.label == label && b.key.is_empty()).or_else(|| bs.iter().position(|b| b.label == label));
+        if let Some(i) = at {
+            bs.remove(i);
+        }
+    }
+    bs
 }
 
 /// A small pane (an editor split, a corner of the screen): one row of keys.
@@ -313,9 +344,10 @@ impl App {
         let small = compact(area);
         let bs = buttons(self.mode, self.st.snap.as_ref().is_some_and(|s| s.exact), self.panel_id().is_some());
         let bs = if small { compact_buttons(self.mode) } else { bs };
+        // one row of keys at any width (the rest: the palette, help)
+        let bs = one_row(bs, area.width);
         let places = flow(&bs, area.width);
-        // a small pane keeps one row of keys (the rest: the palette, help)
-        let rows = if small { 1 } else { places.iter().map(|(r, _)| r + 1).max().unwrap_or(1) };
+        let rows = places.iter().map(|(r, _)| r + 1).max().unwrap_or(1);
         let [top, body, _, footer, status] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(4),
@@ -440,7 +472,8 @@ impl App {
                     Some(a) => {
                         let mut what = vec![label("what"), Span::raw(a.what.clone()).bold()];
                         if self.st.seeded {
-                            what.push(Span::styled("  (last seen; waiting for the TV...)", Style::new().fg(Color::DarkGray).italic()));
+                            let when = self.st.seen_at.map_or_else(|| "last seen".to_string(), tveee_core::engine::last::ago);
+                            what.push(Span::styled(format!("  ({when}; reading the TV...)"), Style::new().fg(Color::DarkGray).italic()));
                         }
                         lines.push((Line::from(what), None));
                         // fields that open something look like links

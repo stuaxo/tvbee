@@ -242,3 +242,22 @@ fn memory_graph_zooms_when_it_stays_high() {
     assert!(f > 1000 && f < 1290 && f.is_multiple_of(50), "{f}");
     assert_eq!(graph_floor(&[], 1342), 0);
 }
+
+#[test]
+fn first_frame_from_last_time_desktop() {
+    use tveee_core::engine::last::{self, LastSeen};
+    let seen = LastSeen { what: "Watching YouTube".into(), title: Some("A video from last time".into()), volume: Some((24, 60)), at: last::now() - 300 };
+    let s = screen(&mut app(TvState::seeded(Some(&seen))), DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("(5 min ago; reading the TV...)"), "{s}");
+    assert!(!s.contains("waiting for the TV"));
+}
+
+#[test]
+fn standby_is_kept_for_next_time() {
+    use tveee_core::engine::last;
+    let st = standby();
+    let l = last::of(st.snap.as_ref().expect("a snapshot")).expect("kept");
+    assert!(l.what.to_lowercase().contains("standby"), "{l:?}");
+    assert_eq!(l.title, None);
+}
