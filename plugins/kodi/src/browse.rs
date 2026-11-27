@@ -137,7 +137,7 @@ pub fn go_for(row: &Row, window: u64) -> Go {
 pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
     let items = rows
         .iter()
-        .map(|r| ListItem { id: r.path.clone(), label: r.label.clone(), meta: Some(r.label2.clone()).filter(|m| !m.is_empty()), folder: r.folder, go: go_for(r, p.window) })
+        .map(|r| ListItem { section: None, id: r.path.clone(), label: r.label.clone(), meta: Some(r.label2.clone()).filter(|m| !m.is_empty()), folder: r.folder, go: go_for(r, p.window) })
         .collect();
     let title = if p.name.is_empty() { p.path.clone() } else { p.name.clone() };
     let mut l = ContextList { title, kind: "folder", key: key_of(p), items, at: None };

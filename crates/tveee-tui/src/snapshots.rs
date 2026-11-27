@@ -613,6 +613,7 @@ fn kodi_artists() -> TvState {
     use tveee_core::provider::{ContextList, ListItem, ListPlace};
     let mut st = kodi_paused();
     let item = |id: &str, label: &str, folder: bool, meta: Option<&str>| ListItem {
+        section: None,
         id: id.into(),
         label: label.into(),
         meta: meta.map(str::to_string),
@@ -731,4 +732,30 @@ fn list_pane_follows_kodi() {
     a.st = h.state();
     a.list_sync(Change::Snapshot);
     assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::LoadList]);
+}
+
+#[test]
+fn list_pane_parts() {
+    // the list in two parts: a subheading where each starts
+    let mut st = kodi_artists();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        for (n, it) in l.items.iter_mut().enumerate() {
+            it.section = Some(if n < 3 { "Artists" } else { "Files" }.into());
+        }
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, _rx, h) = app_seeing(st);
+    a.overlay = Overlay::List { sel: 3 };
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("─ Artists") && s.contains("─ Files"), "{s}");
+    // subheadings aren't chosen: still 4 rows to click
+    assert_eq!(a.hits.iter().filter(|(_, h)| matches!(h, Hit::ListRow(_))).count(), 4);
+    // filtered to the files only: the artists' subheading goes
+    for c in "exit".chars() {
+        let Overlay::List { sel } = a.overlay else { panic!() };
+        a.list_key(sel, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    let s = screen(&mut a, DESKTOP);
+    assert!(!s.contains("─ Artists") && s.contains("─ Files"), "{s}");
 }
