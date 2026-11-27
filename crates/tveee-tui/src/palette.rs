@@ -65,8 +65,38 @@ pub fn palette_matches(actions: &[ActionDescriptor], query: &str) -> Vec<Item> {
 
 impl App {
     pub(super) fn open_palette(&mut self) {
+        // over nothing: nothing to go back to
+        self.under = None;
         self.prompt.clear();
         self.overlay = Overlay::Palette(0);
+    }
+
+    /// Whether this key opens the commands over the pop-up that's open: ^P
+    /// anywhere, : where it isn't typed (a search, a filter, a prompt).
+    pub(super) fn palette_wanted(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        let typing = matches!(self.overlay, Overlay::Search(_) | Overlay::Prompt(_) | Overlay::Pin | Overlay::Guide { .. } | Overlay::AmbiColour { .. });
+        let open = !matches!(self.overlay, Overlay::None | Overlay::Palette(_));
+        open && match code {
+            KeyCode::Char('p') => mods.contains(KeyModifiers::CONTROL),
+            KeyCode::Char(':') => !typing,
+            _ => false,
+        }
+    }
+
+    /// Open the commands over the pop-up that's open, to go back to it.
+    pub(super) fn palette_over(&mut self) {
+        self.under = Some((self.overlay, std::mem::take(&mut self.prompt)));
+        self.overlay = Overlay::Palette(0);
+    }
+
+    /// The palette closed: back to what it was over, if anything.
+    pub(super) fn palette_closed(&mut self) {
+        if let Some((o, text)) = self.under.take()
+            && self.overlay == Overlay::None
+        {
+            self.overlay = o;
+            self.prompt = text;
+        }
     }
 
     /// What's listed now, for what's been typed.
@@ -79,19 +109,27 @@ impl App {
     pub(super) fn palette_key(&mut self, sel: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         let n = self.palette_list().len();
         match code {
-            KeyCode::Esc => self.overlay = Overlay::None,
+            KeyCode::Esc => {
+                self.overlay = Overlay::None;
+                self.palette_closed();
+            }
             KeyCode::Up => self.overlay = Overlay::Palette(sel.checked_sub(1).unwrap_or(n.saturating_sub(1))),
             KeyCode::Down => self.overlay = Overlay::Palette(if sel + 1 >= n { 0 } else { sel + 1 }),
             KeyCode::Enter => match self.palette_list().get(sel) {
                 Some(&Item::Action(i)) => {
                     let (next, action) = choose(&self.actions[i]);
                     self.apply_overlay(next, action, actions);
+                    // run, and nothing new opened: back to what was under
+                    if !matches!(self.overlay, Overlay::Prompt(_) | Overlay::Confirm { .. }) {
+                        self.palette_closed();
+                    }
                 }
                 Some(&Item::Ui(i)) => {
                     self.overlay = Overlay::None;
                     if self.apply(UI[i].1.clone(), actions) {
                         self.quit = true;
                     }
+                    self.palette_closed();
                 }
                 None => {}
             },

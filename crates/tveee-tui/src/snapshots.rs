@@ -467,3 +467,34 @@ fn load_hidden_and_system_watched() {
     let s = screen(&mut a, CORNER);
     assert!(!s.lines().nth(1).unwrap_or_default().contains("load"), "{s}");
 }
+
+#[test]
+fn palette_over_the_log() {
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let h = Handle::new(tx, Arc::new(Mutex::new(Arc::new(kodi_paused()))));
+    let mut a = app_with(kodi_paused(), actions());
+    a.overlay = Overlay::Logs(0);
+    // : opens the commands over the log, which stays drawn under them
+    assert!(a.palette_wanted(KeyCode::Char(':'), KeyModifiers::NONE));
+    a.palette_over();
+    assert_eq!(a.overlay, Overlay::Palette(0));
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("commands") && s.contains("log"), "{s}");
+    // Esc: back to the log
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Logs(0));
+    // over the guide, its filter kept: : is typed there, ^P opens them
+    a.overlay = Overlay::Guide { tab: GuideTab::All, at: 0 };
+    a.prompt = "bbc".into();
+    assert!(!a.palette_wanted(KeyCode::Char(':'), KeyModifiers::NONE));
+    assert!(a.palette_wanted(KeyCode::Char('p'), KeyModifiers::CONTROL));
+    a.palette_over();
+    assert!(a.prompt.is_empty());
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!((a.overlay, a.prompt.as_str()), (Overlay::Guide { tab: GuideTab::All, at: 0 }, "bbc"));
+    // the palette on its own, closed: nothing comes back
+    a.overlay = Overlay::None;
+    a.open_palette();
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::None);
+}
