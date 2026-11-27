@@ -46,6 +46,8 @@ pub enum Hit {
     Chips,
     /// Menu item N, from a button on the now-playing card.
     Chip(usize),
+    /// Line N of the log (by its number).
+    LogLine(usize),
 }
 
 /// Columns `s` takes.

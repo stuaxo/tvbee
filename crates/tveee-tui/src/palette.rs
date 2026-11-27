@@ -74,7 +74,7 @@ impl App {
     /// Whether this key opens the commands over the pop-up that's open: ^P
     /// anywhere, : where it isn't typed (a search, a filter, a prompt).
     pub(super) fn palette_wanted(&self, code: KeyCode, mods: KeyModifiers) -> bool {
-        let typing = matches!(self.overlay, Overlay::Search(_) | Overlay::Prompt(_) | Overlay::Pin | Overlay::Guide { .. } | Overlay::AmbiColour { .. });
+        let typing = matches!(self.overlay, Overlay::Search(_) | Overlay::Prompt(_) | Overlay::Pin | Overlay::Guide { .. } | Overlay::AmbiColour { .. } | Overlay::SaveLog);
         let open = !matches!(self.overlay, Overlay::None | Overlay::Palette(_));
         open && match code {
             KeyCode::Char('p') => mods.contains(KeyModifiers::CONTROL),
