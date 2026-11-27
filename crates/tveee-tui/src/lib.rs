@@ -68,6 +68,10 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// The options dialog's tab: its options, or the plugins.
+    options_plugins: bool,
+    /// Every plugin and whether it's on (the options dialog's plugins tab).
+    plugins: Vec<tveee_core::plugin::PluginState>,
     /// What has been typed into the open prompt.
     prompt: String,
     /// The search box's app choices, made when it opens.
@@ -393,6 +397,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     tveee_core::log::keep_recent();
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
+    app.plugins = c.plugins.clone();
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -478,6 +483,8 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            options_plugins: false,
+            plugins: Vec::new(),
             prompt: String::new(),
             search_targets: Vec::new(),
             settling: None,
@@ -822,6 +829,10 @@ impl App {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
             }
             (Overlay::Options(_), Some(Hit::OptionItem(i))) => self.toggle_option(i),
+            (Overlay::Options(_), Some(Hit::OptionTab(plugins))) => {
+                self.options_plugins = plugins;
+                self.overlay = Overlay::Options(0);
+            }
             (Overlay::Options(_), Some(Hit::Popup)) => {}
             (Overlay::Options(_), _) => self.overlay = Overlay::None,
             (Overlay::Guide { .. }, Some(Hit::Details(click))) => {
