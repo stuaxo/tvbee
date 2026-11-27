@@ -28,6 +28,8 @@ pub enum Input {
     /// The preview panel: a picture of what's on.
     TogglePreview,
     OpenMenu,
+    /// The command palette: every action, found by typing.
+    OpenPalette,
     OpenApps,
     OpenSearch,
     OpenGuide,
@@ -44,12 +46,15 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
     let act = |a| Input::Do(a);
     match (code, mode) {
         (KeyCode::Char('c'), _) if mods.contains(KeyModifiers::CONTROL) => Input::Quit,
+        // the palette from either mode (Ctrl-P types nothing into the TV)
+        (KeyCode::Char('p'), _) if mods.contains(KeyModifiers::CONTROL) => Input::OpenPalette,
         (KeyCode::Tab, _) => Input::ToggleMode,
         // remote mode: the keyboard is the TV's (Tab leaves, Ctrl-C quits)
         (_, Mode::Remote) => remote_input(code, mods),
         (KeyCode::Char('q') | KeyCode::Esc, _) => Input::Quit,
         (KeyCode::Char('?'), _) => Input::ToggleHelp,
         (KeyCode::Char('.'), _) => Input::OpenMenu,
+        (KeyCode::Char(':'), _) => Input::OpenPalette,
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
         (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
         (KeyCode::Char('P'), _) => Input::Pair,

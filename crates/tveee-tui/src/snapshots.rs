@@ -15,9 +15,29 @@ const CORNER: (u16, u16) = (60, 16);
 /// A screen on this state, with no engine behind it (what's asked for goes
 /// nowhere).
 fn app(st: TvState) -> App {
+    app_with(st, Vec::new())
+}
+
+fn app_with(st: TvState, actions: Vec<ActionDescriptor>) -> App {
     let (tx, _) = std::sync::mpsc::channel();
     let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(st))));
-    App::new("192.168.1.19".into(), handle, Vec::new(), true)
+    App::new("192.168.1.19".into(), handle, actions, true)
+}
+
+/// Some actions as plugins describe them, for the palette and menu.
+fn actions() -> Vec<ActionDescriptor> {
+    use tveee_core::actions::{Cx, Output};
+    fn ok(_: &Cx, _: &[String]) -> tveee_core::error::Result<Output> {
+        Ok(Output::default())
+    }
+    vec![
+        ActionDescriptor::new("kodi.subtitles", "kodi", "kodi: next subtitles", ok).key('k'),
+        ActionDescriptor::new("kodi.audio", "kodi", "kodi: next audio track", ok).key('a'),
+        ActionDescriptor::new("kodi.find", "kodi", "kodi: find in the library", ok).text("Find in Kodi:", "a title"),
+        ActionDescriptor::new("media.volume", "media", "volume", ok).cli("vol", "up|down|<level>", "change volume"),
+        ActionDescriptor::new("power.sleep", "power", "sleep (standby)", ok).key('s'),
+        ActionDescriptor::new("power.off", "power", "power off", ok).key('X').confirm("Power off the TV?"),
+    ]
 }
 
 /// The screen as text, one line per row (trailing spaces trimmed).
@@ -77,4 +97,20 @@ fn standby_desktop() {
 #[test]
 fn nothing_read_yet_corner() {
     insta::assert_snapshot!(screen(&mut app(TvState::seeded(None)), CORNER));
+}
+
+#[test]
+fn palette_desktop() {
+    let mut a = app_with(kodi_paused(), actions());
+    a.open_palette();
+    insta::assert_snapshot!("palette_all", screen(&mut a, DESKTOP));
+    a.prompt = "kodi".into();
+    insta::assert_snapshot!("palette_kodi", screen(&mut a, DESKTOP));
+}
+
+#[test]
+fn palette_asks_for_arguments() {
+    let mut a = app_with(kodi_paused(), actions());
+    a.overlay = Overlay::Prompt("media.volume");
+    insta::assert_snapshot!(screen(&mut a, CORNER));
 }

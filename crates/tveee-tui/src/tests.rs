@@ -242,8 +242,8 @@ fn menu_keys() {
     let k = |o, c| overlay_key(o, c, &it);
     // a plain item runs straight away; a risky one asks first
     assert_eq!(k(Overlay::Menu(0), KeyCode::Char('s')), (Overlay::None, Some(Action::Run { id: "power.sleep", args: vec![] })));
-    assert_eq!(k(Overlay::Menu(0), KeyCode::Char('X')), (Overlay::Confirm { item: 1, yes: false }, None));
-    assert_eq!(k(Overlay::Menu(1), KeyCode::Enter), (Overlay::Confirm { item: 1, yes: false }, None));
+    assert_eq!(k(Overlay::Menu(0), KeyCode::Char('X')), (Overlay::Confirm { id: "power.off", yes: false }, None));
+    assert_eq!(k(Overlay::Menu(1), KeyCode::Enter), (Overlay::Confirm { id: "power.off", yes: false }, None));
     assert_eq!(k(Overlay::Menu(0), KeyCode::Down), (Overlay::Menu(1), None));
     assert_eq!(k(Overlay::Menu(1), KeyCode::Down), (Overlay::Menu(0), None));
     assert_eq!(k(Overlay::Menu(0), KeyCode::Up), (Overlay::Menu(1), None));
@@ -255,12 +255,12 @@ fn menu_keys() {
 fn confirmations_default_to_no() {
     let it = items();
     let k = |o, c| overlay_key(o, c, &it);
-    let ask = Overlay::Confirm { item: 1, yes: false };
+    let ask = Overlay::Confirm { id: "power.off", yes: false };
     assert_eq!(k(ask, KeyCode::Enter), (Overlay::None, None));
     assert_eq!(k(ask, KeyCode::Char('n')), (Overlay::None, None));
     assert_eq!(k(ask, KeyCode::Char(' ')), (Overlay::None, None));
     assert_eq!(k(ask, KeyCode::Char('y')), (Overlay::None, Some(Action::Run { id: "power.off", args: vec![] })));
-    let yes = Overlay::Confirm { item: 1, yes: true };
+    let yes = Overlay::Confirm { id: "power.off", yes: true };
     assert_eq!(k(ask, KeyCode::Right), (yes, None));
     assert_eq!(k(yes, KeyCode::Enter), (Overlay::None, Some(Action::Run { id: "power.off", args: vec![] })));
 }
@@ -359,17 +359,17 @@ fn typing_a_link() {
     let none = KeyModifiers::NONE;
     let mut t = String::new();
     for c in "youtu.be/x".chars() {
-        assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Char(c), none, &mut t), (Overlay::Prompt(3), None));
+        assert_eq!(prompt_key("apps.open_link", KeyCode::Char(c), none, &mut t), (Overlay::Prompt("apps.open_link"), None));
     }
-    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Backspace, none, &mut t), (Overlay::Prompt(3), None));
+    assert_eq!(prompt_key("apps.open_link", KeyCode::Backspace, none, &mut t), (Overlay::Prompt("apps.open_link"), None));
     assert_eq!(t, "youtu.be/");
-    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Char('u'), KeyModifiers::CONTROL, &mut t), (Overlay::Prompt(3), None));
+    assert_eq!(prompt_key("apps.open_link", KeyCode::Char('u'), KeyModifiers::CONTROL, &mut t), (Overlay::Prompt("apps.open_link"), None));
     assert_eq!(t, "");
     // Enter on nothing stays put; with text it runs the item
-    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::Prompt(3), None));
+    assert_eq!(prompt_key("apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::Prompt("apps.open_link"), None));
     t.push_str("  vlc http://h/f.mkv ");
-    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::None, Some(Action::Run { id: "apps.open_link", args: vec!["vlc http://h/f.mkv".into()] })));
-    assert_eq!(prompt_key(3, "apps.open_link", KeyCode::Esc, none, &mut t), (Overlay::None, None));
+    assert_eq!(prompt_key("apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::None, Some(Action::Run { id: "apps.open_link", args: vec!["vlc http://h/f.mkv".into()] })));
+    assert_eq!(prompt_key("apps.open_link", KeyCode::Esc, none, &mut t), (Overlay::None, None));
     assert_eq!(paste_text("https://youtu.be/x\r\n"), "https://youtu.be/x");
     assert_eq!(paste_text("vlc\thttp://h/f.mkv"), "vlc http://h/f.mkv");
 }
@@ -377,8 +377,8 @@ fn typing_a_link() {
 #[test]
 fn text_items_open_a_prompt() {
     let items = vec![ActionDescriptor::new("apps.open_link", "apps", "open a link", ok).key('o').text("Link:", "")];
-    assert_eq!(pick(&items, 0), (Overlay::Prompt(0), None));
-    assert_eq!(overlay_key(Overlay::Menu(0), KeyCode::Char('o'), &items), (Overlay::Prompt(0), None));
+    assert_eq!(pick(&items, 0), (Overlay::Prompt("apps.open_link"), None));
+    assert_eq!(overlay_key(Overlay::Menu(0), KeyCode::Char('o'), &items), (Overlay::Prompt("apps.open_link"), None));
 }
 
 fn rows(pm: &str, guessed: &[apps::Guess]) -> Vec<Entry> {
@@ -585,4 +585,14 @@ fn last_seen_round_trip() {
     assert_eq!(super::last::parse(&super::last::format(&bare)), Some(bare));
     assert_eq!(super::last::parse("what=x\n"), None); // no time
     assert_eq!(super::last::parse(""), None);
+}
+
+#[test]
+fn palette_keys() {
+    let k = |c, m| input_for(c, m, Mode::Player);
+    assert_eq!(k(KeyCode::Char(':'), KeyModifiers::NONE), Input::OpenPalette);
+    assert_eq!(k(KeyCode::Char('p'), KeyModifiers::CONTROL), Input::OpenPalette);
+    // in remote mode too (typing goes to the TV, Ctrl-P doesn't)
+    assert_eq!(input_for(KeyCode::Char('p'), KeyModifiers::CONTROL, Mode::Remote), Input::OpenPalette);
+    assert_eq!(input_for(KeyCode::Char(':'), KeyModifiers::NONE, Mode::Remote), Input::Do(Action::Text(":".into())));
 }

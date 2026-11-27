@@ -28,6 +28,7 @@ mod preview;
 mod launcher;
 mod ambi;
 mod overlays;
+mod palette;
 mod drawing;
 #[cfg(test)]
 mod tests;
@@ -40,6 +41,7 @@ pub use self::guide::*;
 pub use self::preview::*;
 pub use self::launcher::*;
 pub use self::overlays::*;
+pub use self::palette::*;
 pub use self::drawing::*;
 
 const CAT: &str = "ui";
@@ -52,7 +54,10 @@ struct App {
     note: String,
     mode: Mode,
     overlay: Overlay,
+    /// The `.` menu: the actions with a menu key.
     menu: Vec<ActionDescriptor>,
+    /// Every action of the enabled plugins (the palette).
+    actions: Vec<ActionDescriptor>,
     /// Where the clickable things were drawn last frame.
     hits: Vec<(ratatui::layout::Rect, Hit)>,
     /// Show the system panel (memory, storage, ...).
@@ -299,10 +304,11 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                         KeyCode::Char(c) if c.is_ascii_digit() && app.prompt.len() < 8 => app.prompt.push(c),
                         _ => {}
                     }
-                } else if let Overlay::Prompt(item) = app.overlay {
+                } else if let Overlay::Palette(sel) = app.overlay {
+                    app.palette_key(sel, k.code, k.modifiers, actions);
+                } else if let Overlay::Prompt(id) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
-                    let id = app.menu.get(item).map_or("", |m| m.id);
-                    let (next, action) = prompt_key(item, id, k.code, k.modifiers, &mut text);
+                    let (next, action) = prompt_key(id, k.code, k.modifiers, &mut text);
                     app.prompt = text;
                     app.apply_overlay(next, action, actions);
                 } else if let Overlay::Apps { tab, sel } = app.overlay {
@@ -318,7 +324,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
             }
             Event::Paste(p) => {
                 match app.overlay {
-                    Overlay::Prompt(_) | Overlay::Search(_) => app.prompt.push_str(&paste_text(&p)),
+                    Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_) => app.prompt.push_str(&paste_text(&p)),
                     // remote mode: type it into the TV (what `input text` can)
                     Overlay::None if app.mode == Mode::Remote => {
                         let t: String = paste_text(&p).chars().filter(|c| c.is_ascii() && !c.is_ascii_control()).collect();
@@ -363,7 +369,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         return tveee_core::error::usage("ui needs a terminal");
     }
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
-    let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.menu.clone(), settle);
+    let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -396,6 +402,8 @@ pub fn actions() -> Vec<ActionDescriptor> {
          \x20 left/right    seek 10s     [ / ]  seek 60s     0-9  jump to 0%-90%\n\
          \x20 up/down + -   volume       m      mute/unmute\n\
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
+         \x20 :  commands (or Ctrl-P): everything tveee can do, found by typing a\n\
+         \x20    few letters of it\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
          \x20 l  Ambilight panel (Philips TVs that have it): state and each light's\n\
          \x20    colour; L (or clicking it) changes power, style, Hue and any light's\n\
@@ -428,7 +436,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
 
 impl App {
     /// A screen on `engine`'s state, nothing open yet.
-    fn new(ip: String, engine: Handle, menu: Vec<ActionDescriptor>, settle: bool) -> App {
+    fn new(ip: String, engine: Handle, actions: Vec<ActionDescriptor>, settle: bool) -> App {
         App {
             ip,
             st: engine.state(),
@@ -436,7 +444,8 @@ impl App {
             note: String::new(),
             mode: Mode::Player,
             overlay: Overlay::None,
-            menu,
+            menu: actions.iter().filter(|a| a.key.is_some()).copied().collect(),
+            actions,
             hits: Vec::new(),
             info: false,
             apps_tab: AppTab::Known,
@@ -611,6 +620,7 @@ impl App {
                 self.overlay = Overlay::Menu(wake.unwrap_or(0));
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
+            Input::OpenPalette => self.open_palette(),
             Input::OpenApps => {
                 // start on the app that's in front, if it's in the list
                 let pkg = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f));
@@ -644,8 +654,14 @@ impl App {
             self.apps_tab = tab;
         }
         match (was, next, action) {
-            (_, _, Some(Action::Run { id, args })) => {
-                self.note = format!("{}...", tveee_core::actions::find(&self.menu, id).map_or(id, |m| m.title));
+            (_, _, Some(Action::Run { id, mut args })) => {
+                let a = tveee_core::actions::find(&self.actions, id);
+                self.note = format!("{}...", a.map_or(id, |m| m.title));
+                // typed arguments (not text it asks for): word by word, as
+                // on the command line
+                if a.is_some_and(|a| a.params == Params::None) && args.len() == 1 {
+                    args = args[0].split_whitespace().map(str::to_string).collect();
+                }
                 // with text typed (e.g. "open a link"): something new should come up
                 if !args.is_empty() {
                     self.settle(self.note.clone(), None);
@@ -708,8 +724,8 @@ impl App {
                 self.apply_overlay(next, action, actions);
             }
             (Overlay::Menu(_), Some(Hit::Popup)) => {}
-            (Overlay::Confirm { item, .. }, Some(Hit::ConfirmYes)) => {
-                self.apply_overlay(Overlay::None, run_item(&self.menu, item), actions)
+            (Overlay::Confirm { id, .. }, Some(Hit::ConfirmYes)) => {
+                self.apply_overlay(Overlay::None, Some(run(id)), actions)
             }
             (Overlay::Confirm { .. }, Some(Hit::Popup)) => {}
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
@@ -749,9 +765,9 @@ impl App {
             (Overlay::AppActions { tab, sel, .. }, Some(Hit::AppChoice(i))) => self.run_choice(tab, sel, i, actions),
             (Overlay::AppActions { .. }, Some(Hit::Popup)) => {}
             (Overlay::AppActions { tab, sel, .. }, _) => self.overlay = Overlay::Apps { tab, sel },
-            (Overlay::Prompt(_) | Overlay::Search(_), Some(Hit::Popup)) => {}
+            (Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), Some(Hit::Popup)) => {}
             // a click elsewhere closes the pop-up (cancelling a confirmation)
-            (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_), _) => {
+            (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
                 self.apply_overlay(Overlay::None, None, actions)
             }
             (Overlay::None, Some(Hit::Input(i))) => return self.apply(i, actions),
