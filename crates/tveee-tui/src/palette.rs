@@ -16,6 +16,7 @@ pub const UI: &[(&str, Input)] = &[
     ("ui: all keys (help)", Input::ToggleHelp),
     ("ui: live TV guide", Input::OpenGuide),
     ("ui: music visualiser: show or hide it (Kodi)", Input::ToggleVisualiser),
+    ("ui: the list the app shows (Kodi's folder)", Input::OpenList),
     ("ui: launch an app", Input::OpenApps),
     ("ui: search the app in front", Input::OpenSearch),
     ("ui: options", Input::OpenOptions),
@@ -100,7 +101,7 @@ impl App {
     }
 
     /// What's listed now, for what's been typed.
-    fn palette_list(&self) -> Vec<Item> {
+    pub(super) fn palette_list(&self) -> Vec<Item> {
         palette_matches(&self.actions, &self.prompt)
     }
 
@@ -113,8 +114,10 @@ impl App {
                 self.overlay = Overlay::None;
                 self.palette_closed();
             }
-            KeyCode::Up => self.overlay = Overlay::Palette(sel.checked_sub(1).unwrap_or(n.saturating_sub(1))),
-            KeyCode::Down => self.overlay = Overlay::Palette(if sel + 1 >= n { 0 } else { sel + 1 }),
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(sel, n, c).unwrap_or(sel);
+                self.overlay = Overlay::Palette(to)
+            }
             KeyCode::Enter => match self.palette_list().get(sel) {
                 Some(&Item::Action(i)) => {
                     let (next, action) = choose(&self.actions[i]);

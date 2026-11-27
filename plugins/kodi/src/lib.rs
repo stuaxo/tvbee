@@ -18,6 +18,7 @@ use tveee_core::tv::Tv;
 pub const PACKAGE: &str = "org.xbmc.kodi";
 
 pub mod addons;
+pub mod browse;
 pub mod sideload;
 const PAIRING: &str = "kodi";
 const DEFAULT_PORT: u16 = 8080;
@@ -517,6 +518,34 @@ impl tveee_core::provider::Player for Kodi {
         match visualiser(tv, want) {
             Err(Error::Unavailable(_)) => Outcome::Fallback,
             r => r.into(),
+        }
+    }
+    fn has_list(&self) -> bool {
+        true
+    }
+    fn list_place(&self, tv: &Tv) -> Outcome<Option<tveee_core::provider::ListPlace>> {
+        match browse::place(tv) {
+            Ok(p) => Outcome::Handled(p.as_ref().map(browse::list_place)),
+            Err(Error::Unavailable(_)) => Outcome::Fallback,
+            Err(e) => Outcome::Failed(e),
+        }
+    }
+    fn list(&self, tv: &Tv) -> Outcome<tveee_core::provider::ContextList> {
+        match browse::list(tv) {
+            Ok(Some(l)) => Outcome::Handled(l),
+            // not showing a list (or its API is off): nothing here
+            Ok(None) | Err(Error::Unavailable(_)) => Outcome::Fallback,
+            Err(e) => Outcome::Failed(e),
+        }
+    }
+    fn go(&self, tv: &Tv, to: &tveee_core::more::Go) -> Outcome<String> {
+        use tveee_core::provider::Provider;
+        let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };
+        match self.open_here(tv, link) {
+            Outcome::Handled(()) if link.starts_with("kodi-window:") => Outcome::Handled("opened it in Kodi".into()),
+            Outcome::Handled(()) => Outcome::Handled("playing it in Kodi".into()),
+            Outcome::Fallback => Outcome::Fallback,
+            Outcome::Failed(e) => Outcome::Failed(e),
         }
     }
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {

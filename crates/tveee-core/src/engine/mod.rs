@@ -127,6 +127,13 @@ pub enum Action {
     /// The system panel opened (true) or closed: the refresh reads the
     /// system figures while it's open (or the top line shows them).
     WatchSystem(bool),
+    /// The list pane opened (true) or closed: while it's open the refresh
+    /// reads where the app's list is ([`Snapshot::list_place`]).
+    WatchList(bool),
+    /// Read the app in front's list ([`crate::provider::Player::list`]).
+    LoadList,
+    /// Choose an item from it; its list is read again after.
+    ListGo(crate::more::Go),
     Refresh,
 }
 
@@ -146,6 +153,9 @@ pub struct Snapshot {
     pub kind: Option<String>,
     pub power: Option<String>,
     pub focus: Option<String>,
+    /// Where the app's list is (which list, and its highlighted row), while
+    /// the list pane is open and the app can say.
+    pub list_place: Option<crate::provider::ListPlace>,
 }
 
 /// The package of the app in front in a snapshot.
@@ -171,6 +181,8 @@ pub enum Msg {
     Guide(std::result::Result<Guide, String>),
     /// A programme's description (channel, start).
     Info((u32, i64), std::result::Result<Option<String>, String>),
+    /// The app in front's list (None: it isn't showing one), or why not.
+    List(std::result::Result<Option<crate::provider::ContextList>, String>),
     /// The panels this TV has (`crate::panel`), by id.
     Panels(Vec<&'static str>),
     /// Pairing: the TV is showing a PIN; ask for it.

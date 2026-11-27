@@ -48,6 +48,8 @@ pub enum Hit {
     Chip(usize),
     /// Line N of the log (by its number).
     LogLine(usize),
+    /// Item N of the list pane.
+    ListRow(usize),
 }
 
 /// Columns `s` takes.
@@ -805,6 +807,10 @@ impl App {
         let music = s.activity.as_ref().and_then(|a| a.media) == Some("audio");
         if music && provider.and_then(|p| p.player()).is_some_and(|p| p.has_visualiser()) {
             out.push(("z".to_string(), "visualiser".to_string(), Hit::Input(Input::ToggleVisualiser)));
+        }
+        // apps that show lists tveee can read (Kodi's folders)
+        if provider.and_then(|p| p.player()).is_some_and(|p| p.has_list()) {
+            out.push(("t".to_string(), "list".to_string(), Hit::Input(Input::OpenList)));
         }
         if live || provider.is_some() {
             out.push(("/".to_string(), "search".to_string(), Hit::Input(Input::OpenSearch)));

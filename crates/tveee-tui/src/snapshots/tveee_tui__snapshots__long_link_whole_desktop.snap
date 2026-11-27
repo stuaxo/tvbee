@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 190
+assertion_line: 191
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -14,7 +14,7 @@ expression: s
 │         se&token=abcdef0123456789                                     │last 0s                                      ││
 │         [copy y] [open ↗]   u shortens it                             │swap     ━━━┃── 316/512 MB                   ││
 │audio    AAC-LC  AAC                                                   │load     4.82 3.10 2.40                      ││
-│do        /  search                                                    └─────────────────────────────────────────────┘│
+│do        t  list   /  search                                          └─────────────────────────────────────────────┘│
 │                                                                                                                      │
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
 │                                                                                                                      │

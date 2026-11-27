@@ -65,8 +65,10 @@ pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Over
         KeyCode::Esc | KeyCode::Backspace => (Overlay::None, None),
         KeyCode::Tab | KeyCode::Left | KeyCode::Right => (Overlay::Apps { tab: tab.other(), sel: 0 }, None),
         KeyCode::Char(' ') if n > 0 => (Overlay::AppActions { tab, sel, at: 0 }, None),
-        KeyCode::Up if n > 0 => at(sel.checked_sub(1).unwrap_or(n - 1)),
-        KeyCode::Down if n > 0 => at((sel + 1) % n),
+        c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(sel, n, c).unwrap_or(sel);
+                at(to)
+            }
         KeyCode::Enter => match list.get(sel) {
             Some(e) => (Overlay::None, Some(Action::Launch(e.target.clone()))),
             None => at(sel),
@@ -109,8 +111,11 @@ impl App {
         let rows = tab_list(self.st.apps_list(), tab);
         let n = rows.get(sel).map_or(1, |e| app_choices(e, self.st.running.contains(&e.package), self.st.fixed.contains(&e.package)).len());
         match code {
-            KeyCode::Up => self.overlay = Overlay::AppActions { tab, sel, at: (at + n - 1) % n },
-            KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::AppActions { tab, sel, at: (at + 1) % n },
+            KeyCode::Tab => self.overlay = Overlay::AppActions { tab, sel, at: (at + 1) % n },
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(at, n, c).unwrap_or(at);
+                self.overlay = Overlay::AppActions { tab, sel, at: to }
+            }
             KeyCode::Enter | KeyCode::Char(' ') => self.run_choice(tab, sel, at, actions),
             // anything else goes back to the list
             _ => self.overlay = Overlay::Apps { tab, sel },

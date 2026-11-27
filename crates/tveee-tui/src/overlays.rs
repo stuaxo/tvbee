@@ -40,6 +40,9 @@ pub enum Overlay {
     /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
     /// the filter typed is `App::prompt`.
     Guide { tab: GuideTab, at: u32 },
+    /// The list the app in front shows (`t`), item `sel` (an index into it)
+    /// highlighted; the filter typed is `App::prompt`.
+    List { sel: usize },
 }
 
 /// An app the search box can search in, and how.
@@ -135,12 +138,17 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
             KeyCode::Down => (Overlay::Help(top.saturating_add(1)), None),
             KeyCode::PageUp => (Overlay::Help(top.saturating_sub(10)), None),
             KeyCode::PageDown => (Overlay::Help(top.saturating_add(10)), None),
+            KeyCode::Home => (Overlay::Help(0), None),
+            // drawing stops it at the last page
+            KeyCode::End => (Overlay::Help(usize::MAX / 2), None),
             _ => (Overlay::None, None),
         },
         Overlay::Menu(sel) => match code {
             KeyCode::Esc | KeyCode::Char('.') | KeyCode::Char('q') | KeyCode::Backspace => (Overlay::None, None),
-            KeyCode::Up => (Overlay::Menu(sel.checked_sub(1).unwrap_or(items.len().saturating_sub(1))), None),
-            KeyCode::Down => (Overlay::Menu(if sel + 1 >= items.len() { 0 } else { sel + 1 }), None),
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(sel, items.len(), c).unwrap_or(sel);
+                (Overlay::Menu(to), None)
+            }
             KeyCode::Enter => pick_item(sel),
             KeyCode::Char(c) => match items.iter().position(|it| it.key == Some(c)) {
                 Some(i) => pick_item(i),
@@ -160,6 +168,8 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
         Overlay::Guide { tab, at } => (Overlay::Guide { tab, at }, None),
+        // handled by App::list_key
+        Overlay::List { sel } => (Overlay::List { sel }, None),
         // handled by App::options_key
         Overlay::Options(i) => (Overlay::Options(i), None),
         Overlay::Confirm { id, yes } => match code {
@@ -248,6 +258,7 @@ pub(super) const HELP: &str = " everywhere
    0-9      jump to 0%-90%   + -    volume
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
+   lists    ↑ ↓ one, pgup pgdn a page, home end the first and last
    : ctrl+p commands: everything tveee can do, found by typing a few letters
             (the ui's own too: the log of what tveee did lately, help, ...)
    F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
@@ -262,6 +273,8 @@ pub(super) const HELP: &str = " everywhere
             YouTube's storyboards; else a screenshot every few seconds)
    /        search the app in front (tab picks another app)
    z        music visualiser: show or hide it (Kodi, while it plays music)
+   t        the list the app shows (Kodi's folder or add-on): choose from it,
+            following Kodi's highlight (type to filter)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
@@ -304,8 +317,10 @@ impl App {
                 self.options_plugins = !self.options_plugins;
                 self.overlay = Overlay::Options(0);
             }
-            KeyCode::Up => self.overlay = Overlay::Options((i + n - 1) % n),
-            KeyCode::Down => self.overlay = Overlay::Options((i + 1) % n),
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(i, n, c).unwrap_or(i);
+                self.overlay = Overlay::Options(to)
+            }
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
             KeyCode::Char('a') if self.options_plugins => self.plugin_choice(i, None),
             _ => {}
@@ -402,6 +417,7 @@ impl App {
             Overlay::Menu(sel) => self.draw_menu(f, sel),
             Overlay::Options(sel) => self.draw_options(f, sel),
             Overlay::Guide { tab, at } => self.draw_guide(f, tab, at),
+            Overlay::List { sel } => self.draw_list(f, sel),
             Overlay::Apps { tab, sel } => self.draw_apps(f, tab, sel, false),
             Overlay::AppActions { tab, sel, at } => self.draw_app_actions(f, tab, sel, at),
             Overlay::Search(at) => self.draw_search(f, at),
@@ -420,7 +436,15 @@ impl App {
     /// scrolling (↑/↓) when they don't all fit its height.
     pub(super) fn draw_help(&mut self, f: &mut Frame, top: usize) {
         let area = f.area();
-        let lines = help_lines(usize::from(area.width.saturating_sub(4)));
+        let w = usize::from(area.width.saturating_sub(4));
+        let mut lines = help_lines(w);
+        // wrapped to fit: the whole width (else a column of the screen's
+        // own border shows beside it)
+        if HELP.lines().any(|l| l.chars().count() > w)
+            && let Some(first) = lines.first_mut()
+        {
+            *first = format!("{first:<w$}");
+        }
         let room = usize::from(area.height.saturating_sub(2)).max(1);
         let top = top.min(lines.len().saturating_sub(room));
         // remembered as shown, so ↑ moves at once from the end

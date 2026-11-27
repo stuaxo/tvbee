@@ -439,6 +439,21 @@ fn options_plugins_tab_desktop() {
 }
 
 #[test]
+fn palette_pages_and_ends() {
+    let mut a = app_with(kodi_paused(), actions());
+    let h = Handle::new(std::sync::mpsc::channel().0, Arc::new(Mutex::new(Arc::new(TvState::seeded(None)))));
+    let n = a.palette_list().len();
+    assert!(n > 10, "enough to page through: {n}");
+    a.overlay = Overlay::Palette(0);
+    a.palette_key(0, KeyCode::End, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(n - 1));
+    a.palette_key(n - 1, KeyCode::PageUp, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(n - 1 - super::listnav::PAGE));
+    a.palette_key(3, KeyCode::Home, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(0));
+}
+
+#[test]
 fn load_hidden_and_system_watched() {
     // load & memory off: not on the top line
     let (tx, rx) = std::sync::mpsc::channel();
@@ -590,4 +605,130 @@ fn app_seeing_predict(st: TvState) -> (App, std::sync::mpsc::Receiver<Action>, H
     let mut a = App::new("192.168.1.19".into(), handle.clone(), Vec::new(), true);
     a.opts = Some(Vec::new());
     (a, rx, handle)
+}
+
+/// Kodi showing Music > Artists, the list read, its highlight on Radiohead.
+fn kodi_artists() -> TvState {
+    use tveee_core::more::Go;
+    use tveee_core::provider::{ContextList, ListItem, ListPlace};
+    let mut st = kodi_paused();
+    let item = |id: &str, label: &str, folder: bool, meta: Option<&str>| ListItem {
+        id: id.into(),
+        label: label.into(),
+        meta: meta.map(str::to_string),
+        folder,
+        go: Go::Link(if folder { format!("kodi-window:music|{id}") } else { id.to_string() }),
+    };
+    let list = ContextList {
+        title: "Artists".into(),
+        kind: "folder",
+        key: "10502|musicdb://artists/".into(),
+        items: vec![
+            item("musicdb://artists/1/", "Massive Attack", true, Some("6 albums")),
+            item("musicdb://artists/7/", "Portishead", true, Some("3 albums")),
+            item("musicdb://artists/9/", "Radiohead", true, Some("9 albums")),
+            item("smb://nas/music/exit.flac", "Exit Music.flac", false, Some("4:24")),
+        ],
+        at: Some(2),
+    };
+    st.list = Some(Arc::new(Ok(Some(list))));
+    if let Some(s) = st.snap.as_mut() {
+        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into() });
+    }
+    st
+}
+
+/// The state an engine handle reads, to change in a test.
+type Held = Arc<Mutex<Arc<TvState>>>;
+
+/// An app whose engine handle keeps what it's asked to do.
+fn app_seeing(st: TvState) -> (App, std::sync::mpsc::Receiver<Action>, Handle) {
+    let (a, rx, h, _) = app_holding(st);
+    (a, rx, h)
+}
+
+/// [`app_seeing`], and the state its handle reads.
+fn app_holding(st: TvState) -> (App, std::sync::mpsc::Receiver<Action>, Handle, Held) {
+    super::tests::install_all();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let held: Held = Arc::new(Mutex::new(Arc::new(st)));
+    let handle = Handle::new(tx, held.clone());
+    let mut app = App::new("192.168.1.19".into(), handle.clone(), Vec::new(), true);
+    // the options as they come: not the real file's
+    app.opts = Some(Vec::new());
+    (app, rx, handle, held)
+}
+
+#[test]
+fn list_pane_desktop() {
+    let (mut a, _rx, _h) = app_seeing(kodi_artists());
+    a.overlay = Overlay::List { sel: 2 };
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    // Kodi's highlight marked; folders end in /; the count
+    assert!(s.contains("› Radiohead/") && s.contains("Exit Music.flac") && s.contains("3 of 4"), "{s}");
+    // the rows answer clicks
+    assert_eq!(a.hits.iter().filter(|(_, h)| matches!(h, Hit::ListRow(_))).count(), 4);
+    // Kodi's card offers it
+    let (mut b, _rx, _h) = app_seeing(kodi_artists());
+    let card = screen(&mut b, DESKTOP);
+    assert!(card.lines().any(|l| l.starts_with("│do ") && l.contains(" t ") && l.contains("list")), "{card}");
+}
+
+#[test]
+fn list_pane_keys() {
+    use tveee_core::more::Go;
+    let (mut a, rx, h) = app_seeing(kodi_artists());
+    // opening asks for the list, and for where it is on each refresh
+    a.open_list(&h);
+    let asked: Vec<Action> = rx.try_iter().collect();
+    assert!(asked.contains(&Action::WatchList(true)) && asked.contains(&Action::LoadList), "{asked:?}");
+    assert_eq!(a.overlay, Overlay::List { sel: 2 });
+    // the list keys
+    a.list_key(2, KeyCode::Home, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::List { sel: 0 });
+    a.list_key(0, KeyCode::End, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::List { sel: 3 });
+    // typing filters: the highlight goes to what's left
+    for c in "port".chars() {
+        let Overlay::List { sel } = a.overlay else { panic!() };
+        a.list_key(sel, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    assert_eq!(a.overlay, Overlay::List { sel: 1 });
+    assert_eq!(a.list_shown(), vec![1]);
+    // a folder: opened, the pane stays (and the filter goes)
+    a.list_key(1, KeyCode::Enter, KeyModifiers::NONE, &h);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListGo(Go::Link("kodi-window:music|musicdb://artists/7/".into()))]);
+    assert!(matches!(a.overlay, Overlay::List { .. }) && a.prompt.is_empty());
+    // a file: played, the pane closes and the refresh stops reading the list
+    a.list_choose(3, &h);
+    let asked: Vec<Action> = rx.try_iter().collect();
+    assert_eq!(asked, vec![Action::ListGo(Go::Link("smb://nas/music/exit.flac".into())), Action::WatchList(false)]);
+    assert_eq!(a.overlay, Overlay::None);
+}
+
+#[test]
+fn list_pane_follows_kodi() {
+    use tveee_core::provider::ListPlace;
+    let st = kodi_artists();
+    let (mut a, rx, h, held) = app_holding(st.clone());
+    a.open_list(&h);
+    let _ = rx.try_iter().count();
+    a.list_sync(Change::Snapshot);
+    // Kodi's highlight moves to Portishead: the pane follows
+    let mut moved = st.clone();
+    moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Portishead".into(), focus_id: "musicdb://artists/7/".into() });
+    *held.lock().unwrap() = Arc::new(moved);
+    a.st = h.state();
+    a.list_sync(Change::Snapshot);
+    assert_eq!(a.overlay, Overlay::List { sel: 1 });
+    // nothing new asked for: same list
+    assert!(rx.try_iter().next().is_none());
+    // Kodi opens another folder: its items are read (once)
+    let mut other = st;
+    other.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new() });
+    *held.lock().unwrap() = Arc::new(other);
+    a.st = h.state();
+    a.list_sync(Change::Snapshot);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::LoadList]);
 }
