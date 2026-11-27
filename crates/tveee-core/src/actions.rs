@@ -105,17 +105,21 @@ pub struct ActionDescriptor {
     /// Ask first, with this warning ("The TV will restart..."). Interactive
     /// front ends only: the command line runs it as asked.
     pub confirm: Option<&'static str>,
+    /// Only for this kind of thing playing ("video": subtitles, audio
+    /// tracks): the ui offers it on the now-playing card only then. None:
+    /// whatever plays.
+    pub media: Option<&'static str>,
     pub run: Run,
 }
 
 impl ActionDescriptor {
     pub const fn new(id: &'static str, category: &'static str, title: &'static str, run: Do) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, run: Run::Do(run) }
+        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, run: Run::Do(run) }
     }
 
     /// A command-line action that prints for itself (see [`Terminal`]).
     pub const fn terminal(id: &'static str, category: &'static str, title: &'static str, run: Terminal) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, run: Run::Terminal(run) }
+        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, run: Run::Terminal(run) }
     }
 
     /// Reachable as `tveee <name>`, `desc` its one-line help.
@@ -133,6 +137,13 @@ impl ActionDescriptor {
     }
 
     /// Other names for the command (after [`Self::cli`]).
+    /// Only offered on the ui's now-playing card while `media` plays
+    /// ("video", "audio").
+    pub const fn while_playing(mut self, media: &'static str) -> Self {
+        self.media = Some(media);
+        self
+    }
+
     pub const fn aliases(mut self, aliases: &'static [&'static str]) -> Self {
         if let Some(c) = &mut self.cli {
             c.aliases = aliases;

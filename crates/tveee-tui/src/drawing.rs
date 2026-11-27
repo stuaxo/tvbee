@@ -754,6 +754,10 @@ impl App {
                     continue;
                 }
                 let Some(key) = a.key else { continue };
+                // subtitles while music plays: no
+                if a.media.is_some() && a.media != s.activity.as_ref().and_then(|x| x.media) {
+                    continue;
+                }
                 let what = a.title.strip_prefix(&format!("{}: ", a.category)).unwrap_or(a.title);
                 out.push((format!(".{key}"), what.to_string(), Hit::Chip(i)));
             }

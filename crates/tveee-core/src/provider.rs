@@ -284,6 +284,9 @@ pub struct Playing {
     /// active player). Its media session can linger after the end, saying
     /// playing or paused: this outweighs it.
     pub idle: bool,
+    /// What kind of thing plays, when the app says: "video", "audio" or
+    /// "picture" (Kodi's player). None: it doesn't say.
+    pub media: Option<&'static str>,
 }
 
 /// An app tveee can ask what it's playing and tell what to do, through an
