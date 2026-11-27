@@ -29,6 +29,8 @@ pub enum Hit {
     GuideTab(GuideTab),
     /// Option N in the options dialog.
     OptionItem(usize),
+    /// The options dialog's tabs: its options (false), the plugins (true).
+    OptionTab(bool),
     /// Part of the guide's details panel.
     Details(DetailsClick),
     /// A field of what's on that opens something.

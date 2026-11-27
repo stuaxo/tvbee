@@ -386,3 +386,46 @@ fn kodi_music_has_no_subtitles() {
     assert!(s.lines().any(|l| l.starts_with("│do ") && l.contains("next subtitles")), "{s}");
     assert!(row.contains("search"), "{row}");
 }
+
+/// The plugins as `tveee plugins` would have them: some built in, the
+/// vendor ones on or off.
+fn plugin_states() -> Vec<tveee_core::plugin::PluginState> {
+    use tveee_core::plugin::{PluginState, Source};
+    let p = |name, enabled, source, desc| PluginState { name, desc, enabled, source };
+    vec![
+        p("apps", true, Source::Builtin, "launching and managing Android apps"),
+        p("media", true, Source::Builtin, "playback keys, volume and mute"),
+        p("power", true, Source::Builtin, "sleep, wake, reboot, shutdown"),
+        p("philips", true, Source::Cache, "Philips TV features via the JointSpace API"),
+        p("kodi", true, Source::Override, "Kodi: what it's playing, exact seeking"),
+        p("youtube", false, Source::Cache, "the YouTube app: what's on, search"),
+    ]
+}
+
+#[test]
+fn options_plugins_tab_desktop() {
+    // what's saved: kodi chosen on; nothing read from the real file
+    tveee_core::options::preset(vec![("plugin.kodi".to_string(), true)]);
+    let mut a = app(kodi_paused());
+    a.plugins = plugin_states();
+    a.overlay = Overlay::Options(0);
+    let opts = screen(&mut a, DESKTOP);
+    assert!(opts.contains("scroll animations") && opts.contains(" Plugins "), "{opts}");
+    // to the plugins tab
+    a.options_key(0, KeyCode::Tab);
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    let row = |name: &str| s.lines().find(|l| l.contains(&format!(" {name} "))).unwrap_or_default().to_string();
+    assert!(row("kodi").contains("on") && row("kodi").contains("on now"), "{s}");
+    assert!(row("philips").contains("auto"), "{s}");
+    assert!(row("youtube").contains("off now"), "{s}");
+    // the built-in ones are listed, not chosen
+    assert!(s.contains("built in: always on") && s.contains("apps, media, power"), "{s}");
+    let rows = a.hits.iter().filter(|(_, h)| matches!(h, Hit::OptionItem(_))).count();
+    assert_eq!(rows, 3, "only the vendor plugins can be chosen");
+    // ↓ moves among them; Tab goes back
+    a.options_key(0, KeyCode::Down);
+    assert_eq!(a.overlay, Overlay::Options(1));
+    a.options_key(1, KeyCode::Tab);
+    assert!(!a.options_plugins);
+}

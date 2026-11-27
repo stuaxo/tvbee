@@ -288,20 +288,46 @@ pub(super) const HELP: &str = " everywhere
    Shift+drag selects text as usual (to copy the url)";
 
 impl App {
-    /// Keys in the options dialog: ↑/↓ choose, Space/Enter toggle, Esc closes.
+    /// The plugins its tab lets you change: the vendor ones (built-in ones
+    /// are always on).
+    pub(super) fn vendor_plugins(&self) -> Vec<&tveee_core::plugin::PluginState> {
+        self.plugins.iter().filter(|p| p.source != tveee_core::plugin::Source::Builtin).collect()
+    }
+
+    /// Keys in the options dialog: ↑/↓ choose, Space/Enter change it,
+    /// Tab/←/→ switch between options and plugins, Esc closes.
     pub(super) fn options_key(&mut self, i: usize, code: KeyCode) {
-        let n = tveee_core::options::OPTIONS.len().max(1);
+        let n = if self.options_plugins { self.vendor_plugins().len() } else { tveee_core::options::OPTIONS.len() }.max(1);
         match code {
             KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') | KeyCode::Backspace => self.overlay = Overlay::None,
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => {
+                self.options_plugins = !self.options_plugins;
+                self.overlay = Overlay::Options(0);
+            }
             KeyCode::Up => self.overlay = Overlay::Options((i + n - 1) % n),
-            KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::Options((i + 1) % n),
+            KeyCode::Down => self.overlay = Overlay::Options((i + 1) % n),
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
             _ => {}
         }
     }
 
-    /// Flip option `i` and save it.
+    /// Change row `i` of the tab shown: flip an option, or move a vendor
+    /// plugin on to its next choice (auto, on, off); saved.
     pub(super) fn toggle_option(&mut self, i: usize) {
+        if self.options_plugins {
+            let Some(p) = self.vendor_plugins().get(i).map(|p| p.name) else { return };
+            let next = match tveee_core::options::plugin(p) {
+                None => Some(true),
+                Some(true) => Some(false),
+                Some(false) => None,
+            };
+            self.note = match tveee_core::options::set_plugin(p, next) {
+                Ok(()) => format!("plugin {p}: {} (from tveee's next start)", tveee_core::options::choice_word(next)),
+                Err(e) => format!("couldn't save it: {e}"),
+            };
+            self.overlay = Overlay::Options(i);
+            return;
+        }
         let Some(o) = tveee_core::options::OPTIONS.get(i) else { return };
         let on = !tveee_core::options::get(o.name);
         self.note = match tveee_core::options::set(o.name, on) {
@@ -371,19 +397,63 @@ impl App {
         }
     }
 
+    /// The options dialog: a tab of options, and one of plugins.
     pub(super) fn draw_options(&mut self, f: &mut Frame, sel: usize) {
-        let mut text = Vec::new();
-        for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
-            let tick = if tveee_core::options::get(o.name) { "[x]" } else { "[ ]" };
-            let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), Style::new().fg(Color::DarkGray))]);
-            text.push(if i == sel { line.reversed() } else { line });
+        let dim = Style::new().fg(Color::DarkGray);
+        let tab = |name: &'static str, on: bool| {
+            if on { Span::styled(format!(" {name} "), Style::new().fg(Color::Black).bg(Color::Blue).bold()) } else { Span::styled(format!(" {name} "), Style::new().fg(Color::Gray)) }
+        };
+        let labels = [("Options", false), ("Plugins", true)];
+        let mut text = vec![Line::from(labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options_plugins), Span::raw(" ")]).collect::<Vec<_>>()), Line::default()];
+        // rows that can be chosen start here
+        let first_row = text.len();
+        let rows;
+        if self.options_plugins {
+            let vendor: Vec<_> = self.vendor_plugins().into_iter().cloned().collect();
+            rows = vendor.len();
+            text.push(Line::from(Span::styled(" vendor: on when the TV has what they're for", dim)));
+            // the rows start under that heading
+            let first_row_shift = 1;
+            for (i, p) in vendor.iter().enumerate() {
+                let choice = tveee_core::options::choice_word(tveee_core::options::plugin(p.name));
+                let now = if p.enabled { "on now" } else { "off now" };
+                let line = Line::from(vec![Span::raw(format!(" {:<10} {choice:<5}", p.name)), Span::styled(format!(" {:<10} {}", format!("({now})"), p.desc), dim)]);
+                text.push(if i == sel { line.reversed() } else { line });
+            }
+            text.push(Line::default());
+            let builtin: Vec<&str> = self.plugins.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin).map(|p| p.name).collect();
+            text.push(Line::from(Span::styled(" built in: always on", dim)));
+            for l in super::drawing::textwrap(&builtin.join(", "), 70) {
+                text.push(Line::from(Span::styled(format!("   {l}"), dim)));
+            }
+            text.push(Line::default());
+            text.push(Line::from("↑/↓ choose  space/⏎/click: auto → on → off  tab: options  esc closes").fg(Color::DarkGray));
+            text.push(Line::from("auto: on when checking the TV finds it; changes apply from tveee's next start").fg(Color::DarkGray));
+            let r = popup(f, " options ", text, Color::Blue);
+            self.option_hits(r, first_row + first_row_shift, rows);
+        } else {
+            rows = tveee_core::options::OPTIONS.len();
+            for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
+                let tick = if tveee_core::options::get(o.name) { "[x]" } else { "[ ]" };
+                let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), dim)]);
+                text.push(if i == sel { line.reversed() } else { line });
+            }
+            text.push(Line::default());
+            text.push(Line::from("↑/↓ choose  space/⏎/click toggle  tab: plugins  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray));
+            let r = popup(f, " options ", text, Color::Blue);
+            self.option_hits(r, first_row, rows);
         }
-        text.push(Line::default());
-        text.push(Line::from("↑/↓ choose  space/⏎/click toggle  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray));
-        let r = popup(f, " options ", text, Color::Blue);
+    }
+
+    /// The options dialog's clickable parts: its tabs, and `rows` rows from
+    /// text row `first`.
+    fn option_hits(&mut self, r: ratatui::layout::Rect, first: usize, rows: usize) {
         self.hits.push((r, Hit::Popup));
-        for i in 0..tveee_core::options::OPTIONS.len() {
-            let y = r.y + 1 + u16::try_from(i).unwrap_or(0);
+        let (opts, plugs) = (u16::try_from(" Options ".len()).unwrap_or(0), u16::try_from(" Plugins ".len()).unwrap_or(0));
+        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y: r.y + 1, width: opts, height: 1 }, Hit::OptionTab(false)));
+        self.hits.push((ratatui::layout::Rect { x: r.x + 2 + opts, y: r.y + 1, width: plugs, height: 1 }, Hit::OptionTab(true)));
+        for i in 0..rows {
+            let y = r.y + 1 + u16::try_from(first + i).unwrap_or(0);
             self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::OptionItem(i)));
         }
     }

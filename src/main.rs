@@ -30,7 +30,7 @@ fn main() {
     // Only touch the TV to detect plugins when one of their commands was asked
     // for (and never just to show help).
     let mode = if !help && plugin::needs_probe(&all, sub, rest) { Mode::Probe } else { Mode::Cached };
-    let overrides = plugin::parse_overrides(&std::env::var("TVEEE_PLUGINS").unwrap_or_default());
+    let overrides = plugin::overrides();
     let cache_file = plugin::cache_path(&tv.ip);
     let states = plugin::resolve(&all, &tv, mode, &overrides, cache_file.as_deref());
 

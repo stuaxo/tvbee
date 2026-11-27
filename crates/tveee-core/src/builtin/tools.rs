@@ -162,7 +162,7 @@ fn plugins_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let states = match args.first().map(String::as_str) {
         None => &c.plugins,
         Some("--refresh") => {
-            let overrides = plugin::parse_overrides(&std::env::var("TVEEE_PLUGINS").unwrap_or_default());
+            let overrides = plugin::overrides();
             refreshed = plugin::resolve(
                 &(c.all)(),
                 &c.tv,
