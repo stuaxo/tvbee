@@ -1,0 +1,39 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+expression: "screen(&mut app(standby()), DESKTOP)"
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
+│[F]ree memory │ [:] commands                                                                                          │
+│what     In standby                                                                                                   │
+│press . then w to wake the TV                                                                                         │
+│                                                                                                                      │
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ space  play/pause   ←  rew   →  ffw   ↑  vol+   ↓  vol-   m  mute   ⌫  back   h  home   tab  remote   i  info        │
+│ v  preview   a  apps   /  search   g  guide   ,  options   .  more   ?  help   q  quit                               │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

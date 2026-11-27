@@ -11,12 +11,14 @@ Command-line remote for Android TV over ADB. So far it has only been tested
 on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
 (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
 
-![tveee ui: live TV, the programme guide, options, help, the system panel and launcher, then searching YouTube and playing the video it finds](docs/tveee-ui.gif)
+![tveee ui: live TV, the programme guide, the command palette, the log, the Ambilight and system panels, options, the menu, help and the apps, then searching YouTube and playing the video it finds](docs/tveee-ui.gif)
 
-*`tveee ui`: live TV (channel, programme, what's next), the guide (sliding
-through time, programme details, filtering, the Favourites and Radio tabs),
-options, help, the system panel and the launcher, then searching YouTube for
-a video, playing it in remote mode, and seeking.*
+*`tveee ui`: live TV with the TV's load and free memory along the top, the
+guide (sliding through time, programme details, filtering, the Favourites
+and Radio tabs), the command palette (`:`) finding Ambilight actions and
+the log of what tveee did lately, the Ambilight and system panels, options,
+the menu, help, the apps (F2), then searching YouTube for a video, playing
+it in remote mode, and seeking.*
 
 
 ## Dependencies:
@@ -53,7 +55,7 @@ The release builds include the full-screen remote (`tveee ui`). From source:
 
 The plain build works with Debian 13's packaged Rust (`apt install cargo
 build-essential`: a C compiler builds the bundled SQLite that tveee caches the
-TV's guide in); `--features ui` needs Rust 1.88 or newer.
+TV's guide in); `--features ui` needs Rust 1.90 or newer.
 
 On the TV, turn on network debugging (Developer options). `tveee findtv` finds
 it on the network; point tveee at it with `TV_IP` (see below) and accept the
@@ -189,6 +191,7 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
 [tools]
     commands     list all command names and aliases
     completion   print a bash/zsh completion script
+    do           run any action by its id (list them with no id)
     help         show this help, or help for one command
     plugins      list plugins and whether they are enabled
     wait         wait until the TV is reachable and booted
@@ -206,10 +209,12 @@ YouTube (`youtube`). The `kodi` plugin (when Kodi is installed) uses Kodi's own
 remote control, once it's on in Kodi (Settings > Services > Control > Allow
 remote control via HTTP): what's playing with its exact position, exact
 seeking, artwork in the ui's preview, `goto kodi movies|tvshows|music|...`,
-links played in Kodi, and restarting it where it was. `tveee details` shows the
+links played in Kodi, and restarting it where it was (with the same subtitle
+and audio tracks). `tveee details` shows the
 plot, cast and streams; `tveee app kodi find|play <title>` searches its
 library; `tveee app kodi subtitles|audio|scan|notify` switch tracks, scan the
-library and show a message (also in the ui's menu). With `TVEEE_KODI_PATHS`
+library and show a message (also in the ui's menu); `tveee kodi-rpc <method>
+[json params]` calls any method of its API and prints the result. With `TVEEE_KODI_PATHS`
 (see `.env.example`) the ui's preview shows frames of the video, not its
 artwork. The ui hears Kodi's play/pause/seek at once (its port 9090, on with
 "Allow remote control from applications on other systems"). `tveee pair kodi`
@@ -217,11 +222,13 @@ saves its login if it has a password.
 
 ## Plugins
 
-Commands are grouped by plugin in `tveee help`, Django-style. A plugin is a
-module in `src/plugins/` exporting `commands()`, registered in
-`src/plugins/mod.rs`; it can also add apps (`with_apps`) and ui menu items
-(`with_menu`). Built-in plugins are always on. Vendor plugins (e.g.
-`philips`) carry a detection check:
+Commands are grouped by plugin in `tveee help`, Django-style. A plugin
+contributes actions (commands, ui menu items, anything `tveee do` can run)
+and can add apps, content providers, pairings, panels and `diagnose` checks;
+plugins are listed in `src/plugins/mod.rs`. Built-in plugins are always on and
+live in the core crate (`crates/tveee-core/src/builtin/`). Vendor plugins are
+crates of their own (`plugins/philips`, `plugins/youtube`, `plugins/kodi`)
+and carry a detection check:
 
 - `TVEEE_PLUGINS=philips,-other` forces plugins on/off
 - otherwise the per-TV cache (`~/.cache/tveee/<ip>.plugins`) is used
@@ -238,7 +245,10 @@ module in `src/plugins/` exporting `commands()`, registered in
 Environment: `TVEEE_PLUGINS`, `TV_IP` (default 192.168.1.19), and
 `TVEEE_LOG=<file>`: a debug log of what tveee does (adb and HTTPS calls with
 their timings, and failures the ui otherwise only shows briefly, or not at
-all).
+all). For working on tveee without the TV: `TVEEE_MOCK_DIR=<dir>` with
+`TVEEE_MOCK=record` saves what the TV answers (adb, HTTP, HTTPS) in `<dir>`;
+without `TVEEE_MOCK=record`, tveee answers from there instead of asking the
+TV (use the same `TV_IP`; see `crates/tveee-core/src/mock.rs`).
 
 These can also go in a `.env` file in the current directory, or in
 `~/.config/tveee/env` for every directory (see `.env.example`). Settings
@@ -254,9 +264,10 @@ crates beyond std.
 
       cargo install --path . --features ui
 
-  Without it, `tveee ui` says how to get it. Optional plugins are compiled in
-  with `#[cfg(feature = ...)]` in `src/plugins/mod.rs` and listed in
-  `NOT_BUILT` when left out.
+  Without it, `tveee ui` says how to get it. The remote is its own crate
+  (`crates/tveee-tui`); optional plugins are compiled in with
+  `#[cfg(feature = ...)]` in `src/plugins/mod.rs` and listed in `NOT_BUILT`
+  when left out.
 
 ## Not yet ported / planned
 - Recordings (list / stop) via the JointSpace API on `https://<tv>:1926/6/recordings/*`;

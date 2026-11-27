@@ -1,0 +1,144 @@
+//! Snapshot tests: the screen drawn from fixed states, at a desktop size
+//! (120x35) and a corner pane (60x16), kept in `snapshots/` and checked with
+//! `insta` (`cargo insta review` to look at a change).
+
+use super::*;
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
+use std::sync::Mutex;
+use tveee_core::devtools::Progress;
+use tveee_core::nowplaying::{Field, Place};
+
+const DESKTOP: (u16, u16) = (120, 35);
+const CORNER: (u16, u16) = (60, 16);
+
+/// A screen on this state, with no engine behind it (what's asked for goes
+/// nowhere).
+fn app(st: TvState) -> App {
+    app_with(st, Vec::new())
+}
+
+fn app_with(st: TvState, actions: Vec<ActionDescriptor>) -> App {
+    let (tx, _) = std::sync::mpsc::channel();
+    let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(st))));
+    App::new("192.168.1.19".into(), handle, actions, true)
+}
+
+/// Some actions as plugins describe them, for the palette and menu.
+fn actions() -> Vec<ActionDescriptor> {
+    use tveee_core::actions::{Cx, Output};
+    fn ok(_: &Cx, _: &[String]) -> tveee_core::error::Result<Output> {
+        Ok(Output::default())
+    }
+    vec![
+        ActionDescriptor::new("kodi.subtitles", "kodi", "kodi: next subtitles", ok).key('k'),
+        ActionDescriptor::new("kodi.audio", "kodi", "kodi: next audio track", ok).key('a'),
+        ActionDescriptor::new("kodi.find", "kodi", "kodi: find in the library", ok).text("Find in Kodi:", "a title"),
+        ActionDescriptor::new("media.volume", "media", "volume", ok).cli("vol", "up|down|<level>", "change volume"),
+        ActionDescriptor::new("power.sleep", "power", "sleep (standby)", ok).key('s'),
+        ActionDescriptor::new("power.off", "power", "power off", ok).key('X').confirm("Power off the TV?"),
+    ]
+}
+
+/// The screen as text, one line per row (trailing spaces trimmed).
+fn screen(app: &mut App, (w, h): (u16, u16)) -> String {
+    let mut term = Terminal::new(TestBackend::new(w, h)).expect("a test terminal");
+    term.draw(|f| app.draw(f)).expect("drawn");
+    let buf = term.backend().buffer();
+    (0..h)
+        .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Kodi, paused part way through an episode (paused: the bar doesn't move
+/// with the clock).
+fn kodi_paused() -> TvState {
+    let mut st = TvState::seeded(None);
+    let mut a = Activity::just("Paused in Kodi");
+    a.title = Some("Episode 3 (Off-Road)".into());
+    a.progress = Some(Progress { position: 27.0 * 60.0 + 56.0, duration: Some(48.0 * 60.0 + 47.0), paused: true });
+    a.fields.push(Field { label: "audio", value: "AAC-LC  AAC".into(), place: Place::Bottom, open: None });
+    st.snap = Some(Snapshot {
+        activity: Some(a),
+        volume: Some((24, 60)),
+        muted: Some(false),
+        exact: true,
+        power: Some("Awake".into()),
+        focus: Some("org.xbmc.kodi/org.xbmc.kodi.Main".into()),
+        kind: Some("player".into()),
+        system: tveee_core::builtin::info::System {
+            load: Some((4.82, 3.10, 2.40)),
+            mem: Some(tveee_core::builtin::info::Mem { total: 1_374_208, free: 60_000, available: 317_440, swap_total: 524_288, swap_free: 200_000 }),
+            ..Default::default()
+        },
+        ..Snapshot::default()
+    });
+    st
+}
+
+/// In standby.
+fn standby() -> TvState {
+    let mut st = TvState::seeded(None);
+    st.snap = Some(Snapshot { activity: Some(Activity::just("In standby")), standby: true, volume: Some((24, 60)), ..Snapshot::default() });
+    st
+}
+
+#[test]
+fn kodi_paused_desktop() {
+    insta::assert_snapshot!(screen(&mut app(kodi_paused()), DESKTOP));
+}
+
+#[test]
+fn kodi_paused_corner() {
+    insta::assert_snapshot!(screen(&mut app(kodi_paused()), CORNER));
+}
+
+#[test]
+fn standby_desktop() {
+    insta::assert_snapshot!(screen(&mut app(standby()), DESKTOP));
+}
+
+#[test]
+fn nothing_read_yet_corner() {
+    insta::assert_snapshot!(screen(&mut app(TvState::seeded(None)), CORNER));
+}
+
+#[test]
+fn palette_desktop() {
+    let mut a = app_with(kodi_paused(), actions());
+    a.open_palette();
+    insta::assert_snapshot!("palette_all", screen(&mut a, DESKTOP));
+    a.prompt = "kodi".into();
+    insta::assert_snapshot!("palette_kodi", screen(&mut a, DESKTOP));
+}
+
+#[test]
+fn palette_asks_for_arguments() {
+    let mut a = app_with(kodi_paused(), actions());
+    a.overlay = Overlay::Prompt("media.volume");
+    insta::assert_snapshot!(screen(&mut a, CORNER));
+}
+
+#[test]
+fn palette_lists_the_ui_too() {
+    let mut a = app_with(kodi_paused(), actions());
+    a.open_palette();
+    a.prompt = "log".into();
+    insta::assert_snapshot!(screen(&mut a, CORNER));
+}
+
+#[test]
+fn guide_filter_ctrl_u_clears() {
+    let mut a = app(standby());
+    let (tx, _) = std::sync::mpsc::channel();
+    let h = Handle::new(tx, Arc::new(Mutex::new(Arc::new(TvState::seeded(None)))));
+    let tab = GuideTab::All;
+    for c in "bbc".chars() {
+        a.guide_key(tab, 0, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    assert_eq!(a.prompt, "bbc");
+    // ctrl+u clears it, and no "u" is typed
+    a.guide_key(tab, 0, KeyCode::Char('u'), KeyModifiers::CONTROL, &h);
+    assert_eq!(a.prompt, "");
+}
