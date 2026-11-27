@@ -523,12 +523,12 @@ fn session(tv: &Tv) -> Option<tveee_core::provider::Session> {
         Some(id) => {
             let t = tveee_core::http::number(&v, "t").unwrap_or(0.0).floor() as u64;
             tveee_core::provider::Session {
-                resume: None,
                 link: format!("https://www.youtube.com/watch?v={id}&t={t}s"),
                 said: format!("at {} in the same video", tveee_core::nowplaying::clock(t as f64)),
+                ..Default::default()
             }
         }
-        None => tveee_core::provider::Session { link: "https://www.youtube.com/".into(), said: String::new(), resume: None },
+        None => tveee_core::provider::Session { link: "https://www.youtube.com/".into(), ..Default::default() },
     })
 }
 

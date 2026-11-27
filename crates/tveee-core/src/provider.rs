@@ -211,13 +211,16 @@ pub trait Details {
 }
 
 /// A place in an app to come back to: opening `link` in the app gets there.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Session {
     pub link: String,
     /// What it is, for messages: "at 12:34 in the same video".
     pub said: String,
     /// Where to start `link`, for apps the link alone can't say it to.
     pub resume: Option<f64>,
+    /// Anything else the provider wants back when restoring (its own
+    /// format: Kodi keeps the subtitle and audio tracks here).
+    pub extra: String,
 }
 
 /// What a provider hook did: it handled it; it can't here (the app's API

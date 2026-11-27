@@ -213,8 +213,9 @@ pub fn parse_playing(item: &Value, props: &Value) -> Playing {
     Playing { title, subtitle, progress, link, art, art_moves: false, extra }
 }
 
-/// What Kodi is playing, and its file (for sessions).
-fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>)>> {
+/// What Kodi is playing, its file (for sessions), and the player's
+/// properties (its tracks, for sessions).
+fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>, Value)>> {
     let Some((id, _)) = player_id(tv)? else { return Ok(None) };
     let item = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{ITEM_FIELDS}}}"#))?;
     let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":{PLAYER_FIELDS}}}"#))?;
@@ -229,7 +230,88 @@ fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>)>> {
         playing.art = Some(format!("{FRAME}{}\n{art}", local.display()));
         playing.art_moves = true;
     }
-    Ok(Some((playing, file)))
+    Ok(Some((playing, file, props)))
+}
+
+/// The audio and subtitle tracks chosen in Kodi's player: kept in a
+/// session's `extra` and put back after a restart.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Tracks {
+    pub audio: Option<u64>,
+    pub subtitle: Option<u64>,
+    pub subtitles_on: bool,
+}
+
+impl Tracks {
+    /// From Player.GetProperties' result (`currentaudiostream`,
+    /// `currentsubtitle`, `subtitleenabled`).
+    pub fn of(props: &Value) -> Tracks {
+        let index = |k: &str| props.get(k)?.get("index")?.as_u64();
+        Tracks { audio: index("currentaudiostream"), subtitle: index("currentsubtitle"), subtitles_on: props.get("subtitleenabled").and_then(Value::as_bool).unwrap_or(false) }
+    }
+
+    /// As a session keeps them.
+    pub fn to_extra(&self) -> String {
+        serde_json::json!({ "audio": self.audio, "subtitle": self.subtitle, "subtitles_on": self.subtitles_on }).to_string()
+    }
+
+    /// Back from a session (none kept: nothing to put back).
+    pub fn from_extra(extra: &str) -> Option<Tracks> {
+        let v: Value = serde_json::from_str(extra).ok()?;
+        Some(Tracks { audio: v.get("audio")?.as_u64(), subtitle: v.get("subtitle").and_then(Value::as_u64), subtitles_on: v.get("subtitles_on").and_then(Value::as_bool).unwrap_or(false) })
+    }
+
+    /// The calls that put them back on player `id`.
+    pub fn calls(&self, id: u32) -> Vec<(&'static str, String)> {
+        let mut calls = Vec::new();
+        if let Some(a) = self.audio {
+            calls.push(("Player.SetAudioStream", format!(r#"{{"playerid":{id},"stream":{a}}}"#)));
+        }
+        match (self.subtitles_on, self.subtitle) {
+            (true, Some(s)) => calls.push(("Player.SetSubtitle", format!(r#"{{"playerid":{id},"subtitle":{s},"enable":true}}"#))),
+            _ => calls.push(("Player.SetSubtitle", format!(r#"{{"playerid":{id},"subtitle":"off"}}"#))),
+        }
+        calls
+    }
+}
+
+/// What a session says about the tracks: ", English subtitles" when they're
+/// on, and the audio when it isn't the first track.
+pub fn tracks_said(props: &Value) -> String {
+    let t = Tracks::of(props);
+    let mut said = String::new();
+    if t.audio.is_some_and(|a| a > 0) {
+        if let Some(a) = track_name(props.get("currentaudiostream")) {
+            said += &format!(", {a} audio");
+        }
+    }
+    if t.subtitles_on {
+        said += &format!(", {} subtitles", track_name(props.get("currentsubtitle")).unwrap_or_else(|| "with".into()));
+    }
+    said
+}
+
+/// After Player.Open: wait for the video to start (up to `secs`), then put
+/// the tracks back. Best effort: the video plays either way.
+fn put_back(tv: &Tv, tracks: &Tracks, secs: u64) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    let id = loop {
+        if let Ok(Some((id, kind))) = player_id(tv) {
+            if kind == "video" {
+                break id;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            tveee_core::tlog!("kodi: the video didn't start, tracks not put back");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    };
+    for (method, params) in tracks.calls(id) {
+        if let Err(e) = call(tv, method, &params) {
+            tveee_core::tlog!("kodi: {method}: {e}");
+        }
+    }
 }
 
 /// Whether a path has a login in it (`smb://user:pass@nas/...`).
@@ -344,9 +426,14 @@ impl tveee_core::provider::Provider for Kodi {
     // what's playing and how far in: restarting comes back to it
     fn save_session(&self, tv: &Tv) -> Outcome<Session> {
         let saved = now(tv).map(|n| {
-            let (playing, file) = n?;
+            let (playing, file, props) = n?;
             let at = playing.progress.map(|p| p.position.floor())?;
-            Some(Session { link: file?, said: format!("at {} in the same file", tveee_core::nowplaying::clock(at)), resume: Some(at) })
+            Some(Session {
+                link: file?,
+                said: format!("at {} in the same file{}", tveee_core::nowplaying::clock(at), tracks_said(&props)),
+                resume: Some(at),
+                extra: Tracks::of(&props).to_extra(),
+            })
         });
         match Outcome::from(saved) {
             Outcome::Handled(Some(s)) => Outcome::Handled(s),
@@ -359,7 +446,11 @@ impl tveee_core::provider::Provider for Kodi {
             tveee_core::builtin::apps::start(tv, target)?;
             wait_ready(tv, 40)?;
             let options = s.resume.map(|t| format!(r#","options":{{"resume":{}}}"#, time_json(t))).unwrap_or_default();
-            call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}{options}}}"#, quote(&s.link))).map(drop)
+            call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}{options}}}"#, quote(&s.link)))?;
+            if let Some(tracks) = Tracks::from_extra(&s.extra) {
+                put_back(tv, &tracks, 20);
+            }
+            Ok(())
         })();
         // started, but its remote control never answered: that's a failure,
         // not "do it another way" (Kodi is already up)
@@ -392,7 +483,7 @@ impl tveee_core::provider::Provider for Kodi {
 impl tveee_core::provider::Player for Kodi {
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {
         match Outcome::from(now(tv)) {
-            Outcome::Handled(Some((p, _))) => Outcome::Handled(p),
+            Outcome::Handled(Some((p, _, _))) => Outcome::Handled(p),
             Outcome::Handled(None) | Outcome::Fallback => Outcome::Fallback,
             Outcome::Failed(e) => Outcome::Failed(e),
         }
@@ -731,6 +822,32 @@ fn notify(tv: &Tv, text: &str) -> Result<String> {
     Ok("shown in Kodi".into())
 }
 
+/// `kodi.rpc`'s arguments: a method, then its params as JSON (`{}` when
+/// there are none). The params are checked here, so a typo is said plainly
+/// rather than as Kodi's parse error.
+pub fn rpc_request(args: &[String]) -> Result<(String, String)> {
+    let all = args.join(" ");
+    let (method, params) = all.trim().split_once(char::is_whitespace).unwrap_or((all.trim(), ""));
+    if method.is_empty() || !method.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+        return tveee_core::error::usage("usage: tveee kodi-rpc <Method.Name> [json params], like: tveee kodi-rpc Player.GetActivePlayers");
+    }
+    let params = match params.trim() {
+        "" => "{}".to_string(),
+        p => match serde_json::from_str::<Value>(p) {
+            Ok(v @ (Value::Object(_) | Value::Array(_))) => v.to_string(),
+            Ok(_) => return tveee_core::error::usage("kodi-rpc: the params are a JSON object, like {\"playerid\":1}"),
+            Err(e) => return tveee_core::error::usage(format!("kodi-rpc: the params aren't JSON: {e}")),
+        },
+    };
+    Ok((method.to_string(), params))
+}
+
+fn rpc(tv: &Tv, args: &[String]) -> Result<String> {
+    let (method, params) = rpc_request(args)?;
+    let result = call(tv, &method, &params)?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
 /// Words joined into one (a title, a message), or a usage error saying
 /// what's missing.
 fn words(args: &[String], what: &str) -> Result<String> {
@@ -779,6 +896,23 @@ pub fn actions() -> Vec<ActionDescriptor> {
         A::new("kodi.notify", "kodi", "kodi: show a notification", |cx, a| notify(cx.tv, &words(a, "a message")?).map(Into::into))
             .args("<text>")
             .text("Show in Kodi:", "a line of text"),
+        A::new("kodi.rpc", "kodi", "kodi: call its JSON-RPC API", |cx, a| rpc(cx.tv, a).map(Into::into))
+            .cli("kodi-rpc", "<method> [json params]", "call Kodi's JSON-RPC API and print the result")
+            .long(
+                "Calls a method of Kodi's JSON-RPC API (its remote control, the same one\n\
+                 tveee uses) and prints the result, like 'tveee jointspace' does for\n\
+                 Philips' API. The params are a JSON object (quote them for the shell):\n\
+                 \n\
+                 \x20 tveee kodi-rpc JSONRPC.Version\n\
+                 \x20 tveee kodi-rpc Player.GetActivePlayers\n\
+                 \x20 tveee kodi-rpc Player.GetProperties '{\"playerid\":1,\"properties\":[\"subtitles\"]}'\n\
+                 \n\
+                 The methods are listed by 'tveee kodi-rpc JSONRPC.Introspect' and at\n\
+                 https://kodi.wiki/view/JSON-RPC_API. With a password set in Kodi, run\n\
+                 'tveee pair kodi' first.",
+            )
+            .args("<method> [json params]")
+            .text("Kodi JSON-RPC:", "Player.GetActivePlayers"),
     ]
 }
 
@@ -841,7 +975,7 @@ impl tveee_core::pairing::Pairing for KodiLogin {
     }
     fn check(&self, tv: &Tv, _saved: &tveee_core::pairing::Saved) -> Option<String> {
         Some(match now(tv) {
-            Ok(Some((p, _))) => format!("check: Kodi is playing {}", p.title.unwrap_or_default()),
+            Ok(Some((p, _, _))) => format!("check: Kodi is playing {}", p.title.unwrap_or_default()),
             Ok(None) => "check: Kodi answers (nothing playing)".into(),
             Err(e) => format!("check failed: {e}"),
         })
@@ -926,6 +1060,41 @@ mod tests {
         let p = parse_playing(&json(film), &json(&props));
         assert_eq!((p.subtitle.as_deref(), p.progress.unwrap().paused, p.art), (Some("1995"), true, None));
         assert!(p.extra.iter().any(|(k, v)| *k == "subtitles" && v == "English"));
+    }
+
+    #[test]
+    fn tracks_come_back_after_a_restart() {
+        // English audio (the first), English subtitles off
+        let t = Tracks::of(&json(PROPS));
+        assert_eq!(t, Tracks { audio: Some(0), subtitle: Some(0), subtitles_on: false });
+        assert_eq!(Tracks::from_extra(&t.to_extra()), Some(t.clone()));
+        assert_eq!(
+            t.calls(1),
+            vec![("Player.SetAudioStream", r#"{"playerid":1,"stream":0}"#.to_string()), ("Player.SetSubtitle", r#"{"playerid":1,"subtitle":"off"}"#.to_string())]
+        );
+        // nothing said about the usual tracks
+        assert_eq!(tracks_said(&json(PROPS)), "");
+        // the second audio track, French subtitles on
+        let props = json(r#"{"currentaudiostream":{"codec":"dts","index":1,"name":"Commentary"},"currentsubtitle":{"index":2,"language":"fre","name":"French"},"subtitleenabled":true}"#);
+        let t = Tracks::of(&props);
+        assert_eq!(t.calls(1)[1].1, r#"{"playerid":1,"subtitle":2,"enable":true}"#);
+        assert_eq!(tracks_said(&props), ", Commentary DTS audio, French subtitles");
+        // an older session, or another app's: nothing to put back
+        assert_eq!(Tracks::from_extra(""), None);
+    }
+
+    #[test]
+    fn rpc_arguments() {
+        let args = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(rpc_request(&args("JSONRPC.Version")).unwrap(), ("JSONRPC.Version".into(), "{}".into()));
+        // as the shell splits it, or as one line typed in the ui
+        let want = ("Player.GetProperties".to_string(), r#"{"playerid":1,"properties":["time"]}"#.to_string());
+        assert_eq!(rpc_request(&args(r#"Player.GetProperties {"playerid": 1, "properties": ["time"]}"#)).unwrap(), want);
+        assert_eq!(rpc_request(&[r#"Player.GetProperties {"playerid":1,"properties":["time"]}"#.into()]).unwrap(), want);
+        assert!(rpc_request(&[]).is_err());
+        assert!(rpc_request(&args(r#"Bad"Method"#)).is_err());
+        assert!(rpc_request(&args("Player.Stop {playerid:1}")).is_err());
+        assert!(rpc_request(&args("Player.Stop 1")).is_err());
     }
 
     #[test]
