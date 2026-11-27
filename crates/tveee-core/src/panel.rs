@@ -51,6 +51,8 @@ pub struct Row {
     pub name: &'static str,
     pub options: Vec<Choice>,
     pub current: Option<usize>,
+    /// What it does, when the name doesn't say ("sync Hue bulbs with the TV").
+    pub help: Option<&'static str>,
 }
 
 /// An option: its label, a colour it shows (a light's), and what picking it does.

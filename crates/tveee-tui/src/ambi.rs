@@ -145,7 +145,7 @@ impl App {
         };
         let mut out = Vec::new();
         // what the rows don't say (who has the lights: the TV, or outside control)
-        let said: Vec<&str> = s.rows.iter().map(|r| r.name).chain(["style", "lights"]).collect();
+        let said: Vec<&str> = s.rows.iter().map(|r| r.name).chain(["style", "lights", "hue"]).collect();
         for (k, v) in s.info.iter().filter(|(k, _)| !said.contains(&k.as_str())) {
             out.push(whole(Line::from(vec![Span::styled(format!("{k:<9}"), dim), Span::raw(v.clone())]), Some(open.clone())));
         }
@@ -188,6 +188,15 @@ impl App {
                 spans.push(Span::styled(shown, st));
                 spans.push(Span::raw(" "));
                 x += w + 1;
+            }
+            // what it does, beside its options, else under them
+            if let Some(help) = r.help {
+                let w = u16::try_from(help.chars().count()).unwrap_or(u16::MAX);
+                if x + 1 + w > width {
+                    out.push((Line::from(std::mem::take(&mut spans)), std::mem::take(&mut spots)));
+                    spans.push(Span::raw(" ".repeat(usize::from(LABEL))));
+                }
+                spans.push(Span::styled(format!(" {help}"), dim));
             }
             out.push((Line::from(spans), spots));
         }
