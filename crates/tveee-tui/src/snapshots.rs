@@ -24,7 +24,10 @@ fn app_with(st: TvState, actions: Vec<ActionDescriptor>) -> App {
     super::tests::install_all();
     let (tx, _) = std::sync::mpsc::channel();
     let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(st))));
-    App::new("192.168.1.19".into(), handle, actions, true)
+    let mut a = App::new("192.168.1.19".into(), handle, actions, true);
+    // the options as they come: not the real file's
+    a.opts = Some(Vec::new());
+    a
 }
 
 /// Some actions as plugins describe them, for the palette and menu.
@@ -60,7 +63,7 @@ fn kodi_paused() -> TvState {
     let mut st = TvState::seeded(None);
     let mut a = Activity::just("Paused in Kodi");
     a.title = Some("Episode 3 (Off-Road)".into());
-    a.progress = Some(Progress { position: 27.0 * 60.0 + 56.0, duration: Some(48.0 * 60.0 + 47.0), paused: true });
+    a.progress = Some(Progress { position: 27.0 * 60.0 + 56.0, duration: Some(48.0 * 60.0 + 47.0), paused: true, rate: 1.0 });
     a.fields.push(Field { label: "audio", value: "AAC-LC  AAC".into(), place: Place::Bottom, open: None });
     a.media = Some("video");
     st.snap = Some(Snapshot {
@@ -378,11 +381,354 @@ fn kodi_music_has_no_subtitles() {
     let s = screen(&mut a, DESKTOP);
     let row = s.lines().find(|l| l.starts_with("│do ")).expect("a row of buttons");
     assert!(!row.contains("subtitles") && !row.contains("audio track"), "{row}");
+    // music: its visualiser is offered
+    assert!(row.contains(" z ") && row.contains("visualiser"), "{row}");
     // a video: they're back
     if let Some(x) = st.snap.as_mut().and_then(|s| s.activity.as_mut()) {
         x.media = Some("video");
     }
     let s = screen(&mut app_with(st, tveee_plugin_kodi::actions()), DESKTOP);
     assert!(s.lines().any(|l| l.starts_with("│do ") && l.contains("next subtitles")), "{s}");
+    // and no visualiser: it's for music
+    assert!(!s.contains("visualiser"), "{s}");
     assert!(row.contains("search"), "{row}");
+}
+
+/// The plugins as `tveee plugins` would have them: some built in, the
+/// vendor ones on or off.
+fn plugin_states() -> Vec<tveee_core::plugin::PluginState> {
+    use tveee_core::plugin::{PluginState, Source};
+    let p = |name, enabled, source, desc| PluginState { name, desc, enabled, source };
+    vec![
+        p("apps", true, Source::Builtin, "launching and managing Android apps"),
+        p("media", true, Source::Builtin, "playback keys, volume and mute"),
+        p("power", true, Source::Builtin, "sleep, wake, reboot, shutdown"),
+        p("philips", true, Source::Cache, "Philips TV features via the JointSpace API"),
+        p("kodi", true, Source::Override, "Kodi: what it's playing, exact seeking"),
+        p("youtube", false, Source::Cache, "the YouTube app: what's on, search"),
+    ]
+}
+
+#[test]
+fn options_plugins_tab_desktop() {
+    let mut a = app(kodi_paused());
+    // what's saved: kodi chosen on (this app's own options)
+    a.opts = Some(vec![("plugin.kodi".to_string(), true)]);
+    a.plugins = plugin_states();
+    a.overlay = Overlay::Options(0);
+    let opts = screen(&mut a, DESKTOP);
+    assert!(opts.contains("scroll animations") && opts.contains(" Plugins "), "{opts}");
+    // to the plugins tab
+    a.options_key(0, KeyCode::Tab);
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    let row = |name: &str| s.lines().find(|l| l.contains(&format!(" {name} "))).unwrap_or_default().to_string();
+    // ticked as the options are: kodi chosen on, philips on (auto), youtube off (auto)
+    assert!(row("kodi").contains("[x] kodi") && !row("kodi").contains("(auto)"), "{s}");
+    assert!(row("philips").contains("[x] philips") && row("philips").contains("(auto)"), "{s}");
+    assert!(row("youtube").contains("[ ] youtube") && row("youtube").contains("(auto)"), "{s}");
+    // the built-in ones are listed ticked, not chosen
+    assert!(s.contains("built in (always on)") && row("media").contains("[x] media"), "{s}");
+    let rows = a.hits.iter().filter(|(_, h)| matches!(h, Hit::OptionItem(_))).count();
+    assert_eq!(rows, 3, "only the vendor plugins can be chosen");
+    // ↓ moves among them; Tab goes back
+    a.options_key(0, KeyCode::Down);
+    assert_eq!(a.overlay, Overlay::Options(1));
+    a.options_key(1, KeyCode::Tab);
+    assert!(!a.options_plugins);
+}
+
+#[test]
+fn palette_pages_and_ends() {
+    let mut a = app_with(kodi_paused(), actions());
+    let h = Handle::new(std::sync::mpsc::channel().0, Arc::new(Mutex::new(Arc::new(TvState::seeded(None)))));
+    let n = a.palette_list().len();
+    assert!(n > 10, "enough to page through: {n}");
+    a.overlay = Overlay::Palette(0);
+    a.palette_key(0, KeyCode::End, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(n - 1));
+    a.palette_key(n - 1, KeyCode::PageUp, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(n - 1 - super::listnav::PAGE));
+    a.palette_key(3, KeyCode::Home, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Palette(0));
+}
+
+#[test]
+fn load_hidden_and_system_watched() {
+    // load & memory off: not on the top line
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(kodi_paused()))));
+    let mut a = App::new("192.168.1.19".into(), handle, Vec::new(), true);
+    a.opts = Some(vec![(tveee_core::options::SHOW_LOAD.to_string(), false)]);
+    let s = screen(&mut a, CORNER);
+    let top = s.lines().nth(1).unwrap_or_default();
+    assert!(!top.contains("load") && !top.contains("310 MB") && top.contains("[F]ree memory"), "{top}");
+    // the system panel opened: the engine is told to read the figures; closed: told to stop
+    a.info = Some(true);
+    let _ = screen(&mut a, CORNER);
+    assert!(rx.try_iter().any(|x| x == Action::WatchSystem(true)));
+    a.info = Some(false);
+    let _ = screen(&mut a, CORNER);
+    assert!(rx.try_iter().any(|x| x == Action::WatchSystem(false)));
+    // toggled back on in the options: shown at once (from the figures it
+    // has), and a read asked for straight away
+    let row = tveee_core::options::OPTIONS.iter().position(|o| o.name == tveee_core::options::SHOW_LOAD).expect("the option");
+    a.toggle_option(row);
+    assert!(rx.try_iter().any(|x| x == Action::Refresh));
+    let s = screen(&mut a, CORNER);
+    assert!(s.lines().nth(1).unwrap_or_default().contains("load 4.82"), "{s}");
+    // and off again: gone at once
+    a.toggle_option(row);
+    let s = screen(&mut a, CORNER);
+    assert!(!s.lines().nth(1).unwrap_or_default().contains("load"), "{s}");
+}
+
+#[test]
+fn palette_over_the_log() {
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let h = Handle::new(tx, Arc::new(Mutex::new(Arc::new(kodi_paused()))));
+    let mut a = app_with(kodi_paused(), actions());
+    a.overlay = Overlay::Logs { at: None, from: None };
+    // : opens the commands over the log, which stays drawn under them
+    assert!(a.palette_wanted(KeyCode::Char(':'), KeyModifiers::NONE));
+    a.palette_over();
+    assert_eq!(a.overlay, Overlay::Palette(0));
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("commands") && s.contains("log"), "{s}");
+    // Esc: back to the log
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::Logs { at: None, from: None });
+    // over the guide, its filter kept: : is typed there, ^P opens them
+    a.overlay = Overlay::Guide { tab: GuideTab::All, at: 0 };
+    a.prompt = "bbc".into();
+    assert!(!a.palette_wanted(KeyCode::Char(':'), KeyModifiers::NONE));
+    assert!(a.palette_wanted(KeyCode::Char('p'), KeyModifiers::CONTROL));
+    a.palette_over();
+    assert!(a.prompt.is_empty());
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!((a.overlay, a.prompt.as_str()), (Overlay::Guide { tab: GuideTab::All, at: 0 }, "bbc"));
+    // the palette on its own, closed: nothing comes back
+    a.overlay = Overlay::None;
+    a.open_palette();
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::None);
+}
+
+#[test]
+fn log_select_and_save() {
+    tveee_core::log::keep_recent();
+    let mark = format!("log-test-{}", std::process::id());
+    for i in 0..5 {
+        tveee_core::tlog!("{mark} line {i}");
+    }
+    let (first, lines) = tveee_core::log::recent_numbered();
+    let n0 = first + lines.iter().position(|l| l.contains(&format!("{mark} line 0"))).expect("logged");
+    let mut a = app(kodi_paused());
+    a.overlay = Overlay::Logs { at: Some(n0), from: None };
+    // shift+↓ twice: three lines selected, from line 0
+    a.logs_key(Some(n0), None, KeyCode::Down, KeyModifiers::SHIFT);
+    let Overlay::Logs { at, from } = a.overlay else { panic!() };
+    a.logs_key(at, from, KeyCode::Down, KeyModifiers::SHIFT);
+    assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: Some(n0) });
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("3 lines selected"), "{s}");
+    let (first, lines) = tveee_core::log::recent_numbered();
+    let picked = super::logview::lines_between(first, &lines, n0, n0 + 2);
+    assert!(picked.contains(&format!("{mark} line 0")) && picked.contains(&format!("{mark} line 2")) && !picked.contains(&format!("{mark} line 3")), "{picked}");
+    // esc lets go of the selection, then closes
+    a.logs_key(Some(n0 + 2), Some(n0), KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: None });
+    // s: a file name asked for (one offered), saved, back to the log
+    a.logs_key(Some(n0 + 2), None, KeyCode::Char('s'), KeyModifiers::NONE);
+    assert_eq!(a.overlay, Overlay::SaveLog);
+    assert!(a.prompt.starts_with("tveee-log-") && a.prompt.ends_with(".txt"), "{}", a.prompt);
+    let path = std::env::temp_dir().join(format!("{mark}.txt"));
+    let _ = std::fs::remove_file(&path);
+    a.prompt = path.display().to_string();
+    a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
+    let saved = std::fs::read_to_string(&path).expect("saved");
+    assert!(saved.contains(&format!("{mark} line 4")), "{saved}");
+    assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: None });
+    // again, the same name: asked before writing over it
+    a.logs_key(Some(n0 + 2), None, KeyCode::Char('s'), KeyModifiers::NONE);
+    a.prompt = path.display().to_string();
+    a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(a.overlay, Overlay::SaveLog);
+    assert!(a.note.contains("again writes over it"), "{}", a.note);
+    a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
+    assert!(a.note.starts_with("saved"), "{}", a.note);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn position_predicted() {
+    use super::drawing::{predict, stops_prediction};
+    let p = |position, paused, rate| Progress { position, duration: Some(100.0), paused, rate };
+    // playing: on at its speed; fast-forward faster; rewinding back
+    assert_eq!(predict(p(10.0, false, 1.0), 2.0).position, 12.0);
+    assert_eq!(predict(p(10.0, false, 4.0), 2.0).position, 18.0);
+    assert_eq!(predict(p(10.0, false, -8.0), 2.0).position, 0.0);
+    // kept within the bar; paused stays
+    assert_eq!(predict(p(99.0, false, 1.0), 5.0).position, 100.0);
+    assert_eq!(predict(p(10.0, true, 1.0), 5.0).position, 10.0);
+    // what stops it
+    assert!(stops_prediction(&Action::PlayPause) && stops_prediction(&Action::Seek(10.0)) && stops_prediction(&Action::Key(86)));
+    assert!(!stops_prediction(&Action::Volume(1)));
+
+    // in the app: playing Kodi, moved on since the read
+    let mut st = kodi_paused();
+    if let Some(pr) = st.snap.as_mut().and_then(|s| s.activity.as_mut()).and_then(|a| a.progress.as_mut()) {
+        pr.paused = false;
+    }
+    st.at = std::time::Instant::now() - std::time::Duration::from_secs(3);
+    let read = 27.0 * 60.0 + 56.0;
+    let (mut a, _rx, h) = app_seeing_predict(st);
+    let now = a.progress_now().unwrap().position;
+    assert!((now - (read + 3.0)).abs() < 0.5, "{now}");
+    // pause asked for: held where it is until a read
+    a.apply(Input::Do(Action::PlayPause), &h);
+    let held = a.progress_now().unwrap().position;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(a.progress_now().unwrap().position, held);
+    a.handle(CoreEvent::Changed(Change::Snapshot));
+    assert!(a.frozen.is_none());
+    // the option off: as read
+    a.opts = Some(vec![(tveee_core::options::PREDICT_POSITION.to_string(), false)]);
+    assert_eq!(a.progress_now().unwrap().position, read);
+}
+
+/// An app on `st` with its own options, and a handle that keeps what it's asked.
+fn app_seeing_predict(st: TvState) -> (App, std::sync::mpsc::Receiver<Action>, Handle) {
+    super::tests::install_all();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(st))));
+    let mut a = App::new("192.168.1.19".into(), handle.clone(), Vec::new(), true);
+    a.opts = Some(Vec::new());
+    (a, rx, handle)
+}
+
+/// Kodi showing Music > Artists, the list read, its highlight on Radiohead.
+fn kodi_artists() -> TvState {
+    use tveee_core::more::Go;
+    use tveee_core::provider::{ContextList, ListItem, ListPlace};
+    let mut st = kodi_paused();
+    let item = |id: &str, label: &str, folder: bool, meta: Option<&str>| ListItem {
+        id: id.into(),
+        label: label.into(),
+        meta: meta.map(str::to_string),
+        folder,
+        go: Go::Link(if folder { format!("kodi-window:music|{id}") } else { id.to_string() }),
+    };
+    let list = ContextList {
+        title: "Artists".into(),
+        kind: "folder",
+        key: "10502|musicdb://artists/".into(),
+        items: vec![
+            item("musicdb://artists/1/", "Massive Attack", true, Some("6 albums")),
+            item("musicdb://artists/7/", "Portishead", true, Some("3 albums")),
+            item("musicdb://artists/9/", "Radiohead", true, Some("9 albums")),
+            item("smb://nas/music/exit.flac", "Exit Music.flac", false, Some("4:24")),
+        ],
+        at: Some(2),
+    };
+    st.list = Some(Arc::new(Ok(Some(list))));
+    if let Some(s) = st.snap.as_mut() {
+        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into() });
+    }
+    st
+}
+
+/// The state an engine handle reads, to change in a test.
+type Held = Arc<Mutex<Arc<TvState>>>;
+
+/// An app whose engine handle keeps what it's asked to do.
+fn app_seeing(st: TvState) -> (App, std::sync::mpsc::Receiver<Action>, Handle) {
+    let (a, rx, h, _) = app_holding(st);
+    (a, rx, h)
+}
+
+/// [`app_seeing`], and the state its handle reads.
+fn app_holding(st: TvState) -> (App, std::sync::mpsc::Receiver<Action>, Handle, Held) {
+    super::tests::install_all();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let held: Held = Arc::new(Mutex::new(Arc::new(st)));
+    let handle = Handle::new(tx, held.clone());
+    let mut app = App::new("192.168.1.19".into(), handle.clone(), Vec::new(), true);
+    // the options as they come: not the real file's
+    app.opts = Some(Vec::new());
+    (app, rx, handle, held)
+}
+
+#[test]
+fn list_pane_desktop() {
+    let (mut a, _rx, _h) = app_seeing(kodi_artists());
+    a.overlay = Overlay::List { sel: 2 };
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    // Kodi's highlight marked; folders end in /; the count
+    assert!(s.contains("› Radiohead/") && s.contains("Exit Music.flac") && s.contains("3 of 4"), "{s}");
+    // the rows answer clicks
+    assert_eq!(a.hits.iter().filter(|(_, h)| matches!(h, Hit::ListRow(_))).count(), 4);
+    // Kodi's card offers it
+    let (mut b, _rx, _h) = app_seeing(kodi_artists());
+    let card = screen(&mut b, DESKTOP);
+    assert!(card.lines().any(|l| l.starts_with("│do ") && l.contains(" t ") && l.contains("list")), "{card}");
+}
+
+#[test]
+fn list_pane_keys() {
+    use tveee_core::more::Go;
+    let (mut a, rx, h) = app_seeing(kodi_artists());
+    // opening asks for the list, and for where it is on each refresh
+    a.open_list(&h);
+    let asked: Vec<Action> = rx.try_iter().collect();
+    assert!(asked.contains(&Action::WatchList(true)) && asked.contains(&Action::LoadList), "{asked:?}");
+    assert_eq!(a.overlay, Overlay::List { sel: 2 });
+    // the list keys
+    a.list_key(2, KeyCode::Home, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::List { sel: 0 });
+    a.list_key(0, KeyCode::End, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::List { sel: 3 });
+    // typing filters: the highlight goes to what's left
+    for c in "port".chars() {
+        let Overlay::List { sel } = a.overlay else { panic!() };
+        a.list_key(sel, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    assert_eq!(a.overlay, Overlay::List { sel: 1 });
+    assert_eq!(a.list_shown(), vec![1]);
+    // a folder: opened, the pane stays (and the filter goes)
+    a.list_key(1, KeyCode::Enter, KeyModifiers::NONE, &h);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListGo(Go::Link("kodi-window:music|musicdb://artists/7/".into()))]);
+    assert!(matches!(a.overlay, Overlay::List { .. }) && a.prompt.is_empty());
+    // a file: played, the pane closes and the refresh stops reading the list
+    a.list_choose(3, &h);
+    let asked: Vec<Action> = rx.try_iter().collect();
+    assert_eq!(asked, vec![Action::ListGo(Go::Link("smb://nas/music/exit.flac".into())), Action::WatchList(false)]);
+    assert_eq!(a.overlay, Overlay::None);
+}
+
+#[test]
+fn list_pane_follows_kodi() {
+    use tveee_core::provider::ListPlace;
+    let st = kodi_artists();
+    let (mut a, rx, h, held) = app_holding(st.clone());
+    a.open_list(&h);
+    let _ = rx.try_iter().count();
+    a.list_sync(Change::Snapshot);
+    // Kodi's highlight moves to Portishead: the pane follows
+    let mut moved = st.clone();
+    moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Portishead".into(), focus_id: "musicdb://artists/7/".into() });
+    *held.lock().unwrap() = Arc::new(moved);
+    a.st = h.state();
+    a.list_sync(Change::Snapshot);
+    assert_eq!(a.overlay, Overlay::List { sel: 1 });
+    // nothing new asked for: same list
+    assert!(rx.try_iter().next().is_none());
+    // Kodi opens another folder: its items are read (once)
+    let mut other = st;
+    other.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new() });
+    *held.lock().unwrap() = Arc::new(other);
+    a.st = h.state();
+    a.list_sync(Change::Snapshot);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::LoadList]);
 }

@@ -64,6 +64,10 @@ pub fn key_name(code: u32) -> &'static str {
 
 /// How often the refresh reads what's on.
 pub const REFRESH: Duration = Duration::from_secs(1);
+/// How often the TV is read with the "low bandwidth" option on.
+pub const REFRESH_LOW: Duration = Duration::from_secs(4);
+/// How often the system figures are read with it on (while they're shown).
+pub const SYSTEM_LOW: Duration = Duration::from_secs(10);
 
 /// What one fast-forward/rewind key press is assumed to skip, for apps we
 /// can't seek exactly.
@@ -118,6 +122,18 @@ pub enum Action {
     Watch(crate::provider::Channel),
     /// Make a channel a favourite (true) or not.
     Favourite(crate::provider::Channel, bool),
+    /// Show or hide the app in front's music visualiser (switch).
+    Visualiser,
+    /// The system panel opened (true) or closed: the refresh reads the
+    /// system figures while it's open (or the top line shows them).
+    WatchSystem(bool),
+    /// The list pane opened (true) or closed: while it's open the refresh
+    /// reads where the app's list is ([`Snapshot::list_place`]).
+    WatchList(bool),
+    /// Read the app in front's list ([`crate::provider::Player::list`]).
+    LoadList,
+    /// Choose an item from it; its list is read again after.
+    ListGo(crate::more::Go),
     Refresh,
 }
 
@@ -137,6 +153,9 @@ pub struct Snapshot {
     pub kind: Option<String>,
     pub power: Option<String>,
     pub focus: Option<String>,
+    /// Where the app's list is (which list, and its highlighted row), while
+    /// the list pane is open and the app can say.
+    pub list_place: Option<crate::provider::ListPlace>,
 }
 
 /// The package of the app in front in a snapshot.
@@ -162,6 +181,8 @@ pub enum Msg {
     Guide(std::result::Result<Guide, String>),
     /// A programme's description (channel, start).
     Info((u32, i64), std::result::Result<Option<String>, String>),
+    /// The app in front's list (None: it isn't showing one), or why not.
+    List(std::result::Result<Option<crate::provider::ContextList>, String>),
     /// The panels this TV has (`crate::panel`), by id.
     Panels(Vec<&'static str>),
     /// Pairing: the TV is showing a PIN; ask for it.
@@ -216,7 +237,18 @@ impl Engine {
         spawn_named("preview", move || preview_lane(&sh, &preview_msgs));
         let sh = Arc::clone(&shared);
         spawn_named("push", move || push_lane(&sh, &push_wake));
-        let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None, last_window: String::new(), last_power: String::new(), last_activity: None, said: String::new() };
+        let refresher = Refresher {
+            tv: shared.tv(),
+            shared: Arc::clone(&shared),
+            channel: None,
+            named: None,
+            last_window: String::new(),
+            last_power: String::new(),
+            last_activity: None,
+            said: String::new(),
+            system: None,
+            read_at: Instant::now(),
+        };
         spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
         let _ = act_tx.send(Action::Refresh);
         // the keeper: what the lanes find, into the state

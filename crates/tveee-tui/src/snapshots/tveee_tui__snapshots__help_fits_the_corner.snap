@@ -1,9 +1,9 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 188
+assertion_line: 208
 expression: s
 ---
-┌ keys - ↑/↓ scroll, any other key closes ───── 1-14 of 70 ┐
+┌ keys - ↑/↓ scroll, any other key closes ───── 1-14 of 77 ┐
 │ everywhere                                               │
 │   space p  play/pause                                    │
 │   ⌫        back                                          │
@@ -15,7 +15,7 @@ expression: s
 │   r        refresh                                       │
 │   tab      switch mode                                   │
 │   .        more (power, mirror, ...)                     │
+│   lists    ↑ ↓ one, pgup pgdn a page, home end the       │
+│            first and last                                │
 │   : ctrl+p commands: everything tveee can do, found by   │
-│            typing a few letters                          │
-│            (the ui's own too: the log of what tveee did  │
 └──────────────────────────────────────────────────────────┘

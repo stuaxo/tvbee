@@ -31,6 +31,9 @@ mod overlays;
 mod palette;
 mod drawing;
 mod links;
+mod logview;
+mod listnav;
+mod ctxlist;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -68,6 +71,37 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// Where the progress bar stays after a pause, seek or stop asked for
+    /// here, until the next read says what it's doing (no prediction).
+    frozen: Option<f64>,
+    /// The log as it was before saving it was asked for (back to it after).
+    log_back: Option<Overlay>,
+    /// The file name ⏎ was pressed for that's there already (⏎ again
+    /// writes over it).
+    save_confirm: Option<String>,
+    /// The log's top line shown (by number), so the view only moves as far
+    /// as keeps the highlight in it.
+    log_top: Option<usize>,
+    /// A drag over the log's lines started (it selects).
+    log_drag: bool,
+    /// tveee's options as this app reads them: None, the saved ones; tests
+    /// give each app its own (never the real file, nor each other's).
+    opts: Option<Vec<(String, bool)>>,
+    /// The engine has been told the system panel is showing (it reads the
+    /// system figures while it is).
+    system_watching: bool,
+    /// The pop-up the command palette opened over (the log, the guide, ...)
+    /// and its typed text: back to it when the palette closes.
+    under: Option<(Overlay, String)>,
+    /// Where the app's list was at the last refresh (the list pane follows
+    /// its highlight when it moves).
+    list_seen: Option<tveee_core::provider::ListPlace>,
+    /// The refresh has been asked to read where the list is.
+    list_watching: bool,
+    /// The options dialog's tab: its options, or the plugins.
+    options_plugins: bool,
+    /// Every plugin and whether it's on (the options dialog's plugins tab).
+    plugins: Vec<tveee_core::plugin::PluginState>,
     /// What has been typed into the open prompt.
     prompt: String,
     /// The search box's app choices, made when it opens.
@@ -280,13 +314,21 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     app.switch_view(v, actions);
                 }
             }
+            // the commands open over anything (: where it isn't typed text)
+            Event::Key(k) if k.kind != KeyEventKind::Release && app.palette_wanted(k.code, k.modifiers) => app.palette_over(),
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
+                } else if let Overlay::Logs { at, from } = app.overlay {
+                    app.logs_key(at, from, k.code, k.modifiers);
+                } else if let Overlay::SaveLog = app.overlay {
+                    app.save_log_key(k.code, k.modifiers);
                 } else if let Overlay::Options(i) = app.overlay {
                     app.options_key(i, k.code);
                 } else if let Overlay::Guide { tab, at } = app.overlay {
                     app.guide_key(tab, at, k.code, k.modifiers, actions);
+                } else if let Overlay::List { sel } = app.overlay {
+                    app.list_key(sel, k.code, k.modifiers, actions);
                 } else if let Overlay::Search(at) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
                     let (next, action) = search_key(at, k.code, k.modifiers, &mut text, &app.search_targets);
@@ -357,6 +399,19 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                 }
             }
             Event::Mouse(m) => match m.kind {
+                // the log's lines: shift+click selects to there; a drag selects
+                MouseEventKind::Down(MouseButton::Left) if matches!((app.overlay, app.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) => {
+                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
+                        app.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
+                        app.log_drag = true;
+                    }
+                }
+                MouseEventKind::Drag(MouseButton::Left) if app.log_drag => {
+                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
+                        app.log_click(n, true);
+                    }
+                }
+                MouseEventKind::Up(MouseButton::Left) => app.log_drag = false,
                 MouseEventKind::Down(MouseButton::Left) => {
                     if app.click(m.column, m.row, actions) {
                         return Ok(());
@@ -393,6 +448,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     tveee_core::log::keep_recent();
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
+    app.plugins = c.plugins.clone();
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -478,6 +534,18 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            frozen: None,
+            log_back: None,
+            save_confirm: None,
+            log_top: None,
+            log_drag: false,
+            opts: None,
+            system_watching: false,
+            under: None,
+            list_seen: None,
+            list_watching: false,
+            options_plugins: false,
+            plugins: Vec::new(),
             prompt: String::new(),
             search_targets: Vec::new(),
             settling: None,
@@ -508,6 +576,11 @@ impl App {
         match e {
             CoreEvent::Changed(change) => {
                 self.st = self.engine.state();
+                // a read (or a seek landing) says where it is now
+                if matches!(change, Change::Snapshot | Change::Seeked) {
+                    self.frozen = None;
+                }
+                self.list_sync(change);
                 match change {
                     // while an action settles the latest snapshot is only
                     // shown once the action has got there
@@ -599,6 +672,13 @@ impl App {
     }
 
     fn apply(&mut self, input: Input, actions: &Handle) -> bool {
+        // playback asked to change: the bar stays where it is until a read
+        // says what happened
+        if let Input::Do(a) = &input
+            && stops_prediction(a)
+        {
+            self.frozen = self.progress_now().map(|p| p.position);
+        }
         match input {
             Input::Quit => return true,
             Input::ToggleMode => {
@@ -649,6 +729,11 @@ impl App {
             },
             Input::OpenSearch => self.open_search(None),
             Input::OpenGuide => self.open_guide(None, actions),
+            Input::ToggleVisualiser => {
+                self.note = "the music visualiser...".into();
+                let _ = actions.send(Action::Visualiser);
+            }
+            Input::OpenList => self.open_list(actions),
             Input::OpenOptions => self.overlay = Overlay::Options(0),
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
@@ -658,7 +743,7 @@ impl App {
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
             Input::OpenPalette => self.open_palette(),
-            Input::ShowLogs => self.overlay = Overlay::Logs(0),
+            Input::ShowLogs => self.overlay = Overlay::Logs { at: None, from: None },
             Input::ToggleUrl => match self.url() {
                 Some(_) => self.url_full = !self.url_full,
                 None => self.note = "no link for what's on".into(),
@@ -822,6 +907,10 @@ impl App {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
             }
             (Overlay::Options(_), Some(Hit::OptionItem(i))) => self.toggle_option(i),
+            (Overlay::Options(_), Some(Hit::OptionTab(plugins))) => {
+                self.options_plugins = plugins;
+                self.overlay = Overlay::Options(0);
+            }
             (Overlay::Options(_), Some(Hit::Popup)) => {}
             (Overlay::Options(_), _) => self.overlay = Overlay::None,
             (Overlay::Guide { .. }, Some(Hit::Details(click))) => {
@@ -844,6 +933,9 @@ impl App {
             (Overlay::Guide { .. }, Some(Hit::Popup)) => {}
             // clicking outside closes it
             (Overlay::Guide { .. }, _) => self.overlay = Overlay::None,
+            (Overlay::List { .. }, Some(Hit::ListRow(i))) => self.list_choose(i, actions),
+            (Overlay::List { .. }, Some(Hit::Popup)) => {}
+            (Overlay::List { .. }, _) => self.close_list(actions),
             (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) => {
                 let rows = tab_list(self.st.apps_list(), tab);
                 let target = rows.get(i).map(|e| e.target.clone());
@@ -857,11 +949,18 @@ impl App {
             (Overlay::AppActions { tab, sel, .. }, _) => self.overlay = Overlay::Apps { tab, sel },
             (Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), Some(Hit::Popup)) => {}
             // the log: a click inside does nothing, outside closes it
-            (Overlay::Logs(_), Some(Hit::Popup)) => {}
-            (Overlay::Logs(_), _) => self.overlay = Overlay::None,
+            (Overlay::Logs { .. }, Some(Hit::LogLine(n))) => self.log_click(n, false),
+            (Overlay::Logs { .. }, Some(Hit::Popup)) => {}
+            (Overlay::Logs { .. }, _) => self.overlay = Overlay::None,
+            (Overlay::SaveLog, Some(Hit::Popup)) => {}
+            (Overlay::SaveLog, _) => self.overlay = self.log_back.take().unwrap_or(Overlay::None),
             // a click elsewhere closes the pop-up (cancelling a confirmation)
             (Overlay::Help(_) | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
-                self.apply_overlay(Overlay::None, None, actions)
+                let palette = matches!(self.overlay, Overlay::Palette(_));
+                self.apply_overlay(Overlay::None, None, actions);
+                if palette {
+                    self.palette_closed();
+                }
             }
             (Overlay::None, Some(Hit::Input(i))) => return self.apply(i, actions),
             (Overlay::None, Some(Hit::Progress { x0, width })) => {
@@ -893,7 +992,12 @@ impl App {
     fn scroll(&mut self, up: bool, actions: &Handle) {
         match self.overlay {
             // the wheel scrolls the log, three lines a notch
-            Overlay::Logs(n) => self.overlay = Overlay::Logs(if up { n + 3 } else { n.saturating_sub(3) }),
+            Overlay::Logs { .. } => {
+                for _ in 0..3 {
+                    let Overlay::Logs { at, from } = self.overlay else { break };
+                    self.logs_key(at, from, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE);
+                }
+            }
             Overlay::Menu(_) => {
                 let code = if up { KeyCode::Up } else { KeyCode::Down };
                 let (next, action) = overlay_key(self.overlay, code, &self.menu);
@@ -906,6 +1010,7 @@ impl App {
             }
             Overlay::Options(i) => self.options_key(i, if up { KeyCode::Up } else { KeyCode::Down }),
             Overlay::Guide { tab, at } => self.guide_key(tab, at, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE, actions),
+            Overlay::List { sel } => self.list_key(sel, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE, actions),
             Overlay::None => {
                 let _ = actions.send(Action::Volume(if up { 1 } else { -1 }));
             }

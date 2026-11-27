@@ -24,7 +24,7 @@ pub enum Lane {
 pub fn lane(a: &Action) -> Lane {
     match a {
         Action::Key(_) | Action::Text(_) => Lane::Keys,
-        Action::LoadGuide | Action::CheckRunning | Action::WatchPanel(..) | Action::PreviewPanel(_) => Lane::Read,
+        Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => Lane::Read,
         Action::PrefetchInfo => Lane::Idle,
         _ => Lane::Act,
     }
@@ -46,6 +46,14 @@ pub fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender
         }
         if let Action::PreviewPanel(on) = a {
             shared.preview.store(on, Ordering::Relaxed);
+            continue;
+        }
+        if let Action::WatchSystem(on) = a {
+            shared.system_watch.store(on, Ordering::Relaxed);
+            continue;
+        }
+        if let Action::WatchList(on) = a {
+            shared.list_watch.store(on, Ordering::Relaxed);
             continue;
         }
         let l = lane(&a);
@@ -146,6 +154,10 @@ pub struct Shared {
     pub panels: std::sync::Mutex<std::collections::BTreeSet<&'static str>>,
     /// The preview panel is open: its lane makes pictures.
     pub preview: AtomicBool,
+    /// The system panel is open: the refresh reads the system figures.
+    pub system_watch: AtomicBool,
+    /// The list pane is open: the refresh reads where the list is.
+    pub list_watch: AtomicBool,
     /// A picture of what an app's player is playing, for the preview.
     pub art: std::sync::Mutex<Option<ArtNow>>,
 
@@ -179,6 +191,8 @@ impl Shared {
             shown: AtomicBool::new(false),
             panels: Default::default(),
             preview: AtomicBool::new(false),
+            system_watch: AtomicBool::new(false),
+            list_watch: AtomicBool::new(false),
             art: Default::default(),
 
             apps_sent: std::sync::Mutex::new(false),
@@ -275,6 +289,39 @@ pub struct Refresher {
     pub last_activity: Option<Activity>,
     /// The state last shown, as [`state_line`] says it: a change is logged.
     pub said: String,
+    /// The system figures last read, and when (read less often, or not at
+    /// all, when they aren't shown: see [`system_wanted`]).
+    pub system: Option<(info::System, Instant)>,
+    /// When the last refresh read the TV (for when playback should end).
+    pub read_at: Instant,
+}
+
+/// Whether the system figures need reading now: they're shown (the top
+/// line's load and memory, or the system panel), and in low-bandwidth mode
+/// not read for a while.
+pub fn system_wanted(shown: bool, low: bool, last_read: Option<Duration>) -> bool {
+    shown && last_read.is_none_or(|ago| !low || ago >= super::SYSTEM_LOW)
+}
+
+/// How long the refresh waits for its next read: a second; with low
+/// bandwidth on, four, or just after what's playing should end if that's
+/// sooner (so the end shows on time). `left`: how long it has to go.
+pub fn next_wait(low: bool, left: Option<Duration>) -> Duration {
+    if !low {
+        return REFRESH;
+    }
+    match left {
+        Some(l) => (l + Duration::from_millis(500)).clamp(REFRESH, super::REFRESH_LOW),
+        None => super::REFRESH_LOW,
+    }
+}
+
+/// How long `a` has to go, `ago` after it was read: playing (not paused)
+/// with a length.
+pub fn time_left(a: Option<&Activity>, ago: Duration) -> Option<Duration> {
+    let p = a?.progress.as_ref().filter(|p| !p.paused)?;
+    let left = p.duration? - p.position - ago.as_secs_f64();
+    Some(Duration::from_secs_f64(left.max(0.0)))
 }
 
 /// What a refresh shows, in one line for the log: the what line, the
@@ -298,7 +345,12 @@ pub fn state_line(s: &Snapshot) -> String {
 impl Refresher {
     pub fn run(mut self, wake: &Receiver<()>, tx: Sender<Msg>) {
         // every REFRESH, or when woken; until the action lane has gone
-        while let Ok(()) | Err(RecvTimeoutError::Timeout) = wake.recv_timeout(REFRESH) {
+        loop {
+            let low = crate::options::get(crate::options::LOW_BANDWIDTH);
+            let wait = next_wait(low, time_left(self.last_activity.as_ref(), self.read_at.elapsed()));
+            if let Err(RecvTimeoutError::Disconnected) = wake.recv_timeout(wait) {
+                break;
+            }
             // several wake-ups at once: one refresh
             while wake.try_recv().is_ok() {}
             let held = Instant::now();
@@ -309,6 +361,7 @@ impl Refresher {
                 break;
             }
             let started = Instant::now();
+            self.read_at = started;
             let msg = match self.snapshot() {
                 Ok(s) => {
                     let now = state_line(&s);
@@ -363,18 +416,33 @@ impl Refresher {
     pub fn snapshot(&mut self) -> Result<Snapshot> {
         let tv = &self.tv;
         let open: Vec<&'static crate::panel::Spec> = lock(&self.shared.panels).iter().filter_map(|id| crate::panel::by_id(id)).collect();
+        let shown = crate::options::get(crate::options::SHOW_LOAD) || self.shared.system_watch.load(Ordering::Relaxed);
+        let low = crate::options::get(crate::options::LOW_BANDWIDTH);
+        let want_system = system_wanted(shown, low, self.system.as_ref().map(|(_, at)| at.elapsed()));
         let (power, window, media_dump, audio, system, panels) = std::thread::scope(|sc| {
             let l = sc.spawn(move || open.iter().map(|p| (p.id, (p.read)(tv))).collect::<Vec<_>>());
             let p = sc.spawn(|| tv.shell(&["dumpsys", "power"]));
             let w = sc.spawn(|| tv.window_dump());
             let m = sc.spawn(|| tv.shell(&["dumpsys", "media_session"]));
-            let y = sc.spawn(|| info::read_system(tv));
+            // the system figures: only while shown (and less often with low bandwidth)
+            let y = sc.spawn(|| if want_system { info::read_system(tv).map(Some) } else { Ok(None) });
             let a = tv.shell(&["dumpsys", "audio"]);
             let j = |h: std::thread::ScopedJoinHandle<'_, Result<String>>| h.join().unwrap_or_else(|_| Ok(String::new()));
-            // the system figures only feed the optional panel
-            let y = y.join().ok().and_then(|r| r.ok()).unwrap_or_default();
+            let y = y.join().ok().and_then(|r| r.ok()).flatten();
             (j(p), j(w), j(m), a, y, l.join().unwrap_or_default())
         });
+        // fresh figures, else the last ones while they're still shown
+        let system = match system {
+            Some(s) => {
+                self.system = Some((s.clone(), Instant::now()));
+                s
+            }
+            None if shown => self.system.as_ref().map(|(s, _)| s.clone()).unwrap_or_default(),
+            None => {
+                self.system = None;
+                info::System::default()
+            }
+        };
         let (mut power, mut window, audio) = (power?, window?, audio?);
         if !power.lines().any(|l| l.trim().starts_with("mWakefulness=")) {
             crate::tlog!("refresh: power dump without mWakefulness ({} bytes); asking again", power.len());
@@ -442,6 +510,11 @@ impl Refresher {
             },
             _ => activity,
         };
+        // where the list is, while the ui shows it (one small read)
+        let list_place = match (pkg.as_deref(), awake && self.shared.list_watch.load(Ordering::Relaxed)) {
+            (Some(p), true) => crate::provider::for_package(p).and_then(|pr| pr.player()).filter(|pl| pl.has_list()).and_then(|pl| pl.list_place(&self.tv).handled().flatten()),
+            _ => None,
+        };
         let activity = activity.map(|a| nowplaying::keep_title(self.last_activity.as_ref(), a));
         self.last_activity.clone_from(&activity);
         *lock(&self.shared.art) = art;
@@ -459,6 +532,7 @@ impl Refresher {
             focus: info::focus_window(&window),
             system,
             panels,
+            list_place,
         })
     }
 }
@@ -624,6 +698,21 @@ impl Actor {
                 });
                 String::new()
             }
+            Action::Visualiser => crate::builtin::media::visualiser_of(&self.tv, None)?,
+            Action::ListGo(to) => {
+                let pkg = lock(&self.shared.pkg).clone().unwrap_or_default();
+                let player = crate::provider::for_package(&pkg).and_then(|p| p.player());
+                let said = match player.map(|p| p.go(&self.tv, &to).or_fallback()) {
+                    Some(Ok(Some(said))) => said,
+                    Some(Err(e)) => return Err(e),
+                    _ => crate::builtin::info::go(&self.tv, &pkg, &to)?,
+                };
+                // it changed what the app shows: its list, read again now
+                // rather than waiting for the refresh to notice
+                std::thread::sleep(Duration::from_millis(600));
+                let _ = tx.send(Msg::List(read_list(&self.shared, &self.tv)));
+                said
+            }
             Action::Refresh => "refreshed".into(),
             // other lanes' actions don't come here
             Action::PairStart(id) => {
@@ -641,9 +730,16 @@ impl Actor {
                 crate::pairing::save(id, &self.tv.ip, &saved)?;
                 "paired with the TV".into()
             }
-            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo | Action::WatchPanel(..) | Action::PreviewPanel(_) => String::new(),
+            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::PrefetchInfo | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => String::new(),
         })
     }
+}
+
+/// The app in front's list, if its player has one and is showing it.
+pub fn read_list(shared: &Shared, tv: &Tv) -> std::result::Result<Option<crate::provider::ContextList>, String> {
+    let pkg = lock(&shared.pkg).clone();
+    let Some(player) = pkg.as_deref().and_then(crate::provider::for_package).and_then(|p| p.player()).filter(|p| p.has_list()) else { return Ok(None) };
+    player.list(tv).or_fallback().map_err(|e| e.to_string())
 }
 
 /// The read lane: things the user is waiting to see, kept apart from
@@ -658,6 +754,9 @@ pub fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg>) {
             match a {
                 Action::LoadGuide => {
                     let _ = tx.send(Msg::Guide(load_guide(tv).map_err(|e| e.to_string())));
+                }
+                Action::LoadList => {
+                    let _ = tx.send(Msg::List(read_list(shared, tv)));
                 }
                 // the launcher is open: its apps can't wait for a lull
                 Action::CheckRunning => std::thread::scope(|sc| {
@@ -784,5 +883,50 @@ pub fn push_lane(shared: &Shared, wake: &Sender<()>) {
         if still() {
             resting = Some((pkg, Instant::now()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn low_bandwidth_waits() {
+        use std::time::Duration;
+        let secs = Duration::from_secs;
+        // responsive: every second, whatever plays
+        assert_eq!(super::next_wait(false, None), secs(1));
+        assert_eq!(super::next_wait(false, Some(secs(30))), secs(1));
+        // low bandwidth: every four, or just after the end when that's sooner
+        assert_eq!(super::next_wait(true, None), secs(4));
+        assert_eq!(super::next_wait(true, Some(secs(60))), secs(4));
+        assert_eq!(super::next_wait(true, Some(Duration::from_millis(2000))), Duration::from_millis(2500));
+        assert_eq!(super::next_wait(true, Some(secs(0))), secs(1));
+    }
+
+    #[test]
+    fn time_left_of_what_plays() {
+        use crate::devtools::Progress;
+        use std::time::Duration;
+        let mut a = crate::nowplaying::Activity::just("Listening in Kodi");
+        a.progress = Some(Progress { position: 200.0, duration: Some(213.0), paused: false, rate: 1.0 });
+        assert_eq!(super::time_left(Some(&a), Duration::from_secs(3)), Some(Duration::from_secs(10)));
+        // paused, no length, nothing: no end to wait for
+        a.progress = Some(Progress { position: 200.0, duration: Some(213.0), paused: true, rate: 1.0 });
+        assert_eq!(super::time_left(Some(&a), Duration::ZERO), None);
+        a.progress = Some(Progress { position: 200.0, duration: None, paused: false, rate: 1.0 });
+        assert_eq!(super::time_left(Some(&a), Duration::ZERO), None);
+        assert_eq!(super::time_left(None, Duration::ZERO), None);
+    }
+
+    #[test]
+    fn system_read_when_shown() {
+        use std::time::Duration;
+        // not shown: never
+        assert!(!super::system_wanted(false, false, None));
+        // shown: every refresh, or with low bandwidth every ten seconds
+        assert!(super::system_wanted(true, false, Some(Duration::from_secs(1))));
+        assert!(!super::system_wanted(true, true, Some(Duration::from_secs(4))));
+        assert!(super::system_wanted(true, true, Some(Duration::from_secs(10))));
+        assert!(super::system_wanted(true, true, None));
     }
 }

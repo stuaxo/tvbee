@@ -18,6 +18,7 @@ use tveee_core::tv::Tv;
 pub const PACKAGE: &str = "org.xbmc.kodi";
 
 pub mod addons;
+pub mod browse;
 pub mod sideload;
 const PAIRING: &str = "kodi";
 const DEFAULT_PORT: u16 = 8080;
@@ -200,8 +201,10 @@ pub fn parse_playing(item: &Value, props: &Value) -> Playing {
     };
     let time = props.get("time").and_then(seconds);
     let total = props.get("totaltime").and_then(seconds).filter(|t| *t > 0.0);
-    let paused = num_of(props, "speed").is_some_and(|s| s == 0.0);
-    let progress = time.map(|position| Progress { position, duration: total, paused });
+    // 0 paused, 1 playing, 2 4 8... fast-forwarding, -2... rewinding
+    let speed = num_of(props, "speed").unwrap_or(1.0);
+    let paused = speed == 0.0;
+    let progress = time.map(|position| Progress { position, duration: total, paused, rate: speed });
     // a picture: fanart or a poster/thumb
     let art = item
         .get("art")
@@ -508,6 +511,43 @@ impl tveee_core::provider::Provider for Kodi {
 }
 
 impl tveee_core::provider::Player for Kodi {
+    fn has_visualiser(&self) -> bool {
+        true
+    }
+    fn visualiser(&self, tv: &Tv, want: Option<bool>) -> Outcome<bool> {
+        match visualiser(tv, want) {
+            Err(Error::Unavailable(_)) => Outcome::Fallback,
+            r => r.into(),
+        }
+    }
+    fn has_list(&self) -> bool {
+        true
+    }
+    fn list_place(&self, tv: &Tv) -> Outcome<Option<tveee_core::provider::ListPlace>> {
+        match browse::place(tv) {
+            Ok(p) => Outcome::Handled(p.as_ref().map(browse::list_place)),
+            Err(Error::Unavailable(_)) => Outcome::Fallback,
+            Err(e) => Outcome::Failed(e),
+        }
+    }
+    fn list(&self, tv: &Tv) -> Outcome<tveee_core::provider::ContextList> {
+        match browse::list(tv) {
+            Ok(Some(l)) => Outcome::Handled(l),
+            // not showing a list (or its API is off): nothing here
+            Ok(None) | Err(Error::Unavailable(_)) => Outcome::Fallback,
+            Err(e) => Outcome::Failed(e),
+        }
+    }
+    fn go(&self, tv: &Tv, to: &tveee_core::more::Go) -> Outcome<String> {
+        use tveee_core::provider::Provider;
+        let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };
+        match self.open_here(tv, link) {
+            Outcome::Handled(()) if link.starts_with("kodi-window:") => Outcome::Handled("opened it in Kodi".into()),
+            Outcome::Handled(()) => Outcome::Handled("playing it in Kodi".into()),
+            Outcome::Fallback => Outcome::Fallback,
+            Outcome::Failed(e) => Outcome::Failed(e),
+        }
+    }
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {
         match Outcome::from(now(tv)) {
             Outcome::Handled(Some((p, _, _))) => Outcome::Handled(p),
@@ -810,6 +850,37 @@ fn play(tv: &Tv, q: &str, front: bool) -> Result<String> {
     }
 }
 
+/// Kodi's music visualisation window (shown full screen while music plays).
+pub const VISUALISATION: u64 = 12006;
+
+/// What to set full screen to, to get the visualiser `want` (None: switch)
+/// when it's `now` showing; None: nothing to do.
+pub fn visualiser_step(now: bool, want: Option<bool>) -> Option<bool> {
+    let want = want.unwrap_or(!now);
+    (want != now).then_some(want)
+}
+
+fn window_id(tv: &Tv) -> Result<u64> {
+    let r = call(tv, "GUI.GetProperties", r#"{"properties":["currentwindow"]}"#)?;
+    Ok(r.pointer("/currentwindow/id").and_then(Value::as_u64).unwrap_or(0))
+}
+
+/// Show Kodi's music visualiser or go back from it (None: switch), while it
+/// plays music: full screen is the visualiser then. Whether it's showing.
+fn visualiser(tv: &Tv, want: Option<bool>) -> Result<bool> {
+    match player_id(tv)? {
+        Some((_, kind)) if kind == "audio" => {}
+        Some(_) => return failed("Kodi's visualiser is for music: it's playing a video"),
+        None => return failed("Kodi isn't playing music (its visualiser needs some)"),
+    }
+    let now = window_id(tv)? == VISUALISATION;
+    let Some(to) = visualiser_step(now, want) else { return Ok(now) };
+    call(tv, "GUI.SetFullscreen", &format!(r#"{{"fullscreen":{to}}}"#))?;
+    // as Kodi has it now
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    Ok(window_id(tv)? == VISUALISATION)
+}
+
 /// The playing video's player id, or a failure saying nothing is playing.
 fn video_player(tv: &Tv) -> Result<u32> {
     match player_id(tv)? {
@@ -1086,6 +1157,19 @@ pub fn pairings() -> Vec<&'static dyn tveee_core::pairing::Pairing> {
 /// Nothing of its own: `tveee app kodi`, `goto kodi`, `seek`, ... cover it.
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn visualiser_steps() {
+        use super::visualiser_step;
+        // switch
+        assert_eq!(visualiser_step(false, None), Some(true));
+        assert_eq!(visualiser_step(true, None), Some(false));
+        // asked for what it is: nothing to do
+        assert_eq!(visualiser_step(true, Some(true)), None);
+        assert_eq!(visualiser_step(false, Some(false)), None);
+        assert_eq!(visualiser_step(false, Some(true)), Some(true));
+    }
+
     use super::*;
 
     // as Kodi 21 answers

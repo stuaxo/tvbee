@@ -22,7 +22,11 @@ pub enum Overlay {
     /// `App::prompt`).
     Palette(usize),
     /// The log, scrolled up this many lines from the end.
-    Logs(usize),
+    /// The log: line `at` (by its number) highlighted, or None following
+    /// the newest; `from`: where a selection starts.
+    Logs { at: Option<usize>, from: Option<usize> },
+    /// Typing the file to save the log to (the name is `App::prompt`).
+    SaveLog,
     /// The app launcher: which tab, and the highlighted app in it.
     Apps { tab: AppTab, sel: usize },
     /// Typing what action `id` needs (the text is `App::prompt`).
@@ -36,6 +40,9 @@ pub enum Overlay {
     /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
     /// the filter typed is `App::prompt`.
     Guide { tab: GuideTab, at: u32 },
+    /// The list the app in front shows (`t`), item `sel` (an index into it)
+    /// highlighted; the filter typed is `App::prompt`.
+    List { sel: usize },
 }
 
 /// An app the search box can search in, and how.
@@ -131,12 +138,17 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
             KeyCode::Down => (Overlay::Help(top.saturating_add(1)), None),
             KeyCode::PageUp => (Overlay::Help(top.saturating_sub(10)), None),
             KeyCode::PageDown => (Overlay::Help(top.saturating_add(10)), None),
+            KeyCode::Home => (Overlay::Help(0), None),
+            // drawing stops it at the last page
+            KeyCode::End => (Overlay::Help(usize::MAX / 2), None),
             _ => (Overlay::None, None),
         },
         Overlay::Menu(sel) => match code {
             KeyCode::Esc | KeyCode::Char('.') | KeyCode::Char('q') | KeyCode::Backspace => (Overlay::None, None),
-            KeyCode::Up => (Overlay::Menu(sel.checked_sub(1).unwrap_or(items.len().saturating_sub(1))), None),
-            KeyCode::Down => (Overlay::Menu(if sel + 1 >= items.len() { 0 } else { sel + 1 }), None),
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(sel, items.len(), c).unwrap_or(sel);
+                (Overlay::Menu(to), None)
+            }
             KeyCode::Enter => pick_item(sel),
             KeyCode::Char(c) => match items.iter().position(|it| it.key == Some(c)) {
                 Some(i) => pick_item(i),
@@ -149,18 +161,15 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         Overlay::Prompt(id) => (Overlay::Prompt(id), None),
         // handled by App::palette_key
         Overlay::Palette(sel) => (Overlay::Palette(sel), None),
-        Overlay::Logs(up) => match code {
-            KeyCode::Up => (Overlay::Logs(up + 1), None),
-            KeyCode::Down => (Overlay::Logs(up.saturating_sub(1)), None),
-            KeyCode::PageUp => (Overlay::Logs(up + 10), None),
-            KeyCode::PageDown => (Overlay::Logs(up.saturating_sub(10)), None),
-            KeyCode::End => (Overlay::Logs(0), None),
-            _ => (Overlay::None, None),
-        },
+        // handled by App::logs_key / save_log_key
+        Overlay::Logs { at, from } => (Overlay::Logs { at, from }, None),
+        Overlay::SaveLog => (Overlay::SaveLog, None),
         Overlay::Search(i) => (Overlay::Search(i), None),
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
         Overlay::Guide { tab, at } => (Overlay::Guide { tab, at }, None),
+        // handled by App::list_key
+        Overlay::List { sel } => (Overlay::List { sel }, None),
         // handled by App::options_key
         Overlay::Options(i) => (Overlay::Options(i), None),
         Overlay::Confirm { id, yes } => match code {
@@ -249,6 +258,7 @@ pub(super) const HELP: &str = " everywhere
    0-9      jump to 0%-90%   + -    volume
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
+   lists    ↑ ↓ one, pgup pgdn a page, home end the first and last
    : ctrl+p commands: everything tveee can do, found by typing a few letters
             (the ui's own too: the log of what tveee did lately, help, ...)
    F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
@@ -262,6 +272,9 @@ pub(super) const HELP: &str = " everywhere
    v        preview: a picture of what's on (scrcpy if installed, 1 a second;
             YouTube's storyboards; else a screenshot every few seconds)
    /        search the app in front (tab picks another app)
+   z        music visualiser: show or hide it (Kodi, while it plays music)
+   t        the list the app shows (Kodi's folder or add-on): choose from it,
+            following Kodi's highlight (type to filter)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
@@ -288,27 +301,92 @@ pub(super) const HELP: &str = " everywhere
    Shift+drag selects text as usual (to copy the url)";
 
 impl App {
-    /// Keys in the options dialog: ↑/↓ choose, Space/Enter toggle, Esc closes.
+    /// The plugins its tab lets you change: the vendor ones (built-in ones
+    /// are always on).
+    pub(super) fn vendor_plugins(&self) -> Vec<&tveee_core::plugin::PluginState> {
+        self.plugins.iter().filter(|p| p.source != tveee_core::plugin::Source::Builtin).collect()
+    }
+
+    /// Keys in the options dialog: ↑/↓ choose, Space/Enter change it,
+    /// Tab/←/→ switch between options and plugins, Esc closes.
     pub(super) fn options_key(&mut self, i: usize, code: KeyCode) {
-        let n = tveee_core::options::OPTIONS.len().max(1);
+        let n = if self.options_plugins { self.vendor_plugins().len() } else { tveee_core::options::OPTIONS.len() }.max(1);
         match code {
             KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') | KeyCode::Backspace => self.overlay = Overlay::None,
-            KeyCode::Up => self.overlay = Overlay::Options((i + n - 1) % n),
-            KeyCode::Down | KeyCode::Tab => self.overlay = Overlay::Options((i + 1) % n),
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => {
+                self.options_plugins = !self.options_plugins;
+                self.overlay = Overlay::Options(0);
+            }
+            c if super::listnav::is_move(c) => {
+                let to = super::listnav::step(i, n, c).unwrap_or(i);
+                self.overlay = Overlay::Options(to)
+            }
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
+            KeyCode::Char('a') if self.options_plugins => self.plugin_choice(i, None),
             _ => {}
         }
     }
 
-    /// Flip option `i` and save it.
+    /// Whether vendor plugin `p` is ticked: its saved choice, else whether
+    /// it's on now.
+    pub(super) fn plugin_ticked(&self, p: &tveee_core::plugin::PluginState) -> bool {
+        self.plugin_opt(p.name).unwrap_or(p.enabled)
+    }
+
+    /// Option `name` (see [`App::opts`]).
+    pub(super) fn opt(&self, name: &str) -> bool {
+        match &self.opts {
+            None => tveee_core::options::get(name),
+            Some(v) => v.iter().rev().find(|(k, _)| k == name).map(|(_, on)| *on).unwrap_or_else(|| tveee_core::options::OPTIONS.iter().any(|o| o.name == name && o.default)),
+        }
+    }
+
+    /// The choice saved for vendor plugin `name` (see [`App::opts`]).
+    pub(super) fn plugin_opt(&self, name: &str) -> Option<bool> {
+        match &self.opts {
+            None => tveee_core::options::plugin(name),
+            Some(v) => v.iter().rev().find(|(k, _)| *k == format!("plugin.{name}")).map(|(_, on)| *on),
+        }
+    }
+
+    /// Save vendor plugin row `i`'s choice (None: back to checking the TV).
+    pub(super) fn plugin_choice(&mut self, i: usize, choice: Option<bool>) {
+        let Some(p) = self.vendor_plugins().get(i).map(|p| p.name) else { return };
+        self.note = match tveee_core::options::set_plugin(p, choice) {
+            Ok(()) => format!("plugin {p}: {} (from tveee's next start)", tveee_core::options::choice_word(choice)),
+            Err(e) => format!("couldn't save it: {e}"),
+        };
+        self.overlay = Overlay::Options(i);
+    }
+
+    /// Change row `i` of the tab shown: flip an option, or a vendor
+    /// plugin's tick (saved as its choice).
     pub(super) fn toggle_option(&mut self, i: usize) {
+        if self.options_plugins {
+            let Some(on) = self.vendor_plugins().get(i).map(|p| self.plugin_ticked(p)) else { return };
+            self.plugin_choice(i, Some(!on));
+            return;
+        }
         let Some(o) = tveee_core::options::OPTIONS.get(i) else { return };
-        let on = !tveee_core::options::get(o.name);
-        self.note = match tveee_core::options::set(o.name, on) {
+        let on = !self.opt(o.name);
+        let saved = match &mut self.opts {
+            // this app's own options (tests): changed here, not saved
+            Some(v) => {
+                v.push((o.name.to_string(), on));
+                Ok(())
+            }
+            None => tveee_core::options::set(o.name, on),
+        };
+        self.note = match saved {
             Ok(()) => format!("{}: {}", o.label, if on { "on" } else { "off" }),
             Err(e) => format!("couldn't save the option: {e}"),
         };
         self.overlay = Overlay::Options(i);
+        // what the refresh reads changed: a read now, so it shows at once
+        // (load and memory back on weren't being read)
+        if [tveee_core::options::SHOW_LOAD, tveee_core::options::LOW_BANDWIDTH].contains(&o.name) {
+            let _ = self.engine.send(Action::Refresh);
+        }
     }
 
     /// Open the search box on `pkg` (or the app in front).
@@ -321,18 +399,32 @@ impl App {
     }
 
     pub(super) fn draw_overlay(&mut self, f: &mut Frame) {
+        // the commands over another pop-up: that first, under them
+        if let (Overlay::Palette(_), Some((under, text))) = (self.overlay, self.under.clone()) {
+            let (palette_text, over) = (std::mem::replace(&mut self.prompt, text), self.overlay);
+            self.overlay = under;
+            self.draw_one(f);
+            self.overlay = over;
+            self.prompt = palette_text;
+        }
+        self.draw_one(f);
+    }
+
+    fn draw_one(&mut self, f: &mut Frame) {
         match self.overlay {
             Overlay::None => {}
             Overlay::Help(top) => self.draw_help(f, top),
             Overlay::Menu(sel) => self.draw_menu(f, sel),
             Overlay::Options(sel) => self.draw_options(f, sel),
             Overlay::Guide { tab, at } => self.draw_guide(f, tab, at),
+            Overlay::List { sel } => self.draw_list(f, sel),
             Overlay::Apps { tab, sel } => self.draw_apps(f, tab, sel, false),
             Overlay::AppActions { tab, sel, at } => self.draw_app_actions(f, tab, sel, at),
             Overlay::Search(at) => self.draw_search(f, at),
             Overlay::Prompt(id) => self.draw_prompt(f, id),
             Overlay::Palette(sel) => self.draw_palette(f, sel),
-            Overlay::Logs(up) => self.draw_logs(f, up),
+            Overlay::Logs { at, from } => self.draw_logs(f, at, from),
+            Overlay::SaveLog => self.draw_save_log(f),
             Overlay::Ambilight { row, col } => self.draw_ambi_dialog(f, row, col),
             Overlay::AmbiColour { row, col } => self.draw_ambi_colour(f, row, col),
             Overlay::Pin => self.draw_pin(f),
@@ -344,7 +436,15 @@ impl App {
     /// scrolling (↑/↓) when they don't all fit its height.
     pub(super) fn draw_help(&mut self, f: &mut Frame, top: usize) {
         let area = f.area();
-        let lines = help_lines(usize::from(area.width.saturating_sub(4)));
+        let w = usize::from(area.width.saturating_sub(4));
+        let mut lines = help_lines(w);
+        // wrapped to fit: the whole width (else a column of the screen's
+        // own border shows beside it)
+        if HELP.lines().any(|l| l.chars().count() > w)
+            && let Some(first) = lines.first_mut()
+        {
+            *first = format!("{first:<w$}");
+        }
         let room = usize::from(area.height.saturating_sub(2)).max(1);
         let top = top.min(lines.len().saturating_sub(room));
         // remembered as shown, so ↑ moves at once from the end
@@ -371,19 +471,68 @@ impl App {
         }
     }
 
+    /// The options dialog: a tab of options, and one of plugins.
     pub(super) fn draw_options(&mut self, f: &mut Frame, sel: usize) {
-        let mut text = Vec::new();
-        for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
-            let tick = if tveee_core::options::get(o.name) { "[x]" } else { "[ ]" };
-            let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), Style::new().fg(Color::DarkGray))]);
-            text.push(if i == sel { line.reversed() } else { line });
+        let dim = Style::new().fg(Color::DarkGray);
+        let tab = |name: &'static str, on: bool| {
+            if on { Span::styled(format!(" {name} "), Style::new().fg(Color::Black).bg(Color::Blue).bold()) } else { Span::styled(format!(" {name} "), Style::new().fg(Color::Gray)) }
+        };
+        let labels = [("Options", false), ("Plugins", true)];
+        let mut text = vec![Line::from(labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options_plugins), Span::raw(" ")]).collect::<Vec<_>>()), Line::default()];
+        // rows that can be chosen start here
+        let first_row = text.len();
+        let rows;
+        if self.options_plugins {
+            let vendor: Vec<_> = self.vendor_plugins().into_iter().cloned().collect();
+            rows = vendor.len();
+            text.push(Line::from(Span::styled(" vendor", dim)));
+            // the rows start under that heading
+            let first_row_shift = 1;
+            for (i, p) in vendor.iter().enumerate() {
+                let choice = self.plugin_opt(p.name);
+                let ticked = self.plugin_ticked(p);
+                let tick = if ticked { "[x]" } else { "[ ]" };
+                let note = match choice {
+                    None => "  (auto)".to_string(),
+                    Some(on) if on != p.enabled => "  (from the next start)".to_string(),
+                    Some(_) => String::new(),
+                };
+                let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", p.name)), Span::styled(format!("  {}{note}", p.desc), dim)]);
+                text.push(if i == sel { line.reversed() } else { line });
+            }
+            text.push(Line::default());
+            text.push(Line::from(Span::styled(" built in (always on)", dim)));
+            for p in self.plugins.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin) {
+                text.push(Line::from(Span::styled(format!(" [x] {:<20}  {}", p.name, p.desc), dim)));
+            }
+            text.push(Line::default());
+            text.push(Line::from("↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes").fg(Color::DarkGray));
+            text.push(Line::from("changes apply from tveee's next start").fg(Color::DarkGray));
+            let r = popup(f, " options ", text, Color::Blue);
+            self.option_hits(r, first_row + first_row_shift, rows);
+        } else {
+            rows = tveee_core::options::OPTIONS.len();
+            for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
+                let tick = if tveee_core::options::get(o.name) { "[x]" } else { "[ ]" };
+                let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), dim)]);
+                text.push(if i == sel { line.reversed() } else { line });
+            }
+            text.push(Line::default());
+            text.push(Line::from("↑/↓ choose  space/⏎/click toggle  tab: plugins  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray));
+            let r = popup(f, " options ", text, Color::Blue);
+            self.option_hits(r, first_row, rows);
         }
-        text.push(Line::default());
-        text.push(Line::from("↑/↓ choose  space/⏎/click toggle  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray));
-        let r = popup(f, " options ", text, Color::Blue);
+    }
+
+    /// The options dialog's clickable parts: its tabs, and `rows` rows from
+    /// text row `first`.
+    fn option_hits(&mut self, r: ratatui::layout::Rect, first: usize, rows: usize) {
         self.hits.push((r, Hit::Popup));
-        for i in 0..tveee_core::options::OPTIONS.len() {
-            let y = r.y + 1 + u16::try_from(i).unwrap_or(0);
+        let (opts, plugs) = (u16::try_from(" Options ".len()).unwrap_or(0), u16::try_from(" Plugins ".len()).unwrap_or(0));
+        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y: r.y + 1, width: opts, height: 1 }, Hit::OptionTab(false)));
+        self.hits.push((ratatui::layout::Rect { x: r.x + 2 + opts, y: r.y + 1, width: plugs, height: 1 }, Hit::OptionTab(true)));
+        for i in 0..rows {
+            let y = r.y + 1 + u16::try_from(first + i).unwrap_or(0);
             self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::OptionItem(i)));
         }
     }
@@ -450,33 +599,6 @@ impl App {
     }
 
     /// The log's last lines, in most of the screen.
-    pub(super) fn draw_logs(&mut self, f: &mut Frame, up: usize) {
-        let area = f.area();
-        let r = ratatui::layout::Rect {
-            x: area.x + area.width / 20,
-            y: area.y + area.height / 10,
-            width: area.width - area.width / 10,
-            height: area.height - area.height / 5,
-        };
-        let lines = tveee_core::log::recent();
-        let room = usize::from(r.height.saturating_sub(2));
-        let up = up.min(lines.len().saturating_sub(room));
-        let end = lines.len() - up;
-        let shown: Vec<Line> = if lines.is_empty() {
-            vec![Line::from("nothing logged yet").italic()]
-        } else {
-            lines[end.saturating_sub(room)..end].iter().map(|l| Line::from(l.clone())).collect()
-        };
-        f.render_widget(ratatui::widgets::Clear, r);
-        let title = format!(" log - {} lines (TVEEE_LOG=<file> keeps them) ", lines.len());
-        let block = Block::bordered()
-            .title(title)
-            .title_bottom(Line::from(" ↑↓ pgup/pgdn scroll  end: newest  any other key closes ").right_aligned())
-            .border_style(Style::new().fg(Color::DarkGray));
-        f.render_widget(Paragraph::new(shown).block(block), r);
-        self.hits.push((r, Hit::Popup));
-    }
-
     pub(super) fn draw_pin(&mut self, f: &mut Frame) {
         let text = vec![
             Line::from("Type the PIN the TV is showing:"),

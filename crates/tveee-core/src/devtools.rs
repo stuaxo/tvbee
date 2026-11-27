@@ -71,6 +71,9 @@ pub struct Progress {
     /// None for live streams (infinite or unknown duration).
     pub duration: Option<f64>,
     pub paused: bool,
+    /// How fast it goes: 1 playing, 2, 4... fast-forwarding, below 0
+    /// rewinding (as the app says; 1 when it doesn't).
+    pub rate: f64,
 }
 
 /// An open page and, if it has a video, how far through it is.
@@ -92,7 +95,7 @@ pub fn parse_progress(s: &str) -> Option<Progress> {
     let [pos, dur, paused] = f.as_slice() else { return None };
     let position: f64 = pos.parse().ok().filter(|p: &f64| p.is_finite() && *p >= 0.0)?;
     let duration = dur.parse().ok().filter(|d: &f64| d.is_finite() && *d > 0.0);
-    Some(Progress { position, duration, paused: *paused == "true" })
+    Some(Progress { position, duration, paused: *paused == "true", rate: 1.0 })
 }
 
 /// A forwarded connection to one app's devtools server. Kept open, it makes
@@ -354,7 +357,7 @@ mod tests {
     fn parses_video_progress() {
         assert_eq!(
             parse_progress("[1516.342226,1651.061,false]"),
-            Some(Progress { position: 1516.342226, duration: Some(1651.061), paused: false })
+            Some(Progress { position: 1516.342226, duration: Some(1651.061), paused: false, rate: 1.0 })
         );
         // live: duration is Infinity, which JSON.stringify writes as null
         assert_eq!(parse_progress("[12,null,true]").unwrap().duration, None);

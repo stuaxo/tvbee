@@ -430,6 +430,36 @@ fn seek(c: &Cx, args: &[String]) -> Result<Output> {
 
 
 
+/// Show or hide the music visualiser of the app in front (`want`: on, off,
+/// or None to switch). Says what it did.
+pub fn visualiser_of(tv: &crate::tv::Tv, want: Option<bool>) -> Result<String> {
+    let window = tv.window_dump()?;
+    let pkg = crate::builtin::info::focus_window(&window).map(|w| w.split('/').next().unwrap_or(&w).to_string()).unwrap_or_default();
+    let name = super::apps::by_package(&pkg).map_or(pkg.clone(), |a| a.name.to_string());
+    let Some(player) = crate::provider::for_package(&pkg).and_then(|p| p.player()).filter(|p| p.has_visualiser()) else {
+        return failed(format!("visualiser: {name} hasn't got one tveee can show (Kodi has, while it plays music)"));
+    };
+    match player.visualiser(tv, want).or_fallback()? {
+        Some(true) => Ok(format!("{name}'s music visualiser is showing")),
+        Some(false) => Ok(format!("back from {name}'s music visualiser")),
+        None => failed(format!("visualiser: {name} can't show it now")),
+    }
+}
+
+/// `on`, `off` or nothing (switch), as a visualiser wants it.
+pub fn visualiser_want(args: &[String]) -> Result<Option<bool>> {
+    match args.first().map(String::as_str) {
+        None | Some("toggle") => Ok(None),
+        Some("on") => Ok(Some(true)),
+        Some("off") => Ok(Some(false)),
+        Some(other) => usage(format!("visualiser: on, off or nothing (switch), not '{other}'")),
+    }
+}
+
+fn visualiser(c: &Cx, args: &[String]) -> Result<Output> {
+    visualiser_of(c.tv, visualiser_want(args)?).map(Into::into)
+}
+
 pub fn actions() -> Vec<A> {
     vec![
         A::new("media.play", CAT, "play", |c, _| c.tv.key(126).map(|()| "play".into())).cli("play", "", "media play"),
@@ -437,6 +467,15 @@ pub fn actions() -> Vec<A> {
         A::new("media.stop", CAT, "stop", |c, _| c.tv.key(86).map(|()| "stop".into())).cli("stop", "", "media stop"),
         A::new("media.playpause", CAT, "play/pause", playpause).cli("playpause", "", "toggle play/pause"),
         A::new("media.mute", CAT, "mute", mute).cli("mute", "", "mute (no-op if already muted)"),
+        A::new("media.visualiser", CAT, "music visualiser: show or hide it", visualiser)
+            .cli("visualiser", "[on|off]", "show or hide the music visualiser (Kodi, while it plays music)")
+            .long(
+                "Shows the music visualiser of the app in front, or goes back from it; with\n\
+                 nothing, switches. Kodi has one while it plays music (its visualisation:\n\
+                 projectM, Goom, ... whichever it's set to use).",
+            )
+            .args("[on|off]")
+            .while_playing("audio"),
         A::new("media.unmute", CAT, "unmute", unmute).cli("unmute", "", "unmute (no-op if not muted)"),
         A::new("media.ffw", CAT, "fast-forward", ffw).cli("ff", SKIP_USAGE, "fast-forward by an amount").aliases(&["ffw"]).long(SKIP_LONG),
         A::new("media.rew", CAT, "rewind", rew).cli("rw", SKIP_USAGE, "rewind by an amount").aliases(&["rew"]).long(SKIP_LONG),
@@ -604,6 +643,16 @@ Audio playback (lastly played comes first)
 
 #[cfg(test)]
 mod mute_tests {
+
+    #[test]
+    fn visualiser_asked() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::visualiser_want(&a(&[])).unwrap(), None);
+        assert_eq!(super::visualiser_want(&a(&["on"])).unwrap(), Some(true));
+        assert_eq!(super::visualiser_want(&a(&["off"])).unwrap(), Some(false));
+        assert!(super::visualiser_want(&a(&["loud"])).is_err());
+    }
+
     use super::*;
 
     #[test]

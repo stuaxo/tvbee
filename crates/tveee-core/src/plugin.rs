@@ -4,7 +4,8 @@
 //! for the TV being talked to.
 //!
 //! Resolution order for a vendor plugin: `TVEEE_PLUGINS` override, then the
-//! per-TV cache, then (only when one of its commands was asked for, or on
+//! choice saved in tveee's options (`plugin.kodi=off`), then the per-TV
+//! cache, then (only when one of its commands was asked for, or on
 //! `plugins --refresh`) a live probe whose result is cached. Plain `help`
 //! never touches the TV.
 
@@ -180,6 +181,7 @@ impl Source {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct PluginState {
     pub name: &'static str,
     pub desc: &'static str,
@@ -198,6 +200,14 @@ pub enum Mode {
 }
 
 /// `philips,-other` -> {philips: true, other: false}
+/// What decides vendor plugins before checking the TV: the choices saved in
+/// tveee's options, with `TVEEE_PLUGINS` over them.
+pub fn overrides() -> HashMap<String, bool> {
+    let mut o = crate::options::plugin_choices();
+    o.extend(parse_overrides(&std::env::var("TVEEE_PLUGINS").unwrap_or_default()));
+    o
+}
+
 pub fn parse_overrides(s: &str) -> HashMap<String, bool> {
     s.split(',')
         .map(str::trim)

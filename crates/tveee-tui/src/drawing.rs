@@ -29,6 +29,8 @@ pub enum Hit {
     GuideTab(GuideTab),
     /// Option N in the options dialog.
     OptionItem(usize),
+    /// The options dialog's tabs: its options (false), the plugins (true).
+    OptionTab(bool),
     /// Part of the guide's details panel.
     Details(DetailsClick),
     /// A field of what's on that opens something.
@@ -44,6 +46,10 @@ pub enum Hit {
     Chips,
     /// Menu item N, from a button on the now-playing card.
     Chip(usize),
+    /// Line N of the log (by its number).
+    LogLine(usize),
+    /// Item N of the list pane.
+    ListRow(usize),
 }
 
 /// Columns `s` takes.
@@ -173,6 +179,25 @@ fn chip_width(key: &str, text: &str) -> u16 {
 /// A row of them, with two spaces between.
 fn chips_width(chips: &[(String, String, Hit)]) -> usize {
     chips.iter().map(|(k, t, _)| usize::from(chip_width(k, t)) + 2).sum::<usize>().saturating_sub(2)
+}
+
+/// Whether asking for `a` changes how playback goes (pause, seek, stop, the
+/// media keys): the bar's prediction holds until the next read.
+pub(super) fn stops_prediction(a: &Action) -> bool {
+    matches!(a, Action::PlayPause | Action::Seek(_) | Action::Jump(_) | Action::Key(85 | 86 | 89 | 90 | 126 | 127))
+}
+
+/// `p` moved on `secs` at its speed (paused: where it is), kept between the
+/// start and the end.
+pub(super) fn predict(mut p: tveee_core::devtools::Progress, secs: f64) -> tveee_core::devtools::Progress {
+    if !p.paused {
+        p.position += secs * p.rate;
+        p.position = p.position.max(0.0);
+        if let Some(d) = p.duration {
+            p.position = p.position.min(d);
+        }
+    }
+    p
 }
 
 /// From this wide (inside the border), the panels get a column of their
@@ -346,6 +371,12 @@ impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
         self.hits.clear();
         self.links.clear();
+        // the system figures are read only while something shows them
+        let wanted = self.info_shown();
+        if wanted != self.system_watching {
+            let _ = self.engine.send(Action::WatchSystem(wanted));
+            self.system_watching = wanted;
+        }
         let outer = Block::bordered()
             .title(Line::from(format!(" tveee ui - {} ", self.ip)).bold())
             .title(
@@ -530,7 +561,8 @@ impl App {
 
     /// The top line ([`spine`]), each part clickable.
     pub(super) fn draw_spine(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let system = self.st.snap.as_ref().map(|s| &s.system);
+        // load and memory only when they're wanted (else they aren't read)
+        let system = self.st.snap.as_ref().map(|s| &s.system).filter(|_| self.opt(tveee_core::options::SHOW_LOAD));
         let panel = self.panel_id().map(|_| self.panel_title());
         let mut x = area.x;
         let sep = Span::styled(" │ ", Style::new().fg(Color::DarkGray));
@@ -598,13 +630,7 @@ impl App {
                         if let Some(t) = &a.title {
                             lines.push((Line::from(vec![label("title"), Span::raw(t.clone())]), None));
                         }
-                        if let Some(mut p) = a.progress {
-                            if !p.paused {
-                                p.position += self.st.at.elapsed().as_secs_f64();
-                                if let Some(d) = p.duration {
-                                    p.position = p.position.min(d);
-                                }
-                            }
+                        if let Some(p) = self.progress_now() {
                             // leave room for the label and " 1:02:03 / 1:02:03 (100%)"
                             let w = width.saturating_sub(9 + 26).max(10);
                             // jumping needs a video tveee can seek in (not live TV)
@@ -735,6 +761,21 @@ impl App {
         }
     }
 
+    /// Where what's playing is now, as the bar shows it: as last read, moved
+    /// on at its speed since (the "predict position" option), or held where
+    /// it was after a pause or seek asked for here.
+    pub(super) fn progress_now(&self) -> Option<tveee_core::devtools::Progress> {
+        let mut p = self.st.snap.as_ref()?.activity.as_ref()?.progress?;
+        if let Some(at) = self.frozen {
+            p.position = at;
+            return Some(p);
+        }
+        if !self.opt(tveee_core::options::PREDICT_POSITION) {
+            return Some(p);
+        }
+        Some(predict(p, self.st.at.elapsed().as_secs_f64()))
+    }
+
     /// Things to do with what's playing, as (key, what, click): the
     /// actions of the app in front (Kodi's subtitles and audio, ...; their
     /// key is in the menu, so ".k"), the guide on live TV, and search where
@@ -761,6 +802,15 @@ impl App {
                 let what = a.title.strip_prefix(&format!("{}: ", a.category)).unwrap_or(a.title);
                 out.push((format!(".{key}"), what.to_string(), Hit::Chip(i)));
             }
+        }
+        // music playing in an app with a visualiser (Kodi)
+        let music = s.activity.as_ref().and_then(|a| a.media) == Some("audio");
+        if music && provider.and_then(|p| p.player()).is_some_and(|p| p.has_visualiser()) {
+            out.push(("z".to_string(), "visualiser".to_string(), Hit::Input(Input::ToggleVisualiser)));
+        }
+        // apps that show lists tveee can read (Kodi's folders)
+        if provider.and_then(|p| p.player()).is_some_and(|p| p.has_list()) {
+            out.push(("t".to_string(), "list".to_string(), Hit::Input(Input::OpenList)));
         }
         if live || provider.is_some() {
             out.push(("/".to_string(), "search".to_string(), Hit::Input(Input::OpenSearch)));

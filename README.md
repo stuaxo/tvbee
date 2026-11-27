@@ -147,6 +147,7 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
 [info]
     details      more about what's on: channel, chapters, description
     goto         go to a place in an app, or a link from what's on
+    list         the list the app in front shows, or choose item N from it
     logs         recent logcat, optionally filtered
     now          print the foreground window only
     nowplaying   what's on: app, title, progress bar and link (alias: np)
@@ -172,6 +173,7 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
     seek         jump to a position (time or percent of the way through)
     stop         media stop
     unmute       unmute (no-op if not muted)
+    visualiser   show or hide the music visualiser (Kodi, while it plays music)
     vol          change volume
 
 [options]
@@ -225,7 +227,10 @@ repositories offer), `tveee kodi-addon <name>` opens one's page in Kodi and
 the page and presses Install). `tveee kodi-install <file.zip>` installs an
 add-on from a zip on this computer with no Kodi screens: it checks the zip
 and what the add-on needs, copies it into Kodi over adb and restarts Kodi
-(back where it was); `tveee kodi-uninstall <id>` takes one off the same way.
+(back where it was); `tveee kodi-uninstall <id>` takes one off the same way. `tveee list`
+prints the list on Kodi's screen (a folder, an add-on's listing) and `tveee
+list N` chooses item N; `tveee visualiser` shows or hides its music
+visualiser.
 With `TVEEE_KODI_PATHS`
 (see `.env.example`) the ui's preview shows frames of the video, not its
 artwork. The ui hears Kodi's play/pause/seek at once (its port 9090, on with
@@ -242,7 +247,11 @@ live in the core crate (`crates/tveee-core/src/builtin/`). Vendor plugins are
 crates of their own (`plugins/philips`, `plugins/youtube`, `plugins/kodi`)
 and carry a detection check:
 
-- `TVEEE_PLUGINS=philips,-other` forces plugins on/off
+- `tveee options plugin kodi on|off|auto` (or the Plugins tab in the ui's
+  options, `,`: tick or untick it, `a` for auto) fixes a vendor plugin on or
+  off from the next start; `auto` goes back to checking the TV. Built-in
+  plugins are always on.
+- `TVEEE_PLUGINS=philips,-other` forces plugins on/off (over the options)
 - otherwise the per-TV cache (`~/.cache/tveee/<ip>.plugins`) is used
 - otherwise the TV is probed, but only when one of that plugin's commands was
   asked for (or `tveee plugins --refresh`); `help` never contacts the TV
@@ -280,6 +289,31 @@ crates beyond std.
   (`crates/tveee-tui`); optional plugins are compiled in with
   `#[cfg(feature = ...)]` in `src/plugins/mod.rs` and listed in `NOT_BUILT`
   when left out.
+
+### In the remote (`tveee ui`)
+
+`?` lists every key. Briefly:
+
+- **What's on:** the app, title, progress (moving on at the speed it plays
+  between reads: the *predict position* option), volume, and a row of things
+  to do with it: Kodi's subtitles and audio track (for videos), `t list`,
+  `z visualiser` (Kodi, while music plays), `g guide` (live TV), `/ search`.
+  The top line has the TV's load and free memory (`F` frees memory).
+- **Wide terminals** (100 columns and more) put the panels in a column on the
+  right: the system panel (shown by default; `i`), the Ambilight (`l`), the
+  preview (`v`), and in remote mode (`tab`) a D-pad to click.
+- **Lists** move the same way everywhere: ↑↓, PgUp/PgDn, Home/End.
+  - `:` or `ctrl+p`: every command, found by typing; it opens over whatever
+    is open and closes back to it.
+  - `g`: the live TV guide. `F2` or `a`: the apps.
+  - `t`: the list the app in front shows (Kodi's folder or add-on listing),
+    following Kodi's highlight; ⏎ opens a folder or plays.
+  - The log (`:` then "log"): select whole lines (shift+↑↓, `v`, or the
+    mouse) and `y` copies them; `s` saves the log to a file.
+- **Options** (`,`), also `tveee options`: *low bandwidth* (read the TV every
+  4s, not every second; what you do still shows at once), *load & memory*
+  (off: not read), *predict position*, and a Plugins tab to tick vendor
+  plugins on or off (or `a`: decided by checking the TV).
 
 ## Not yet ported / planned
 - Recordings (list / stop) via the JointSpace API on `https://<tv>:1926/6/recordings/*`;

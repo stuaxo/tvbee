@@ -289,9 +289,87 @@ pub struct Playing {
     pub media: Option<&'static str>,
 }
 
+/// A list from the app in front to choose from: what Kodi is showing (a
+/// folder, an add-on's listing), later a playing queue, a video's chapters
+/// and links. One column, like the guide without its times.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ContextList {
+    /// Its heading: the folder's name, "Chapters", ...
+    pub title: String,
+    /// What it lists ("folder", "tracks", "chapters"): for buttons and
+    /// `tveee list`.
+    pub kind: &'static str,
+    /// What it is, to tell when it's become another list (a folder's path):
+    /// its items only need reading again when this changes.
+    pub key: String,
+    pub items: Vec<ListItem>,
+    /// The highlighted (or playing) item, if the app says.
+    pub at: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListItem {
+    /// What it is, to find it again (Kodi: its path); may be empty.
+    pub id: String,
+    pub label: String,
+    /// More about it, to the right: a duration, a year, a count.
+    pub meta: Option<String>,
+    /// A folder (choosing it opens another list) rather than something to
+    /// play.
+    pub folder: bool,
+    /// What choosing it does.
+    pub go: crate::more::Go,
+}
+
+impl ContextList {
+    /// The item the app has highlighted, by its id, else its label.
+    pub fn find(&self, p: &ListPlace) -> Option<usize> {
+        self.items.iter().position(|i| !p.focus_id.is_empty() && i.id == p.focus_id).or_else(|| self.items.iter().position(|i| i.label == p.focus_label))
+    }
+}
+
+/// Where the app's list is now: which list ([`ContextList::key`]) and its
+/// highlighted row. Read every refresh while the ui shows the list, so it's
+/// cheap; the items are only read again when the key changes.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ListPlace {
+    pub key: String,
+    pub focus_label: String,
+    pub focus_id: String,
+}
+
 /// An app tveee can ask what it's playing and tell what to do, through an
 /// API of its own (Kodi's JSON-RPC).
 pub trait Player: Sync {
+    /// Whether it has a music visualiser ([`Player::visualiser`]): the ui
+    /// offers it while music plays.
+    fn has_visualiser(&self) -> bool {
+        false
+    }
+    /// Show its music visualiser (`Some(true)`), go back from it
+    /// (`Some(false)`) or switch (None); returns whether it's showing now.
+    fn visualiser(&self, _tv: &crate::tv::Tv, _want: Option<bool>) -> Outcome<bool> {
+        Outcome::Fallback
+    }
+    /// Whether it can show lists ([`Player::list`]): the ui offers its list
+    /// pane for it.
+    fn has_list(&self) -> bool {
+        false
+    }
+    /// Where its list is now (cheap), or None when it isn't showing one.
+    fn list_place(&self, _tv: &crate::tv::Tv) -> Outcome<Option<ListPlace>> {
+        Outcome::Fallback
+    }
+    /// The list on its screen to choose from, if there is one (fall back:
+    /// the app can't say, or it isn't showing a list).
+    fn list(&self, _tv: &crate::tv::Tv) -> Outcome<ContextList> {
+        Outcome::Fallback
+    }
+    /// Choose an item from [`Player::list`] (fall back: do it the usual way
+    /// for a [`crate::more::Go`]).
+    fn go(&self, _tv: &crate::tv::Tv, _to: &crate::more::Go) -> Outcome<String> {
+        Outcome::Fallback
+    }
     /// What's playing (fall back: nothing, or the app can't say).
     fn playing(&self, tv: &crate::tv::Tv) -> Outcome<Playing>;
     /// Move what's playing; returns the new position in seconds.

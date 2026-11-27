@@ -43,6 +43,10 @@ pub enum Input {
     OpenApps,
     OpenSearch,
     OpenGuide,
+    /// The music visualiser (Kodi, while music plays): show or hide it.
+    ToggleVisualiser,
+    /// The list the app in front shows (Kodi's folder).
+    OpenList,
     OpenOptions,
     Do(Action),
     Nothing,
@@ -97,6 +101,8 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('v'), _) => Input::TogglePreview,
         (KeyCode::Char('a'), _) => Input::OpenApps,
         (KeyCode::Char('g'), _) => Input::OpenGuide,
+        (KeyCode::Char('z'), _) => Input::ToggleVisualiser,
+        (KeyCode::Char('t'), _) => Input::OpenList,
         (KeyCode::Char(','), _) => Input::OpenOptions,
         (KeyCode::Char('/'), _) => Input::OpenSearch,
         (KeyCode::Char(' ') | KeyCode::Char('p'), _) => act(PlayPause),

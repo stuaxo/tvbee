@@ -109,7 +109,7 @@ pub fn live_activity(ch: &crate::provider::Channel, events: &[crate::provider::E
         what: what.into(),
         title: on.map(|e| e.title.clone()),
         url: None,
-        progress: on.map(|e| Progress { position: (at - e.start) as f64, duration: Some((e.end - e.start) as f64), paused: false }),
+        progress: on.map(|e| Progress { position: (at - e.start) as f64, duration: Some((e.end - e.start) as f64), paused: false, rate: 1.0 }),
         fields,
         media: Some(if ch.radio { "audio" } else { "video" }),
     }
@@ -316,10 +316,10 @@ mod tests {
     #[test]
     fn music_is_listened_to() {
         use crate::provider::Playing;
-        let p = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false }), media: Some("audio"), ..Playing::default() };
+        let p = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false, rate: 1.0 }), media: Some("audio"), ..Playing::default() };
         let a = merge_playing("org.xbmc.kodi", Some(Activity::just("Browsing Kodi")), p, &[]);
         assert_eq!((a.what.as_str(), a.media), ("Listening in Kodi", Some("audio")));
-        let v = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false }), media: Some("video"), ..Playing::default() };
+        let v = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false, rate: 1.0 }), media: Some("video"), ..Playing::default() };
         assert_eq!(merge_playing("org.xbmc.kodi", Some(Activity::just("Browsing Kodi")), v, &[]).what, "Watching Kodi");
     }
 
@@ -331,7 +331,7 @@ mod tests {
         let p = Playing {
             title: Some("A Very Nuanced Character".into()),
             subtitle: Some("Taskmaster S03E04".into()),
-            progress: Some(crate::devtools::Progress { position: 200.0, duration: Some(2700.0), paused: false }),
+            progress: Some(crate::devtools::Progress { position: 200.0, duration: Some(2700.0), paused: false, rate: 1.0 }),
             art: None,
             link: None,
             art_moves: false,
@@ -357,7 +357,7 @@ mod tests {
         let s = MediaInfo { package: YT.into(), state: Some(8), title: Some("Never Gonna Give You Up".into()), subtitle: Some("Rick Astley".into()) };
         let browsing = activity_with(YT, Some(("YouTube".into(), Kind::Video)), std::slice::from_ref(&s));
         assert_eq!(browsing.as_ref().map(|a| a.what.as_str()), Some("Browsing YouTube"));
-        let at = |paused| Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused }), ..Playing::default() };
+        let at = |paused| Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused, rate: 1.0 }), ..Playing::default() };
         let a = merge_playing(YT, browsing.clone(), at(false), std::slice::from_ref(&s));
         assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching YouTube", Some("Never Gonna Give You Up (Rick Astley)")));
         assert_eq!(merge_playing(YT, browsing.clone(), at(true), std::slice::from_ref(&s)).what, "Paused in YouTube");
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn bars() {
-        let p = |pos, dur| Progress { position: pos, duration: dur, paused: false };
+        let p = |pos, dur| Progress { position: pos, duration: dur, paused: false, rate: 1.0 };
         assert_eq!(progress_bar(&p(1516.3, Some(1651.0)), 10), "━━━━━━━━━┃ 25:16 / 27:31 (91%)");
         assert_eq!(progress_bar(&p(0.0, Some(60.0)), 4), "┃─── 0:00 / 1:00 (0%)");
         assert_eq!(progress_bar(&p(30.0, Some(60.0)), 4), "━━┃─ 0:30 / 1:00 (50%)");

@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 316
+assertion_line: 317
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── remote ┐
@@ -9,7 +9,7 @@ expression: s
 │title    Episode 3 (Off-Road)                                          │          ↑           back    ⏯              ││
 │progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │   ←     ok      →    home   vol+            ││
 │audio    AAC-LC  AAC                                                   │          ↓            del   vol-            ││
-│do        /  search                                                    └─────────────────────────────────────────────┘│
+│do        t  list   /  search                                          └─────────────────────────────────────────────┘│
 │                                                                       ┌ system - i hides ───────────────────────────┐│
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │power    Awake   up 3h 40m                   ││
 │                                                                       │app      [player] org.xbmc.kodi              ││
