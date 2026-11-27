@@ -127,3 +127,18 @@ fn palette_lists_the_ui_too() {
     a.prompt = "log".into();
     insta::assert_snapshot!(screen(&mut a, CORNER));
 }
+
+#[test]
+fn guide_filter_ctrl_u_clears() {
+    let mut a = app(standby());
+    let (tx, _) = std::sync::mpsc::channel();
+    let h = Handle::new(tx, Arc::new(Mutex::new(Arc::new(TvState::seeded(None)))));
+    let tab = GuideTab::All;
+    for c in "bbc".chars() {
+        a.guide_key(tab, 0, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    assert_eq!(a.prompt, "bbc");
+    // ctrl+u clears it, and no "u" is typed
+    a.guide_key(tab, 0, KeyCode::Char('u'), KeyModifiers::CONTROL, &h);
+    assert_eq!(a.prompt, "");
+}

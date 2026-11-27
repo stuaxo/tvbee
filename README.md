@@ -11,12 +11,14 @@ Command-line remote for Android TV over ADB. So far it has only been tested
 on a Philips Android TV (Android 8). A Rust port of the `tv` bash script
 (`~/.local/bin/tv` + `~/.local/lib/tv/*.sh`).
 
-![tveee ui: live TV, the programme guide, options, help, the system panel and launcher, then searching YouTube and playing the video it finds](docs/tveee-ui.gif)
+![tveee ui: live TV, the programme guide, the command palette, the log, the Ambilight and system panels, options, the menu, help and the apps, then searching YouTube and playing the video it finds](docs/tveee-ui.gif)
 
-*`tveee ui`: live TV (channel, programme, what's next), the guide (sliding
-through time, programme details, filtering, the Favourites and Radio tabs),
-options, help, the system panel and the launcher, then searching YouTube for
-a video, playing it in remote mode, and seeking.*
+*`tveee ui`: live TV with the TV's load and free memory along the top, the
+guide (sliding through time, programme details, filtering, the Favourites
+and Radio tabs), the command palette (`:`) finding Ambilight actions and
+the log of what tveee did lately, the Ambilight and system panels, options,
+the menu, help, the apps (F2), then searching YouTube for a video, playing
+it in remote mode, and seeking.*
 
 
 ## Dependencies:

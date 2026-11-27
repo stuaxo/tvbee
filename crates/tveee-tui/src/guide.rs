@@ -310,7 +310,10 @@ impl App {
             KeyCode::Backspace => {
                 self.prompt.pop();
             }
-            KeyCode::Char(c) => self.prompt.push(c),
+            // ctrl+u clears the filter (as in the palette); other ctrl keys
+            // aren't letters to filter by
+            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.prompt.clear(),
+            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.prompt.push(c),
             _ => {}
         }
         let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
