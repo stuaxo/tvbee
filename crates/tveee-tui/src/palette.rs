@@ -15,6 +15,7 @@ pub const UI: &[(&str, Input)] = &[
     ("ui: show the log (what tveee did lately)", Input::ShowLogs),
     ("ui: all keys (help)", Input::ToggleHelp),
     ("ui: live TV guide", Input::OpenGuide),
+    ("ui: music visualiser: show or hide it (Kodi)", Input::ToggleVisualiser),
     ("ui: launch an app", Input::OpenApps),
     ("ui: search the app in front", Input::OpenSearch),
     ("ui: options", Input::OpenOptions),

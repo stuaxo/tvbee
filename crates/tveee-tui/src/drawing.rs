@@ -764,6 +764,11 @@ impl App {
                 out.push((format!(".{key}"), what.to_string(), Hit::Chip(i)));
             }
         }
+        // music playing in an app with a visualiser (Kodi)
+        let music = s.activity.as_ref().and_then(|a| a.media) == Some("audio");
+        if music && provider.and_then(|p| p.player()).is_some_and(|p| p.has_visualiser()) {
+            out.push(("z".to_string(), "visualiser".to_string(), Hit::Input(Input::ToggleVisualiser)));
+        }
         if live || provider.is_some() {
             out.push(("/".to_string(), "search".to_string(), Hit::Input(Input::OpenSearch)));
         }

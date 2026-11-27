@@ -378,12 +378,16 @@ fn kodi_music_has_no_subtitles() {
     let s = screen(&mut a, DESKTOP);
     let row = s.lines().find(|l| l.starts_with("│do ")).expect("a row of buttons");
     assert!(!row.contains("subtitles") && !row.contains("audio track"), "{row}");
+    // music: its visualiser is offered
+    assert!(row.contains(" z ") && row.contains("visualiser"), "{row}");
     // a video: they're back
     if let Some(x) = st.snap.as_mut().and_then(|s| s.activity.as_mut()) {
         x.media = Some("video");
     }
     let s = screen(&mut app_with(st, tveee_plugin_kodi::actions()), DESKTOP);
     assert!(s.lines().any(|l| l.starts_with("│do ") && l.contains("next subtitles")), "{s}");
+    // and no visualiser: it's for music
+    assert!(!s.contains("visualiser"), "{s}");
     assert!(row.contains("search"), "{row}");
 }
 

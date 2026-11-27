@@ -656,6 +656,10 @@ impl App {
             },
             Input::OpenSearch => self.open_search(None),
             Input::OpenGuide => self.open_guide(None, actions),
+            Input::ToggleVisualiser => {
+                self.note = "the music visualiser...".into();
+                let _ = actions.send(Action::Visualiser);
+            }
             Input::OpenOptions => self.overlay = Overlay::Options(0),
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"

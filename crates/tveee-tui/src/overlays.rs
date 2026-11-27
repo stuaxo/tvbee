@@ -262,6 +262,7 @@ pub(super) const HELP: &str = " everywhere
    v        preview: a picture of what's on (scrcpy if installed, 1 a second;
             YouTube's storyboards; else a screenshot every few seconds)
    /        search the app in front (tab picks another app)
+   z        music visualiser: show or hide it (Kodi, while it plays music)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);

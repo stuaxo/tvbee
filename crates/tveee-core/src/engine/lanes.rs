@@ -624,6 +624,7 @@ impl Actor {
                 });
                 String::new()
             }
+            Action::Visualiser => crate::builtin::media::visualiser_of(&self.tv, None)?,
             Action::Refresh => "refreshed".into(),
             // other lanes' actions don't come here
             Action::PairStart(id) => {

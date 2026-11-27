@@ -1,9 +1,9 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 188
+assertion_line: 205
 expression: s
 ---
-┌ keys - ↑/↓ scroll, any other key closes ───── 1-14 of 70 ┐
+┌ keys - ↑/↓ scroll, any other key closes ───── 1-14 of 72 ┐
 │ everywhere                                               │
 │   space p  play/pause                                    │
 │   ⌫        back                                          │
