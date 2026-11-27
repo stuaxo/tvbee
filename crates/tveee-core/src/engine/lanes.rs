@@ -871,12 +871,12 @@ mod tests {
         use crate::devtools::Progress;
         use std::time::Duration;
         let mut a = crate::nowplaying::Activity::just("Listening in Kodi");
-        a.progress = Some(Progress { position: 200.0, duration: Some(213.0), paused: false });
+        a.progress = Some(Progress { position: 200.0, duration: Some(213.0), paused: false, rate: 1.0 });
         assert_eq!(super::time_left(Some(&a), Duration::from_secs(3)), Some(Duration::from_secs(10)));
         // paused, no length, nothing: no end to wait for
-        a.progress = Some(Progress { position: 200.0, duration: Some(213.0), paused: true });
+        a.progress = Some(Progress { position: 200.0, duration: Some(213.0), paused: true, rate: 1.0 });
         assert_eq!(super::time_left(Some(&a), Duration::ZERO), None);
-        a.progress = Some(Progress { position: 200.0, duration: None, paused: false });
+        a.progress = Some(Progress { position: 200.0, duration: None, paused: false, rate: 1.0 });
         assert_eq!(super::time_left(Some(&a), Duration::ZERO), None);
         assert_eq!(super::time_left(None, Duration::ZERO), None);
     }

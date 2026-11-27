@@ -20,6 +20,7 @@ pub const FAST_KEYS: &str = "fast-keys";
 pub const SHOW_PACKAGES: &str = "show-packages";
 pub const LOW_BANDWIDTH: &str = "low-bandwidth";
 pub const SHOW_LOAD: &str = "show-load";
+pub const PREDICT_POSITION: &str = "predict-position";
 
 pub const OPTIONS: &[Opt] = &[
     Opt {
@@ -45,6 +46,12 @@ pub const OPTIONS: &[Opt] = &[
         label: "low bandwidth",
         help: "the UI reads the TV every 4s, not every second (what you do still shows at once)",
         default: false,
+    },
+    Opt {
+        name: PREDICT_POSITION,
+        label: "predict position",
+        help: "the UI moves the progress bar between reads, as fast as it's playing (still while you pause or seek)",
+        default: true,
     },
     Opt {
         name: SHOW_LOAD,

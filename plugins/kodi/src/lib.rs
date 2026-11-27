@@ -200,8 +200,10 @@ pub fn parse_playing(item: &Value, props: &Value) -> Playing {
     };
     let time = props.get("time").and_then(seconds);
     let total = props.get("totaltime").and_then(seconds).filter(|t| *t > 0.0);
-    let paused = num_of(props, "speed").is_some_and(|s| s == 0.0);
-    let progress = time.map(|position| Progress { position, duration: total, paused });
+    // 0 paused, 1 playing, 2 4 8... fast-forwarding, -2... rewinding
+    let speed = num_of(props, "speed").unwrap_or(1.0);
+    let paused = speed == 0.0;
+    let progress = time.map(|position| Progress { position, duration: total, paused, rate: speed });
     // a picture: fanart or a poster/thumb
     let art = item
         .get("art")
