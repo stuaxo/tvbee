@@ -12,22 +12,22 @@ expression: s
 │do        /  search                                                    │1342 MB                                      ││
 │                                                                       │                                             ││
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │last 0s                                      ││
-│                                                                       │swap     ━━━┃── 316/512 MB                   ││
-│                  ┌ options ──────────────────────────────────────────────────────────────────────┐                  ││
-│                  │ Options   Plugins                                                             │──────────────────┘│
-│                  │                                                                               │                   │
-│                  │ vendor: on when the TV has what they're for                                   │                   │
-│                  │ philips    auto  (on now)   Philips TV features via the JointSpace API        │                   │
-│                  │ kodi       on    (on now)   Kodi: what it's playing, exact seeking            │                   │
-│                  │ youtube    auto  (off now)  the YouTube app: what's on, search                │                   │
-│                  │                                                                               │                   │
-│                  │ built in: always on                                                           │                   │
-│                  │   apps, media, power                                                          │                   │
-│                  │                                                                               │                   │
-│                  │↑/↓ choose  space/⏎/click: auto → on → off  tab: options  esc closes           │                   │
-│                  │auto: on when checking the TV finds it; changes apply from tveee's next start  │                   │
-│                  └───────────────────────────────────────────────────────────────────────────────┘                   │
-│                                                                                                                      │
+│              ┌ options ──────────────────────────────────────────────────────────────────────────────┐              ││
+│              │ Options   Plugins                                                                     │              ││
+│              │                                                                                       │──────────────┘│
+│              │ vendor                                                                                │               │
+│              │ [x] philips               Philips TV features via the JointSpace API  (auto)          │               │
+│              │ [x] kodi                  Kodi: what it's playing, exact seeking                      │               │
+│              │ [ ] youtube               the YouTube app: what's on, search  (auto)                  │               │
+│              │                                                                                       │               │
+│              │ built in (always on)                                                                  │               │
+│              │ [x] apps                  launching and managing Android apps                         │               │
+│              │ [x] media                 playback keys, volume and mute                              │               │
+│              │ [x] power                 sleep, wake, reboot, shutdown                               │               │
+│              │                                                                                       │               │
+│              │↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes  │               │
+│              │changes apply from tveee's next start                                                  │               │
+│              └───────────────────────────────────────────────────────────────────────────────────────┘               │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

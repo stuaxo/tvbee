@@ -243,8 +243,9 @@ crates of their own (`plugins/philips`, `plugins/youtube`, `plugins/kodi`)
 and carry a detection check:
 
 - `tveee options plugin kodi on|off|auto` (or the Plugins tab in the ui's
-  options, `,`) fixes a vendor plugin on or off from the next start; `auto`
-  goes back to checking the TV. Built-in plugins are always on.
+  options, `,`: tick or untick it, `a` for auto) fixes a vendor plugin on or
+  off from the next start; `auto` goes back to checking the TV. Built-in
+  plugins are always on.
 - `TVEEE_PLUGINS=philips,-other` forces plugins on/off (over the options)
 - otherwise the per-TV cache (`~/.cache/tveee/<ip>.plugins`) is used
 - otherwise the TV is probed, but only when one of that plugin's commands was
