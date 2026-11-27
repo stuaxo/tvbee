@@ -16,9 +16,11 @@ tveee-core = { workspace = true, features = ["engine"] }
 ratatui.workspace = true
 ratatui-image.workspace = true
 image.workspace = true
+nucleo-matcher = "0.3.1"
 
 # the tests use real plugins' apps and providers (YouTube's search link, ...)
 [dev-dependencies]
 tveee-plugin-philips.workspace = true
 tveee-plugin-youtube.workspace = true
 tveee-plugin-kodi.workspace = true
+insta = "1.49.0"

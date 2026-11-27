@@ -118,6 +118,67 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
     b
 }
 
+/// A small pane (an editor split, a corner of the screen): one row of keys.
+pub(super) fn compact(area: ratatui::layout::Rect) -> bool {
+    area.width < 65 || area.height < 18
+}
+
+/// The keys a small pane keeps, short enough for one row: playback,
+/// seeking, commands, help, quit (everything else is in the palette and
+/// the help).
+pub(super) fn compact_buttons(mode: Mode) -> Vec<Button> {
+    use Action::*;
+    match mode {
+        Mode::Player => vec![
+            button("space", "play", Input::Do(PlayPause)),
+            button("←", "", Input::Do(Seek(-10.0))),
+            button("→", "", Input::Do(Seek(10.0))),
+            button(":", "cmds", Input::OpenPalette),
+            button("?", "help", Input::ToggleHelp),
+            button("q", "quit", Input::Quit),
+        ],
+        // typing goes to the TV: keys that aren't typing
+        Mode::Remote => vec![
+            button("tab", "player", Input::ToggleMode),
+            button("^p", "cmds", Input::OpenPalette),
+            button("^c", "quit", Input::Quit),
+        ],
+    }
+}
+
+/// A key in a label: `[F]`, highlighted.
+fn mnemonic(key: &str) -> Span<'static> {
+    Span::styled(format!("[{key}]"), Style::new().fg(Color::Yellow).bold())
+}
+
+/// The TV's health and the quick keys, always at the top: load (and
+/// whether it's rising), memory free (red when low) with [F]ree, the
+/// panel (Ambilight) if there is one, and [:] commands. Each part is a
+/// (text, what clicking it does).
+pub(super) fn spine(system: Option<&tveee_core::builtin::info::System>, panel: Option<&str>) -> Vec<(Vec<Span<'static>>, Option<Input>)> {
+    let dim = Style::new().fg(Color::DarkGray);
+    let mut parts = Vec::new();
+    if let Some((one, five, _)) = system.and_then(|s| s.load) {
+        let trend = if one > five * 1.1 { "▲" } else if one < five * 0.9 { "▼" } else { " " };
+        parts.push((vec![Span::styled("load ", dim), Span::raw(format!("{one:.2}{trend}"))], None));
+    }
+    let free = Input::Do(Action::Run { id: "apps.free", args: Vec::new() });
+    match system.and_then(|s| s.mem) {
+        Some(m) => {
+            // under 150 MB the TV starts closing apps itself
+            let low = m.available < 150 * 1024;
+            let amount = Span::styled(tveee_core::builtin::info::size(m.available), if low { Style::new().fg(Color::Red).bold() } else { Style::new() });
+            parts.push((vec![amount, Span::raw(" "), mnemonic("F"), Span::raw("ree")], Some(free)));
+        }
+        None => parts.push((vec![mnemonic("F"), Span::raw("ree memory")], Some(free))),
+    }
+    if let Some(title) = panel {
+        parts.push((vec![mnemonic("l"), Span::raw(format!(" {title}"))], Some(Input::ToggleAmbilight)));
+    }
+    parts.push((vec![mnemonic(":"), Span::raw(" commands")], Some(Input::OpenPalette)));
+    parts
+}
+
 pub(super) fn button_width(b: &Button) -> u16 {
     // " key " + " label", or " label " for a button with no key
     let key = if b.key.is_empty() { 0 } else { Span::raw(b.key).width() + 2 };
@@ -206,16 +267,21 @@ impl App {
         let area = outer.inner(f.area());
         f.render_widget(outer, f.area());
 
+        let small = compact(area);
         let bs = buttons(self.mode, self.st.snap.as_ref().is_some_and(|s| s.exact), self.panel_id().is_some());
+        let bs = if small { compact_buttons(self.mode) } else { bs };
         let places = flow(&bs, area.width);
-        let rows = places.iter().map(|(r, _)| r + 1).max().unwrap_or(1);
-        let [body, _, footer, status] = Layout::vertical([
-            Constraint::Min(4),
+        // a small pane keeps one row of keys (the rest: the palette, help)
+        let rows = if small { 1 } else { places.iter().map(|(r, _)| r + 1).max().unwrap_or(1) };
+        let [top, body, _, footer, status] = Layout::vertical([
             Constraint::Length(1),
+            Constraint::Min(4),
+            Constraint::Length(u16::from(!small)),
             Constraint::Length(rows),
             Constraint::Length(1),
         ])
         .areas(area);
+        self.draw_spine(f, top);
 
         // the preview: beside the rest when there's room, else below it
         let body = if self.preview_open {
@@ -280,6 +346,31 @@ impl App {
         f.render_widget(Paragraph::new(line), status);
 
         self.draw_overlay(f);
+    }
+
+    /// The top line ([`spine`]), each part clickable.
+    pub(super) fn draw_spine(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let system = self.st.snap.as_ref().map(|s| &s.system);
+        let panel = self.panel_id().map(|_| self.panel_title());
+        let mut x = area.x;
+        let sep = Span::styled(" │ ", Style::new().fg(Color::DarkGray));
+        for (i, (spans, hit)) in spine(system, panel).into_iter().enumerate() {
+            if i > 0 {
+                f.render_widget(Paragraph::new(Line::from(sep.clone())), ratatui::layout::Rect { x, y: area.y, width: 3.min(area.right().saturating_sub(x)), height: 1 });
+                x += 3;
+            }
+            let line = Line::from(spans);
+            let w = u16::try_from(line.width()).unwrap_or(u16::MAX);
+            if x + w > area.right() {
+                break;
+            }
+            let r = ratatui::layout::Rect { x, y: area.y, width: w, height: 1 };
+            f.render_widget(Paragraph::new(line), r);
+            if let Some(h) = hit {
+                self.hits.push((r, Hit::Input(h)));
+            }
+            x += w;
+        }
     }
 
     /// The what / title / progress / url / volume lines, each in its own rows so

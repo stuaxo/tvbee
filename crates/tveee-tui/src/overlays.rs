@@ -17,11 +17,16 @@ pub enum Overlay {
     /// The "more" menu, with the highlighted item.
     Menu(usize),
     /// "Are you sure?" for menu item N; `yes` is the highlighted answer.
-    Confirm { item: usize, yes: bool },
+    Confirm { id: &'static str, yes: bool },
+    /// The command palette, with the highlighted match (what's typed is
+    /// `App::prompt`).
+    Palette(usize),
+    /// The log, scrolled up this many lines from the end.
+    Logs(usize),
     /// The app launcher: which tab, and the highlighted app in it.
     Apps { tab: AppTab, sel: usize },
-    /// Typing the text for menu item N (the text itself is `App::prompt`).
-    Prompt(usize),
+    /// Typing what action `id` needs (the text is `App::prompt`).
+    Prompt(&'static str),
     /// Typing a search; N picks the app from `App::search_targets`.
     Search(usize),
     /// What to do with launcher row `sel` of `tab`; `at` is the highlighted choice.
@@ -72,35 +77,36 @@ pub fn search_key(at: usize, code: KeyCode, mods: KeyModifiers, text: &mut Strin
             ),
             _ => (Overlay::Search(at), None),
         },
-        _ => match prompt_key(0, "", code, mods, text) {
+        _ => match prompt_key("", code, mods, text) {
             (Overlay::None, _) => (Overlay::None, None),
             _ => (Overlay::Search(at), None),
         },
     }
 }
 
-/// Keys while typing into a prompt for menu item `item` (action `id`): edit
-/// `text`; Enter runs the action with it, Esc cancels. Ctrl-U clears.
-pub fn prompt_key(item: usize, id: &'static str, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
+/// Keys while typing what action `id` needs: edit `text`; Enter runs it
+/// with that, Esc cancels. Ctrl-U clears.
+pub fn prompt_key(id: &'static str, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
+    let here = Overlay::Prompt(id);
     match code {
         KeyCode::Esc => (Overlay::None, None),
         KeyCode::Enter => {
             let t = text.trim().to_string();
-            if t.is_empty() { (Overlay::Prompt(item), None) } else { (Overlay::None, Some(Action::Run { id, args: vec![t] })) }
+            if t.is_empty() { (here, None) } else { (Overlay::None, Some(Action::Run { id, args: vec![t] })) }
         }
         KeyCode::Backspace => {
             text.pop();
-            (Overlay::Prompt(item), None)
+            (here, None)
         }
         KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => {
             text.clear();
-            (Overlay::Prompt(item), None)
+            (here, None)
         }
         KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => {
             text.push(c);
-            (Overlay::Prompt(item), None)
+            (here, None)
         }
-        _ => (Overlay::Prompt(item), None),
+        _ => (here, None),
     }
 }
 
@@ -116,7 +122,7 @@ pub fn paste_text(s: &str) -> String {
 /// What a key does while an overlay is open: the new overlay, and maybe an
 /// action to run. Esc (or the key that opened it) closes; it never quits.
 pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) -> (Overlay, Option<Action>) {
-    let run = |i: usize| pick(items, i);
+    let pick_item = |i: usize| pick(items, i);
     match overlay {
         Overlay::None => (Overlay::None, None),
         // any key closes the help
@@ -125,26 +131,36 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
             KeyCode::Esc | KeyCode::Char('.') | KeyCode::Char('q') | KeyCode::Backspace => (Overlay::None, None),
             KeyCode::Up => (Overlay::Menu(sel.checked_sub(1).unwrap_or(items.len().saturating_sub(1))), None),
             KeyCode::Down => (Overlay::Menu(if sel + 1 >= items.len() { 0 } else { sel + 1 }), None),
-            KeyCode::Enter => run(sel),
+            KeyCode::Enter => pick_item(sel),
             KeyCode::Char(c) => match items.iter().position(|it| it.key == Some(c)) {
-                Some(i) => run(i),
+                Some(i) => pick_item(i),
                 None => (overlay, None),
             },
             _ => (overlay, None),
         },
         // handled by apps_key / prompt_key
         Overlay::Apps { tab, sel } => (Overlay::Apps { tab, sel }, None),
-        Overlay::Prompt(i) => (Overlay::Prompt(i), None),
+        Overlay::Prompt(id) => (Overlay::Prompt(id), None),
+        // handled by App::palette_key
+        Overlay::Palette(sel) => (Overlay::Palette(sel), None),
+        Overlay::Logs(up) => match code {
+            KeyCode::Up => (Overlay::Logs(up + 1), None),
+            KeyCode::Down => (Overlay::Logs(up.saturating_sub(1)), None),
+            KeyCode::PageUp => (Overlay::Logs(up + 10), None),
+            KeyCode::PageDown => (Overlay::Logs(up.saturating_sub(10)), None),
+            KeyCode::End => (Overlay::Logs(0), None),
+            _ => (Overlay::None, None),
+        },
         Overlay::Search(i) => (Overlay::Search(i), None),
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
         Overlay::Guide { tab, at } => (Overlay::Guide { tab, at }, None),
         // handled by App::options_key
         Overlay::Options(i) => (Overlay::Options(i), None),
-        Overlay::Confirm { item, yes } => match code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, run_item(items, item)),
-            KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { item, yes: !yes }, None),
-            KeyCode::Enter if yes => (Overlay::None, run_item(items, item)),
+        Overlay::Confirm { id, yes } => match code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(run(id))),
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { id, yes: !yes }, None),
+            KeyCode::Enter if yes => (Overlay::None, Some(run(id))),
             // anything else, including Enter on "No", cancels
             _ => (Overlay::None, None),
         },
@@ -155,19 +171,39 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
     }
 }
 
-/// Running menu item `i` (with nothing typed).
-pub fn run_item(items: &[ActionDescriptor], i: usize) -> Option<Action> {
-    items.get(i).map(|it| Action::Run { id: it.id, args: Vec::new() })
+/// Running action `id` with nothing typed.
+pub fn run(id: &'static str) -> Action {
+    Action::Run { id, args: Vec::new() }
 }
 
-/// What a menu item does when chosen: run it, or ask first if it's risky.
-pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
-    match items.get(i) {
-        Some(it) if matches!(it.params, Params::Text { .. }) => (Overlay::Prompt(i), None),
-        Some(it) if it.confirm.is_some() => (Overlay::Confirm { item: i, yes: false }, None),
-        Some(_) => (Overlay::None, run_item(items, i)),
-        None => (Overlay::None, None),
+/// What it takes to run, as usage text ("up|down|<level>"): its own, or
+/// its command's.
+pub fn usage_of(a: &ActionDescriptor) -> &'static str {
+    if !a.args.is_empty() { a.args } else { a.cli.map_or("", |c| c.usage) }
+}
+
+/// Whether running `a` needs something typed first: text it asks for, or
+/// arguments it can't do without (`<level>`, not `[next|off]`).
+pub fn needs_input(a: &ActionDescriptor) -> bool {
+    let usage = usage_of(a);
+    matches!(a.params, Params::Text { .. }) || (!usage.is_empty() && !usage.starts_with('['))
+}
+
+/// What choosing an action does: ask for what it needs, ask first if it's
+/// risky, or run it.
+pub fn choose(a: &ActionDescriptor) -> (Overlay, Option<Action>) {
+    if needs_input(a) {
+        (Overlay::Prompt(a.id), None)
+    } else if a.confirm.is_some() {
+        (Overlay::Confirm { id: a.id, yes: false }, None)
+    } else {
+        (Overlay::None, Some(run(a.id)))
     }
+}
+
+/// What choosing menu item `i` does (see [`choose`]).
+pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
+    items.get(i).map_or((Overlay::None, None), choose)
 }
 
 pub(super) const HELP: &str = " everywhere
@@ -176,6 +212,11 @@ pub(super) const HELP: &str = " everywhere
    0-9      jump to 0%-90%   + -    volume
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
+   : ctrl+p commands: everything tveee can do, found by typing a few letters
+            (the ui's own too: the log of what tveee did lately, help, ...)
+   F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
+   F        free memory (force-stop idle apps)   S  sleep   R  restart the app
+            in front, coming back where it was (YouTube, Kodi)
    i        system info      a      launch an app (space there: front / restart / close)
    l        Ambilight panel (TVs with one; P there pairs if needed)
    L        change the Ambilight: power, style and setting, Hue, any light's colour
@@ -250,11 +291,13 @@ impl App {
             Overlay::Apps { tab, sel } => self.draw_apps(f, tab, sel, false),
             Overlay::AppActions { tab, sel, at } => self.draw_app_actions(f, tab, sel, at),
             Overlay::Search(at) => self.draw_search(f, at),
-            Overlay::Prompt(item) => self.draw_prompt(f, item),
+            Overlay::Prompt(id) => self.draw_prompt(f, id),
+            Overlay::Palette(sel) => self.draw_palette(f, sel),
+            Overlay::Logs(up) => self.draw_logs(f, up),
             Overlay::Ambilight { row, col } => self.draw_ambi_dialog(f, row, col),
             Overlay::AmbiColour { row, col } => self.draw_ambi_colour(f, row, col),
             Overlay::Pin => self.draw_pin(f),
-            Overlay::Confirm { item, yes } => self.draw_confirm(f, item, yes),
+            Overlay::Confirm { id, yes } => self.draw_confirm(f, id, yes),
         }
     }
 
@@ -327,9 +370,13 @@ impl App {
         self.hits.push((r, Hit::Popup));
     }
 
-    pub(super) fn draw_prompt(&mut self, f: &mut Frame, item: usize) {
-        let Some(it) = self.menu.get(item) else { return };
-        let Params::Text { prompt, hint } = it.params else { return };
+    pub(super) fn draw_prompt(&mut self, f: &mut Frame, id: &'static str) {
+        let Some(it) = tveee_core::actions::find(&self.actions, id) else { return };
+        // text it asks for, or the arguments it takes
+        let (prompt, hint) = match it.params {
+            Params::Text { prompt, hint } => (prompt.to_string(), hint),
+            Params::None => (format!("{}:", it.title), usage_of(it)),
+        };
         let field = 60usize;
         // show the end of long input
         let shown: String = {
@@ -350,6 +397,34 @@ impl App {
         self.hits.push((r, Hit::Popup));
     }
 
+    /// The log's last lines, in most of the screen.
+    pub(super) fn draw_logs(&mut self, f: &mut Frame, up: usize) {
+        let area = f.area();
+        let r = ratatui::layout::Rect {
+            x: area.x + area.width / 20,
+            y: area.y + area.height / 10,
+            width: area.width - area.width / 10,
+            height: area.height - area.height / 5,
+        };
+        let lines = tveee_core::log::recent();
+        let room = usize::from(r.height.saturating_sub(2));
+        let up = up.min(lines.len().saturating_sub(room));
+        let end = lines.len() - up;
+        let shown: Vec<Line> = if lines.is_empty() {
+            vec![Line::from("nothing logged yet").italic()]
+        } else {
+            lines[end.saturating_sub(room)..end].iter().map(|l| Line::from(l.clone())).collect()
+        };
+        f.render_widget(ratatui::widgets::Clear, r);
+        let title = format!(" log - {} lines (TVEEE_LOG=<file> keeps them) ", lines.len());
+        let block = Block::bordered()
+            .title(title)
+            .title_bottom(Line::from(" ↑↓ pgup/pgdn scroll  end: newest  any other key closes ").right_aligned())
+            .border_style(Style::new().fg(Color::DarkGray));
+        f.render_widget(Paragraph::new(shown).block(block), r);
+        self.hits.push((r, Hit::Popup));
+    }
+
     pub(super) fn draw_pin(&mut self, f: &mut Frame) {
         let text = vec![
             Line::from("Type the PIN the TV is showing:"),
@@ -364,8 +439,8 @@ impl App {
         self.hits.push((r, Hit::Popup));
     }
 
-    pub(super) fn draw_confirm(&mut self, f: &mut Frame, item: usize, yes: bool) {
-        let Some(it) = self.menu.get(item) else { return };
+    pub(super) fn draw_confirm(&mut self, f: &mut Frame, id: &'static str, yes: bool) {
+        let Some(it) = tveee_core::actions::find(&self.actions, id) else { return };
         let mut text: Vec<Line> = it.confirm.unwrap_or("Are you sure?").lines().map(Line::from).collect();
         text.push(Line::default());
         let answers_row = u16::try_from(text.len()).unwrap_or(0);

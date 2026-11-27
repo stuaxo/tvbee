@@ -1,0 +1,39 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+expression: "screen(&mut a, DESKTOP)"
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
+│load 4.82▲ │ 310 MB [F]ree │ [:] commands                                                                             │
+│what     Paused in Kodi                                                                                               │
+│title    Episode 3 (Off-Road)                                                                                         │
+│progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┃─────────────────────────────────── 27:56 / 48:47 (57%)      │
+│audio    AAC-LC  AAC                                                                                                  │
+│                                                                                                                      │
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                         ┌ commands ───────────────────────────────────────────────────── 3 ┐                         │
+│                         │> kodi█                                                           │                         │
+│                         │────────────────────────────────────────────────────────────────  │                         │
+│                         │ kodi: next subtitles                                      kodi   │                         │
+│                         │ kodi: next audio track                                    kodi   │                         │
+│                         │ kodi: find in the library…                                kodi   │                         │
+│                         │                                                                  │                         │
+│                         │type to find  ↑/↓ choose  ⏎ run  esc close   …: asks first        │                         │
+│                         └──────────────────────────────────────────────────────────────────┘                         │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   ⌫  back   h  home   tab  remote   i  info      │
+│ v  preview   a  apps   /  search   g  guide   ,  options   .  more   ?  help   q  quit                               │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

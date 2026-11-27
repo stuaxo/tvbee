@@ -28,9 +28,12 @@ mod preview;
 mod launcher;
 mod ambi;
 mod overlays;
+mod palette;
 mod drawing;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod snapshots;
 
 use tveee_core::engine::*;
 pub use self::keymap::*;
@@ -38,6 +41,7 @@ pub use self::guide::*;
 pub use self::preview::*;
 pub use self::launcher::*;
 pub use self::overlays::*;
+pub use self::palette::*;
 pub use self::drawing::*;
 
 const CAT: &str = "ui";
@@ -50,7 +54,10 @@ struct App {
     note: String,
     mode: Mode,
     overlay: Overlay,
+    /// The `.` menu: the actions with a menu key.
     menu: Vec<ActionDescriptor>,
+    /// Every action of the enabled plugins (the palette).
+    actions: Vec<ActionDescriptor>,
     /// Where the clickable things were drawn last frame.
     hits: Vec<(ratatui::layout::Rect, Hit)>,
     /// Show the system panel (memory, storage, ...).
@@ -91,6 +98,8 @@ struct App {
     /// Descriptions asked for; `want_info` is the next to ask for.
     infos_asked: std::collections::HashSet<(u32, i64)>,
     want_info: Option<(u32, i64)>,
+    /// Something asked to quit (the palette's ui: quit).
+    quit: bool,
 }
 
 /// An action under way waits this long for its next step: each change on
@@ -235,6 +244,9 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
         }
         // what was asked for may have changed it at once (a star, loading)
         app.st = app.engine.state();
+        if app.quit {
+            return Ok(());
+        }
         if dirty || app.animating() || drawn.is_none_or(|d| d.elapsed() >= TICK) {
             term.draw(|f| app.draw(f))?;
             drawn = Some(Instant::now());
@@ -252,6 +264,13 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
         }
         dirty = true;
         match event::read()? {
+            // F1-F3 (Alt+1-3): the guide, the launcher, remote mode; from the
+            // player or from either list, not while typing into a box
+            Event::Key(k) if k.kind != KeyEventKind::Release && app.can_switch_view() && view_key(k.code, k.modifiers).is_some() => {
+                if let Some(v) = view_key(k.code, k.modifiers) {
+                    app.switch_view(v, actions);
+                }
+            }
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
@@ -297,10 +316,11 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                         KeyCode::Char(c) if c.is_ascii_digit() && app.prompt.len() < 8 => app.prompt.push(c),
                         _ => {}
                     }
-                } else if let Overlay::Prompt(item) = app.overlay {
+                } else if let Overlay::Palette(sel) = app.overlay {
+                    app.palette_key(sel, k.code, k.modifiers, actions);
+                } else if let Overlay::Prompt(id) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
-                    let id = app.menu.get(item).map_or("", |m| m.id);
-                    let (next, action) = prompt_key(item, id, k.code, k.modifiers, &mut text);
+                    let (next, action) = prompt_key(id, k.code, k.modifiers, &mut text);
                     app.prompt = text;
                     app.apply_overlay(next, action, actions);
                 } else if let Overlay::Apps { tab, sel } = app.overlay {
@@ -316,7 +336,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
             }
             Event::Paste(p) => {
                 match app.overlay {
-                    Overlay::Prompt(_) | Overlay::Search(_) => app.prompt.push_str(&paste_text(&p)),
+                    Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_) => app.prompt.push_str(&paste_text(&p)),
                     // remote mode: type it into the TV (what `input text` can)
                     Overlay::None if app.mode == Mode::Remote => {
                         let t: String = paste_text(&p).chars().filter(|c| c.is_ascii() && !c.is_ascii_control()).collect();
@@ -360,37 +380,10 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     if !std::io::stdout().is_terminal() {
         return tveee_core::error::usage("ui needs a terminal");
     }
+    // the log pop-up's lines, kept from the start
+    tveee_core::log::keep_recent();
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
-    let mut app = App {
-        ip: c.tv.ip.clone(),
-        st: engine.handle.state(),
-        engine: engine.handle.clone(),
-        note: String::new(),
-        mode: Mode::Player,
-        overlay: Overlay::None,
-        menu: c.menu.clone(),
-        hits: Vec::new(),
-        info: false,
-        apps_tab: AppTab::Known,
-        prompt: String::new(),
-        search_targets: Vec::new(),
-        settling: None,
-        settle,
-        ambi_open: false,
-        preview_open: false,
-        preview: None,
-        preview_source: "",
-        preview_note: String::new(),
-        picker: None,
-        guide_later: 0,
-        guide_view: 0,
-        guide_slid: Instant::now(),
-        details: Details::Closed,
-        details_scroll: 0,
-        details_of: None,
-        infos_asked: std::collections::HashSet::new(),
-        want_info: None,
-    };
+    let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -423,6 +416,13 @@ pub fn actions() -> Vec<ActionDescriptor> {
          \x20 left/right    seek 10s     [ / ]  seek 60s     0-9  jump to 0%-90%\n\
          \x20 up/down + -   volume       m      mute/unmute\n\
          \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
+         \x20 :  commands (or Ctrl-P): everything tveee can do, found by typing a\n\
+         \x20    few letters of it\n\
+         \x20 F  free memory   S  sleep   R  restart the app in front, where it was\n\
+         \x20 F1 F2 F3  the guide, the apps, remote mode (Alt+1-3 too), from the\n\
+         \x20    player or from the guide or the apps\n\
+         \x20 The top line: the TV's load and free memory, [F]ree, [l] the Ambilight,\n\
+         \x20 [:] commands (click them too). A small pane keeps one row of keys.\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
          \x20 l  Ambilight panel (Philips TVs that have it): state and each light's\n\
          \x20    colour; L (or clicking it) changes power, style, Hue and any light's\n\
@@ -451,6 +451,44 @@ pub fn actions() -> Vec<ActionDescriptor> {
          the TV passes through, until the action has arrived and settled.\n\
          --no-settle shows every step as it comes (for debugging).",
     )]
+}
+
+impl App {
+    /// A screen on `engine`'s state, nothing open yet.
+    fn new(ip: String, engine: Handle, actions: Vec<ActionDescriptor>, settle: bool) -> App {
+        App {
+            ip,
+            st: engine.state(),
+            engine,
+            note: String::new(),
+            mode: Mode::Player,
+            overlay: Overlay::None,
+            menu: actions.iter().filter(|a| a.key.is_some()).copied().collect(),
+            actions,
+            hits: Vec::new(),
+            info: false,
+            apps_tab: AppTab::Known,
+            prompt: String::new(),
+            search_targets: Vec::new(),
+            settling: None,
+            settle,
+            ambi_open: false,
+            preview_open: false,
+            preview: None,
+            preview_source: "",
+            preview_note: String::new(),
+            picker: None,
+            guide_later: 0,
+            guide_view: 0,
+            guide_slid: Instant::now(),
+            details: Details::Closed,
+            details_scroll: 0,
+            details_of: None,
+            infos_asked: std::collections::HashSet::new(),
+            want_info: None,
+            quit: false,
+        }
+    }
 }
 
 impl App {
@@ -602,6 +640,21 @@ impl App {
                 self.overlay = Overlay::Menu(wake.unwrap_or(0));
             }
             Input::OpenMenu => self.note = "no menu items in this build".into(),
+            Input::OpenPalette => self.open_palette(),
+            Input::ShowLogs => self.overlay = Overlay::Logs(0),
+            Input::RestartFront => match self.st.snap.as_ref().and_then(front_pkg) {
+                Some(pkg) if !apps::passes_through(&pkg) => {
+                    self.note = format!("restarting {}...", app_name(&pkg));
+                    self.settle(self.note.clone(), Some(pkg.clone()));
+                    let _ = actions.send(Action::Restart { target: pkg.clone(), pkg });
+                }
+                _ => self.note = "nothing in front to restart".into(),
+            },
+            // free and sleep: what they're doing, till they say
+            Input::Do(Action::Run { id, args }) => {
+                self.note = format!("{}...", tveee_core::actions::find(&self.actions, id).map_or(id, |a| a.title));
+                let _ = actions.dispatch(id, args);
+            }
             Input::OpenApps => {
                 // start on the app that's in front, if it's in the list
                 let pkg = self.st.snap.as_ref().and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f));
@@ -624,6 +677,34 @@ impl App {
         false
     }
 
+    /// Whether F1-F3 switch view now: in the player, remote mode, or the
+    /// guide or launcher (not a box being typed into, or a question).
+    fn can_switch_view(&self) -> bool {
+        matches!(self.overlay, Overlay::None | Overlay::Guide { .. } | Overlay::Apps { .. } | Overlay::AppActions { .. })
+    }
+
+    /// Go to view `v`, leaving whatever list is open.
+    fn switch_view(&mut self, v: View, actions: &Handle) {
+        match v {
+            View::Guide if matches!(self.overlay, Overlay::Guide { .. }) => {}
+            View::Guide => {
+                self.overlay = Overlay::None;
+                self.open_guide(None, actions);
+            }
+            View::Apps if matches!(self.overlay, Overlay::Apps { .. }) => {}
+            View::Apps => {
+                self.overlay = Overlay::None;
+                self.apply(Input::OpenApps, actions);
+            }
+            View::Remote => {
+                self.overlay = Overlay::None;
+                if self.mode != Mode::Remote {
+                    self.apply(Input::ToggleMode, actions);
+                }
+            }
+        }
+    }
+
     /// Move to the overlay `next`, running `action` if there is one.
     fn apply_overlay(&mut self, next: Overlay, action: Option<Action>, actions: &Handle) {
         let was = self.overlay;
@@ -635,8 +716,14 @@ impl App {
             self.apps_tab = tab;
         }
         match (was, next, action) {
-            (_, _, Some(Action::Run { id, args })) => {
-                self.note = format!("{}...", tveee_core::actions::find(&self.menu, id).map_or(id, |m| m.title));
+            (_, _, Some(Action::Run { id, mut args })) => {
+                let a = tveee_core::actions::find(&self.actions, id);
+                self.note = format!("{}...", a.map_or(id, |m| m.title));
+                // typed arguments (not text it asks for): word by word, as
+                // on the command line
+                if a.is_some_and(|a| a.params == Params::None) && args.len() == 1 {
+                    args = args[0].split_whitespace().map(str::to_string).collect();
+                }
                 // with text typed (e.g. "open a link"): something new should come up
                 if !args.is_empty() {
                     self.settle(self.note.clone(), None);
@@ -699,8 +786,8 @@ impl App {
                 self.apply_overlay(next, action, actions);
             }
             (Overlay::Menu(_), Some(Hit::Popup)) => {}
-            (Overlay::Confirm { item, .. }, Some(Hit::ConfirmYes)) => {
-                self.apply_overlay(Overlay::None, run_item(&self.menu, item), actions)
+            (Overlay::Confirm { id, .. }, Some(Hit::ConfirmYes)) => {
+                self.apply_overlay(Overlay::None, Some(run(id)), actions)
             }
             (Overlay::Confirm { .. }, Some(Hit::Popup)) => {}
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
@@ -740,9 +827,12 @@ impl App {
             (Overlay::AppActions { tab, sel, .. }, Some(Hit::AppChoice(i))) => self.run_choice(tab, sel, i, actions),
             (Overlay::AppActions { .. }, Some(Hit::Popup)) => {}
             (Overlay::AppActions { tab, sel, .. }, _) => self.overlay = Overlay::Apps { tab, sel },
-            (Overlay::Prompt(_) | Overlay::Search(_), Some(Hit::Popup)) => {}
+            (Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), Some(Hit::Popup)) => {}
+            // the log: a click inside does nothing, outside closes it
+            (Overlay::Logs(_), Some(Hit::Popup)) => {}
+            (Overlay::Logs(_), _) => self.overlay = Overlay::None,
             // a click elsewhere closes the pop-up (cancelling a confirmation)
-            (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_), _) => {
+            (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
                 self.apply_overlay(Overlay::None, None, actions)
             }
             (Overlay::None, Some(Hit::Input(i))) => return self.apply(i, actions),
@@ -774,6 +864,8 @@ impl App {
     /// Mouse wheel: volume, or the menu highlight while the menu is open.
     fn scroll(&mut self, up: bool, actions: &Handle) {
         match self.overlay {
+            // the wheel scrolls the log, three lines a notch
+            Overlay::Logs(n) => self.overlay = Overlay::Logs(if up { n + 3 } else { n.saturating_sub(3) }),
             Overlay::Menu(_) => {
                 let code = if up { KeyCode::Up } else { KeyCode::Down };
                 let (next, action) = overlay_key(self.overlay, code, &self.menu);

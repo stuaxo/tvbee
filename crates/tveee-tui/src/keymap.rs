@@ -28,6 +28,12 @@ pub enum Input {
     /// The preview panel: a picture of what's on.
     TogglePreview,
     OpenMenu,
+    /// The command palette: every action, found by typing.
+    OpenPalette,
+    /// The log: what tveee did lately.
+    ShowLogs,
+    /// Restart the app in front, coming back where it was if it can.
+    RestartFront,
     OpenApps,
     OpenSearch,
     OpenGuide,
@@ -38,18 +44,44 @@ pub enum Input {
 
 
 
+/// The views: the guide, the launcher, remote mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Guide,
+    Apps,
+    Remote,
+}
+
+/// A key that switches view from anywhere it isn't typing: F1-F3, or
+/// Alt+1-3 for terminals that keep the F keys. (Digits alone keep jumping
+/// through the video, and filter lists.)
+pub fn view_key(code: KeyCode, mods: KeyModifiers) -> Option<View> {
+    match (code, mods.contains(KeyModifiers::ALT)) {
+        (KeyCode::F(1), _) | (KeyCode::Char('1'), true) => Some(View::Guide),
+        (KeyCode::F(2), _) | (KeyCode::Char('2'), true) => Some(View::Apps),
+        (KeyCode::F(3), _) | (KeyCode::Char('3'), true) => Some(View::Remote),
+        _ => None,
+    }
+}
+
 /// Map a key to what it means in `mode`.
 pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
     use Action::*;
     let act = |a| Input::Do(a);
     match (code, mode) {
         (KeyCode::Char('c'), _) if mods.contains(KeyModifiers::CONTROL) => Input::Quit,
+        // the palette from either mode (Ctrl-P types nothing into the TV)
+        (KeyCode::Char('p'), _) if mods.contains(KeyModifiers::CONTROL) => Input::OpenPalette,
         (KeyCode::Tab, _) => Input::ToggleMode,
         // remote mode: the keyboard is the TV's (Tab leaves, Ctrl-C quits)
         (_, Mode::Remote) => remote_input(code, mods),
         (KeyCode::Char('q') | KeyCode::Esc, _) => Input::Quit,
         (KeyCode::Char('?'), _) => Input::ToggleHelp,
         (KeyCode::Char('.'), _) => Input::OpenMenu,
+        (KeyCode::Char(':'), _) => Input::OpenPalette,
+        (KeyCode::Char('F'), _) => act(Run { id: "apps.free", args: Vec::new() }),
+        (KeyCode::Char('S'), _) => act(Run { id: "power.sleep", args: Vec::new() }),
+        (KeyCode::Char('R'), _) => Input::RestartFront,
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
         (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
         (KeyCode::Char('P'), _) => Input::Pair,

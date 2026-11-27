@@ -1,0 +1,20 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+expression: "screen(&mut a, CORNER)"
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
+│load 4.82▲ │ 310 MB [F]ree │ [:] commands                 │
+│what     Paused in Kodi                                   │
+│title    Episode 3 (Off-Road)                             │
+┌ volume ──────────────────────────────────────────────────┐
+│volume:                                                   │
+│█                                                         │
+│up|down|<level>                                           │
+│                                                          │
+│⏎ go   esc cancel   paste works   ctrl-u clears           │
+└──────────────────────────────────────────────────────────┘
+│                                                          │
+│                                                          │
+│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

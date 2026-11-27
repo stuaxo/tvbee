@@ -316,18 +316,16 @@ pub fn pkg_of(app: &str) -> &str {
     target(app).split('/').next().unwrap_or_default()
 }
 
-fn free_ram(tv: &Tv) -> Result<()> {
+/// Force-stop the apps that hog memory; says how much there is now.
+fn free_ram(tv: &Tv) -> Result<String> {
     for p in HOGS {
         tv.shell(&["am", "force-stop", p])?;
     }
-    if let Some(r) = info::read_ram(tv)? {
-        println!("ram: {r}");
-    }
-    Ok(())
+    Ok(info::read_ram(tv)?.map(|r| format!("ram: {r}")).unwrap_or_default())
 }
 
-fn free(c: &Ctx, _: &[String]) -> Result<()> {
-    free_ram(&c.tv)
+fn free(c: &crate::actions::Cx, _: &[String]) -> Result<crate::actions::Output> {
+    free_ram(c.tv).map(Into::into)
 }
 
 fn launch(c: &Ctx, args: &[String]) -> Result<()> {
@@ -344,7 +342,10 @@ fn launch(c: &Ctx, args: &[String]) -> Result<()> {
     let Some(app) = rest.first() else { return usage("launch: missing app") };
     let tv = &c.tv;
     if free {
-        free_ram(tv)?;
+        let said = free_ram(tv)?;
+        if !said.is_empty() {
+            println!("{said}");
+        }
     }
     if quiet {
         media::set_mute(tv, true)?;
@@ -842,7 +843,7 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
              \x20 <action...>          the app's own actions, listed by 'tveee app <app>'\n\
              \x20                      (Kodi: find, play, subtitles, audio, scan, clean, notify)",
         ),
-        ActionDescriptor::terminal("apps.free", CAT, "force-stop idle RAM-hungry apps", free).cli("free", "", "force-stop idle RAM-hungry apps"),
+        ActionDescriptor::new("apps.free", CAT, "free memory (force-stop idle RAM-hungry apps)", free).cli("free", "", "force-stop idle RAM-hungry apps"),
         ActionDescriptor::terminal("apps.apps", CAT, "list app aliases installed on the TV", apps).cli("apps", "[--all | --others]", "list app aliases installed on the TV").long(
             "Queries the TV and hides aliases whose package isn't installed.\n  --all     list every alias without contacting the TV\n  --others  installed apps without an alias, with the kind tveee guesses\n            for them (player, store, home, app); cached for a day",
         ),
