@@ -32,6 +32,7 @@ pub mod plugin;
 #[cfg(feature = "engine")]
 pub mod preview;
 pub mod provider;
+pub mod readings;
 pub mod registry;
 pub mod store;
 pub mod tv;

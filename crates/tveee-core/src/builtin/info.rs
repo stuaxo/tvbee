@@ -260,13 +260,6 @@ fn join2<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B +
     })
 }
 
-fn wakefulness(power: &str) -> Option<String> {
-    power
-        .lines()
-        .find(|l| l.contains("mWakefulness="))
-        .map(|l| l.trim().trim_start_matches("mWakefulness=").to_string())
-}
-
 /// What the TV is doing, from the power, window and media_session dumps.
 /// `audio`: `dumpsys audio`, for apps that play without a media session.
 fn activity_from(tv: &Tv, wake: Option<&str>, window: &str, media: &str, audio: &str) -> Option<Activity> {
@@ -312,14 +305,15 @@ fn push_activity(out: &mut String, a: &Activity) {
 /// The status report, one `label:   value` line each.
 fn status_text(tv: &Tv) -> Result<String> {
     let ((power, window), ((audio, system), media)) = join2(
-        || join2(|| tv.shell(&["dumpsys", "power"]), || tv.window_dump()),
+        || join2(|| tv.read_whole::<crate::readings::Power>(), || tv.read::<crate::readings::Window>()),
         || join2(|| join2(|| tv.shell(&["dumpsys", "audio"]), || read_system(tv)), || tv.shell(&["dumpsys", "media_session"])),
     );
     let (power, window, audio, system) = (power?, window?, audio?, system?);
     // media sessions only feed the optional what/title lines, so don't fail on them
     let media = media.unwrap_or_default();
-    let wake = wakefulness(&power);
-    let activity = activity_from(tv, wake.as_deref(), &window, &media, &audio);
+    // power not said (asked twice): no power line, rather than "standby"
+    let wake = power.map(|p| p.wakefulness);
+    let activity = activity_from(tv, wake.as_deref(), &window.text, &media, &audio);
 
     let mut out = String::new();
     push_line(&mut out, "TV", &tv.ip);
@@ -329,7 +323,7 @@ fn status_text(tv: &Tv) -> Result<String> {
     if let Some(w) = &wake {
         push_line(&mut out, "power", w);
     }
-    push_line(&mut out, "focus", &focus_window(&window).unwrap_or_default());
+    push_line(&mut out, "focus", window.focus.as_deref().unwrap_or_default());
     let muted = super::media::parse_muted(&audio).map_or_else(|| "unknown".into(), |m| m.to_string());
     if let Some((v, max)) = super::media::parse_volume(&audio) {
         push_line(&mut out, "volume", &format!("{v}/{max}"));
@@ -365,14 +359,14 @@ const NOTHING: &str = "nothing playing that tveee recognises\n";
 /// Just the what / title / progress / url lines.
 fn nowplaying_text(tv: &Tv) -> Result<String> {
     let ((power, window), (media, audio)) = join2(
-        || join2(|| tv.shell(&["dumpsys", "power"]), || tv.window_dump()),
+        || join2(|| tv.read_whole::<crate::readings::Power>(), || tv.read::<crate::readings::Window>()),
         || join2(|| tv.shell(&["dumpsys", "media_session"]), || tv.shell(&["dumpsys", "audio"])),
     );
     let (power, window, media) = (power?, window?, media?);
     // only for apps without a media session: don't fail on it
     let audio = audio.unwrap_or_default();
     let mut out = String::new();
-    match activity_from(tv, wakefulness(&power).as_deref(), &window, &media, &audio) {
+    match activity_from(tv, power.map(|p| p.wakefulness).as_deref(), &window.text, &media, &audio) {
         Some(a) => push_activity(&mut out, &a),
         None => out.push_str(NOTHING),
     }

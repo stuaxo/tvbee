@@ -169,7 +169,7 @@ impl Front {
         let Some(app) = self.app() else { return Ok(String::new()) };
         let pkg = app.package();
         let ours = |w: Option<String>| w.is_some_and(|w| w.split('/').next() == Some(pkg));
-        let front = || crate::builtin::info::focus_window(&tv.window_dump().unwrap_or_default());
+        let front = || tv.read::<crate::readings::Window>().ok().and_then(|w| w.focus);
         if ours(front()) {
             return Ok(String::new());
         }
