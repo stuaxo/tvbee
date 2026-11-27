@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 828
+assertion_line: 831
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -11,20 +11,20 @@ expression: s
 │audio    AAC-LC  AAC                                                   │style     video   sound   colour             ││
 │do        t  list   /  search                                          │setting   standard   natural   vivid   game  ││
 │                                                                       │          comfort   relax                    ││
-│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │hue       on   off                           ││
-│                                                                       │lights    all     ▐▌    │                    ││
-│                            ┌ panel colour ──────────────────────────────────────────────┐───────────────────────────┘│
-│                            │Colour for left 1                                           │───────────────────────────┐│
-│                            │                                                            │                           ││
-│                            │                                     lighter                │org.xbmc.kodi              ││
-│                            │▐▌                                   full                   │ MB used, 310 MB free      ││
-│                            │                                     darker                 │                           ││
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │ambi+hue  on   off                           ││
+│                                                                       │          sync Hue bulbs with the TV         ││
+│                            ┌ panel colour ──────────────────────────────────────────────┐▐▌    │                    ││
+│                            │Colour for left 1                                           │───────────────────────────┘│
+│                            │                                                            │───────────────────────────┐│
+│                            │                                     lighter                │                           ││
+│                            │▐▌                                   full                   │org.xbmc.kodi              ││
+│                            │                                     darker                 │ MB used, 310 MB free      ││
 │                            │ white   warm   off                                         │                           ││
 │                            │                                                            │                           ││
-│                            │or type: █                                                  │6/512 MB                   ││
-│                            │red, warm, #ff8800                                          │ 2.40                      ││
-│                            │                                                            │───────────────────────────┘│
-│                            │now       →                                                 │                            │
+│                            │or type: █                                                  │                           ││
+│                            │red, warm, #ff8800                                          │6/512 MB                   ││
+│                            │                                                            │ 2.40                      ││
+│                            │now       →                                                 │───────────────────────────┘│
 │                            │arrows or click pick  type a name or #hex  ⏎ set  esc back  │                            │
 │                            └────────────────────────────────────────────────────────────┘                            │
 │                                                                                                                      │

@@ -782,15 +782,16 @@ fn with_ambilight() -> TvState {
         info: vec![("power".into(), "on".into()), ("control".into(), "the TV".into()), ("style".into(), "follow video, standard".into()), ("hue".into(), "on (Ambilight+Hue)".into())],
         swatches: Vec::new(),
         rows: vec![
-            Row { name: "power", options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])], current: Some(0) },
-            Row { name: "style", options: vec![Choice::act("video", ID, &["style", "FOLLOW_VIDEO"]), Choice::act("sound", ID, &["style", "FOLLOW_AUDIO"]), Choice::act("colour", ID, &["style", "FOLLOW_COLOR"])], current: Some(0) },
+            Row { name: "power", options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])], current: Some(0), help: None },
+            Row { name: "style", options: vec![Choice::act("video", ID, &["style", "FOLLOW_VIDEO"]), Choice::act("sound", ID, &["style", "FOLLOW_AUDIO"]), Choice::act("colour", ID, &["style", "FOLLOW_COLOR"])], current: Some(0), help: None },
             Row {
                 name: "setting",
                 options: ["standard", "natural", "vivid", "game", "comfort", "relax"].iter().map(|s| Choice::act(*s, ID, &["style", "FOLLOW_VIDEO", s])).collect(),
                 current: Some(0),
+                help: None,
             },
-            Row { name: "hue", options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])], current: Some(0) },
-            Row { name: "lights", options: lights, current: None },
+            Row { name: "ambi+hue", options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])], current: Some(0), help: Some("sync Hue bulbs with the TV") },
+            Row { name: "lights", options: lights, current: None, help: None },
         ],
     };
     st.panels = vec!["ambilight"];
@@ -809,6 +810,8 @@ fn ambilight_panel_edits_in_place() {
     // the rows are the choices; "control" (not a row) still said; no colour blocks twice
     assert!(s.contains("power") && s.contains(" video ") && s.contains(" standard ") && s.contains("control"), "{s}");
     assert!(!s.contains("follow video, standard"), "the style isn't said twice: {s}");
+    // Ambilight+Hue: its own toggle, said what it does
+    assert!(s.contains("ambi+hue") && s.contains("sync Hue bulbs with the TV"), "{s}");
     // L: the cursor in the panel, no pop-up
     a.apply(Input::AmbilightDialog, &h);
     assert_eq!(a.overlay, Overlay::Ambilight { row: 0, col: 0 });

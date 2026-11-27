@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 808
+assertion_line: 809
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -11,7 +11,8 @@ expression: s
 │audio    AAC-LC  AAC                                                   │style     video   sound   colour             ││
 │do        t  list   /  search                                          │setting   standard   natural   vivid   game  ││
 │                                                                       │          comfort   relax                    ││
-│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │hue       on   off                           ││
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │ambi+hue  on   off                           ││
+│                                                                       │          sync Hue bulbs with the TV         ││
 │                                                                       │lights    all           │                    ││
 │                                                                       └─────────────────────────────────────────────┘│
 │                                                                       ┌ system - i hides ───────────────────────────┐│
@@ -24,7 +25,6 @@ expression: s
 │                                                                       │swap     ━━━┃── 316/512 MB                   ││
 │                                                                       │load     4.82 3.10 2.40                      ││
 │                                                                       └─────────────────────────────────────────────┘│
-│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

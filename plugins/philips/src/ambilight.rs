@@ -370,6 +370,7 @@ pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
         name: "power",
         options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])],
         current: Some(if state.power { 0 } else { 1 }),
+        help: None,
     }];
     let style = if state.outside() { None } else { state.style.as_deref() };
     let setting = state.setting.as_deref();
@@ -396,11 +397,13 @@ pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
             Some("FOLLOW_COLOR") => Some(2),
             _ => None,
         },
+        help: None,
     });
     let settings = |table: &[(&'static str, &'static str)], style: &'static str| Row {
         name: "setting",
         options: table.iter().map(|(n, tv)| Choice::act(*n, ID, &["style", style, tv])).collect(),
         current: table.iter().position(|(_, tv)| Some(*tv) == setting),
+        help: None,
     };
     match style {
         Some("FOLLOW_VIDEO") => out.push(settings(VIDEO, "FOLLOW_VIDEO")),
@@ -410,9 +413,10 @@ pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
     }
     if let Some(h) = state.hue {
         out.push(Row {
-            name: "hue",
+            name: "ambi+hue",
             options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])],
             current: Some(if h { 0 } else { 1 }),
+            help: Some("sync Hue bulbs with the TV"),
         });
     }
     // a light asks for its colour (the TV hands the lights over)
@@ -427,7 +431,7 @@ pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
         colour: Some(l.rgb),
         run: Run::Ask { prompt: format!("Colour for {} {}:", l.side, l.n), hint: HINT, id: ID, args: vec!["one".into(), l.side.clone(), l.n.to_string()] },
     }));
-    out.push(Row { name: "lights", options, current: None });
+    out.push(Row { name: "lights", options, current: None, help: None });
     out
 }
 
@@ -546,7 +550,7 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
          \x20                          who drives the lights: the TV (internal), or\n\
          \x20                          something outside it, such as tveee's 'set' or\n\
          \x20                          a program like Hyperion (manual, expert)\n\
-         \x20 hue on|off               Ambilight+Hue (Philips Hue lamps joining in)\n\
+         \x20 hue on|off               Ambilight+Hue: sync Hue bulbs with the TV\n\
          \n\
          Picking a style gives the lights back to the TV.",
     )]
@@ -627,7 +631,8 @@ mod tests {
         let st = State { power: true, mode: Some("internal".into()), style: Some("FOLLOW_VIDEO".into()), setting: Some("VIVID".into()), hue: Some(true), sides: vec![] };
         let lights = vec![Light { layer: 1, side: "left".into(), n: 0, rgb: (1, 2, 3) }];
         let r = rows(&st, &lights);
-        assert_eq!(r.iter().map(|r| r.name).collect::<Vec<_>>(), ["power", "style", "setting", "hue", "lights"]);
+        assert_eq!(r.iter().map(|r| r.name).collect::<Vec<_>>(), ["power", "style", "setting", "ambi+hue", "lights"]);
+        assert_eq!(r[3].help, Some("sync Hue bulbs with the TV"));
         assert_eq!((r[1].current, r[2].current), (Some(0), Some(2)));
         let act = |args: &[&str]| tveee_core::panel::Run::Act { id: "ambilight.change", args: args.iter().map(|a| a.to_string()).collect() };
         // going back to video keeps vivid; sound starts at its default
