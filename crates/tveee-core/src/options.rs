@@ -18,6 +18,8 @@ pub struct Opt {
 pub const SCROLL_ANIMATION: &str = "scroll-animation";
 pub const FAST_KEYS: &str = "fast-keys";
 pub const SHOW_PACKAGES: &str = "show-packages";
+pub const LOW_BANDWIDTH: &str = "low-bandwidth";
+pub const SHOW_LOAD: &str = "show-load";
 
 pub const OPTIONS: &[Opt] = &[
     Opt {
@@ -37,6 +39,18 @@ pub const OPTIONS: &[Opt] = &[
         label: "package names",
         help: "the UI's launcher shows each app's package (com.example.app) too; # there toggles it",
         default: false,
+    },
+    Opt {
+        name: LOW_BANDWIDTH,
+        label: "low bandwidth",
+        help: "the UI reads the TV every 4s, not every second (what you do still shows at once)",
+        default: false,
+    },
+    Opt {
+        name: SHOW_LOAD,
+        label: "load & memory",
+        help: "the UI's top line shows the TV's load and free memory (off: not read, unless the system panel is open)",
+        default: true,
     },
 ];
 
@@ -64,13 +78,6 @@ static SET: Mutex<Option<Vec<(String, bool)>>> = Mutex::new(None);
 fn saved() -> Vec<(String, bool)> {
     let mut set = SET.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     set.get_or_insert_with(|| file().and_then(|f| std::fs::read_to_string(f).ok()).map(|t| parse(&t)).unwrap_or_default()).clone()
-}
-
-/// Use `all` as what's saved, without reading the file (tests: never the
-/// real one). Saving still writes the file, so tests don't save.
-#[doc(hidden)]
-pub fn preset(all: Vec<(String, bool)>) {
-    *SET.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(all);
 }
 
 /// Whether option `name` is on (its default if it was never set).

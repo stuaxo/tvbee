@@ -64,6 +64,10 @@ pub fn key_name(code: u32) -> &'static str {
 
 /// How often the refresh reads what's on.
 pub const REFRESH: Duration = Duration::from_secs(1);
+/// How often the TV is read with the "low bandwidth" option on.
+pub const REFRESH_LOW: Duration = Duration::from_secs(4);
+/// How often the system figures are read with it on (while they're shown).
+pub const SYSTEM_LOW: Duration = Duration::from_secs(10);
 
 /// What one fast-forward/rewind key press is assumed to skip, for apps we
 /// can't seek exactly.
@@ -120,6 +124,9 @@ pub enum Action {
     Favourite(crate::provider::Channel, bool),
     /// Show or hide the app in front's music visualiser (switch).
     Visualiser,
+    /// The system panel opened (true) or closed: the refresh reads the
+    /// system figures while it's open (or the top line shows them).
+    WatchSystem(bool),
     Refresh,
 }
 
@@ -218,7 +225,18 @@ impl Engine {
         spawn_named("preview", move || preview_lane(&sh, &preview_msgs));
         let sh = Arc::clone(&shared);
         spawn_named("push", move || push_lane(&sh, &push_wake));
-        let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None, last_window: String::new(), last_power: String::new(), last_activity: None, said: String::new() };
+        let refresher = Refresher {
+            tv: shared.tv(),
+            shared: Arc::clone(&shared),
+            channel: None,
+            named: None,
+            last_window: String::new(),
+            last_power: String::new(),
+            last_activity: None,
+            said: String::new(),
+            system: None,
+            read_at: Instant::now(),
+        };
         spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
         let _ = act_tx.send(Action::Refresh);
         // the keeper: what the lanes find, into the state

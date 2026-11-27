@@ -24,7 +24,10 @@ fn app_with(st: TvState, actions: Vec<ActionDescriptor>) -> App {
     super::tests::install_all();
     let (tx, _) = std::sync::mpsc::channel();
     let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(st))));
-    App::new("192.168.1.19".into(), handle, actions, true)
+    let mut a = App::new("192.168.1.19".into(), handle, actions, true);
+    // the options as they come: not the real file's
+    a.opts = Some(Vec::new());
+    a
 }
 
 /// Some actions as plugins describe them, for the palette and menu.
@@ -408,9 +411,9 @@ fn plugin_states() -> Vec<tveee_core::plugin::PluginState> {
 
 #[test]
 fn options_plugins_tab_desktop() {
-    // what's saved: kodi chosen on; nothing read from the real file
-    tveee_core::options::preset(vec![("plugin.kodi".to_string(), true)]);
     let mut a = app(kodi_paused());
+    // what's saved: kodi chosen on (this app's own options)
+    a.opts = Some(vec![("plugin.kodi".to_string(), true)]);
     a.plugins = plugin_states();
     a.overlay = Overlay::Options(0);
     let opts = screen(&mut a, DESKTOP);
@@ -433,4 +436,34 @@ fn options_plugins_tab_desktop() {
     assert_eq!(a.overlay, Overlay::Options(1));
     a.options_key(1, KeyCode::Tab);
     assert!(!a.options_plugins);
+}
+
+#[test]
+fn load_hidden_and_system_watched() {
+    // load & memory off: not on the top line
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(kodi_paused()))));
+    let mut a = App::new("192.168.1.19".into(), handle, Vec::new(), true);
+    a.opts = Some(vec![(tveee_core::options::SHOW_LOAD.to_string(), false)]);
+    let s = screen(&mut a, CORNER);
+    let top = s.lines().nth(1).unwrap_or_default();
+    assert!(!top.contains("load") && !top.contains("310 MB") && top.contains("[F]ree memory"), "{top}");
+    // the system panel opened: the engine is told to read the figures; closed: told to stop
+    a.info = Some(true);
+    let _ = screen(&mut a, CORNER);
+    assert!(rx.try_iter().any(|x| x == Action::WatchSystem(true)));
+    a.info = Some(false);
+    let _ = screen(&mut a, CORNER);
+    assert!(rx.try_iter().any(|x| x == Action::WatchSystem(false)));
+    // toggled back on in the options: shown at once (from the figures it
+    // has), and a read asked for straight away
+    let row = tveee_core::options::OPTIONS.iter().position(|o| o.name == tveee_core::options::SHOW_LOAD).expect("the option");
+    a.toggle_option(row);
+    assert!(rx.try_iter().any(|x| x == Action::Refresh));
+    let s = screen(&mut a, CORNER);
+    assert!(s.lines().nth(1).unwrap_or_default().contains("load 4.82"), "{s}");
+    // and off again: gone at once
+    a.toggle_option(row);
+    let s = screen(&mut a, CORNER);
+    assert!(!s.lines().nth(1).unwrap_or_default().contains("load"), "{s}");
 }
