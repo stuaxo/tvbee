@@ -97,16 +97,67 @@ fn inputs(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn channel(c: &Cx, args: &[String]) -> Result<Output> {
-    match args.first().map(String::as_str) {
-        Some("up") => c.tv.key(166).map(|()| "channel up".into()),
-        Some("down") => c.tv.key(167).map(|()| "channel down".into()),
-        Some(n) if !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()) => {
-            channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))?;
-            Ok(format!("channel {n}").into())
-        }
-        _ => usage("usage: tveee channel up|down|<number>"),
+/// Whether `window` (`pkg/activity`) is `pkg`'s.
+fn is_of(window: Option<&str>, pkg: &str) -> bool {
+    window.is_some_and(|w| w.split('/').next() == Some(pkg))
+}
+
+/// The TV's own live TV app at the front (the channel keys only change
+/// channel there): brought forward if something else is, and waited for.
+/// Returns what to say about it ("" when it was there already, or there's
+/// no live TV app here).
+fn live_tv_in_front(tv: &crate::tv::Tv) -> Result<String> {
+    use crate::builtin::apps;
+    let Some(app) = apps::all().iter().find(|a| matches!(a.kind, apps::Kind::LiveTv)) else { return Ok(String::new()) };
+    let pkg = app.package();
+    let front = || crate::builtin::info::focus_window(&tv.window_dump().unwrap_or_default());
+    if is_of(front().as_deref(), pkg) {
+        return Ok(String::new());
     }
+    apps::bring_to_front(tv, app.target)?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    while !is_of(front().as_deref(), pkg) {
+        if std::time::Instant::now() >= until {
+            return crate::error::failed(format!("channel: couldn't bring {} to the front (it's showing {})", app.name, front().unwrap_or_else(|| "nothing".into())));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    // it takes the keys a moment after it shows
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    Ok(format!("brought {} to the front; ", app.name))
+}
+
+fn channel(c: &Cx, args: &[String]) -> Result<Output> {
+    let arg = args.first().map(String::as_str);
+    let number = arg.filter(|n| !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()));
+    if !matches!(arg, Some("up" | "down")) && number.is_none() {
+        return usage("usage: tveee channel up|down|<number>");
+    }
+    let first = live_tv_in_front(c.tv)?;
+    let said = match (arg, number) {
+        (Some("up"), _) => c.tv.key(166).map(|()| "channel up".to_string())?,
+        (Some("down"), _) => c.tv.key(167).map(|()| "channel down".to_string())?,
+        // a number: tuned exactly where a provider can (as 'watch'), else typed
+        (_, Some(n)) => {
+            let p = crate::provider::all().iter().copied().find(|p| p.channels().is_some());
+            let cx = crate::provider::Cx { tv: c.tv };
+            let tuned = p.and_then(|p| {
+                let chans = p.channels()?;
+                let list = chans.list(&cx).ok()?;
+                let ch = list.iter().find(|ch| ch.number.as_deref() == Some(n))?;
+                Some(chans.tune(&cx, ch))
+            });
+            match tuned {
+                Some(r) => r?,
+                None => {
+                    channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))?;
+                    format!("channel {n}")
+                }
+            }
+        }
+        _ => unreachable!("checked above"),
+    };
+    Ok(format!("{first}{said}").into())
 }
 
 macro_rules! input_item {
@@ -152,6 +203,16 @@ pub fn actions() -> Vec<A> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn whose_window() {
+        use super::is_of;
+        assert!(is_of(Some("org.droidtv.zapster/org.droidtv.zapster.playtv.activity.PlayTvActivity"), "org.droidtv.zapster"));
+        assert!(!is_of(Some("org.droidtv.zapster2/x"), "org.droidtv.zapster"));
+        assert!(!is_of(Some("org.xbmc.kodi/.Splash"), "org.droidtv.zapster"));
+        assert!(!is_of(None, "org.droidtv.zapster"));
+    }
+
     use super::*;
 
     #[test]
