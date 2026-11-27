@@ -317,6 +317,9 @@ pub struct ListItem {
     /// A folder (choosing it opens another list) rather than something to
     /// play.
     pub folder: bool,
+    /// The part of the list it's in ("Chapters", "Links"): a subheading is
+    /// shown where it changes. None: no subheadings.
+    pub section: Option<String>,
     /// What choosing it does.
     pub go: crate::more::Go,
 }

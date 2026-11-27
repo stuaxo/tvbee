@@ -524,7 +524,7 @@ pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_
     let mut items: Vec<ListItem> = d
         .chapters
         .iter()
-        .map(|c| ListItem { id: chapter_id(c), label: c.title.clone(), meta: Some(tveee_core::nowplaying::clock(c.start)), folder: false, go: Go::Seek(c.start) })
+        .map(|c| ListItem { section: Some("Chapters".into()), id: chapter_id(c), label: c.title.clone(), meta: Some(tveee_core::nowplaying::clock(c.start)), folder: false, go: Go::Seek(c.start) })
         .collect();
     // the links (the chapters are in them too, as seeks: those are above)
     items.extend(d.links.iter().filter(|l| !matches!(l.go, Go::Seek(_))).map(|l| {
@@ -532,12 +532,12 @@ pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_
             Go::Link(u) => format!("link:{u}"),
             Go::Seek(t) => format!("seek:{t}"),
         };
-        ListItem { id, label: l.label.clone(), meta: Some("link".into()), folder: false, go: l.go.clone() }
+        ListItem { section: Some("Links".into()), id, label: l.label.strip_prefix("channel: ").map_or_else(|| l.label.clone(), |c| format!("{c} (channel)")), meta: None, folder: false, go: l.go.clone() }
     }));
     if items.is_empty() {
         return None;
     }
-    let title = if d.chapters.is_empty() { "Links" } else { "Chapters & links" };
+    let title = if d.chapters.is_empty() { "Links" } else { "Chapters and links" };
     Some(ContextList { title: title.into(), kind: "chapters", key: link.to_string(), items, at: pos.and_then(|p| chapter_at(&d.chapters, p)) })
 }
 
@@ -624,7 +624,10 @@ mod tests {
         let l = chapters_list(link, &d, Some(60.0)).expect("a list");
         // the chapters (seeking), then the links once each (no chapter twice)
         let labels: Vec<&str> = l.items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(labels, ["Intro", "Could anybody do this?", "channel: RelfWolf", "Claude Code"]);
+        assert_eq!(labels, ["Intro", "Could anybody do this?", "RelfWolf (channel)", "Claude Code"]);
+        // two parts, with their subheadings
+        let parts: Vec<Option<&str>> = l.items.iter().map(|i| i.section.as_deref()).collect();
+        assert_eq!(parts, [Some("Chapters"), Some("Chapters"), Some("Links"), Some("Links")]);
         assert_eq!(l.items[1].go, Go::Seek(54.0));
         assert_eq!(l.items[1].meta.as_deref(), Some("0:54"));
         // the chapter playing at 1:00 is the second

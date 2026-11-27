@@ -589,7 +589,13 @@ fn host(url: &str) -> &str {
 pub fn list_lines(l: &crate::provider::ContextList, app: &str) -> Vec<String> {
     let w = l.items.iter().map(|i| i.label.chars().count() + usize::from(i.folder)).max().unwrap_or(0).min(48);
     let mut out = vec![format!("{} ({app}, {} {})", l.title, l.items.len(), if l.items.len() == 1 { "item" } else { "items" })];
+    let mut part = None;
     for (n, i) in l.items.iter().enumerate() {
+        // a part's subheading where it starts
+        if i.section.is_some() && i.section != part {
+            out.push(format!("─ {}", i.section.as_deref().unwrap_or_default()));
+        }
+        part.clone_from(&i.section);
         let mark = if l.at == Some(n) { if l.kind == "folder" { "›" } else { "▶" } } else { " " };
         let name = format!("{}{}", i.label, if i.folder { "/" } else { "" });
         let meta = i.meta.as_deref().map(|m| format!("  {m}")).unwrap_or_default();
@@ -784,13 +790,22 @@ mod tests {
     #[test]
     fn list_printed() {
         use crate::provider::{ContextList, ListItem};
-        let item = |label: &str, folder, meta: Option<&str>| ListItem { id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
+        let item = |label: &str, folder, meta: Option<&str>| ListItem { section: None, id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
         let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], at: Some(1) };
         let lines = list_lines(&l, "Kodi");
         assert_eq!(lines[0], "Artists (Kodi, 3 items)");
         assert_eq!(lines[1], "    1  Portishead/");
         assert_eq!(lines[2], "›   2  Radiohead/       9 albums");
         assert_eq!(lines[3], "    3  Exit Music.flac");
+        // parts: a subheading where each starts
+        let mut l = l;
+        l.items[0].section = Some("Folders".into());
+        l.items[1].section = Some("Folders".into());
+        l.items[2].section = Some("Files".into());
+        let lines = list_lines(&l, "Kodi");
+        assert_eq!(lines[1], "─ Folders");
+        assert_eq!(lines[4], "─ Files");
+        assert_eq!(lines[5], "    3  Exit Music.flac");
     }
 
     #[test]
