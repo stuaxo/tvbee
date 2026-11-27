@@ -306,8 +306,9 @@ crates beyond std.
   - `:` or `ctrl+p`: every command, found by typing; it opens over whatever
     is open and closes back to it.
   - `g`: the live TV guide. `F2` or `a`: the apps.
-  - `t`: the list the app in front shows (Kodi's folder or add-on listing),
-    following Kodi's highlight; ⏎ opens a folder or plays.
+  - `t`: the list the app in front shows (Kodi's folder or add-on listing,
+    following Kodi's highlight; YouTube's chapters and links, following the
+    chapter playing); ⏎ opens a folder, plays, or seeks to the chapter.
   - The log (`:` then "log"): select whole lines (shift+↑↓, `v`, or the
     mouse) and `y` copies them; `s` saves the log to a file.
 - **Options** (`,`), also `tveee options`: *low bandwidth* (read the TV every
