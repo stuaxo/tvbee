@@ -143,6 +143,19 @@ fn guide_filter_ctrl_u_clears() {
     assert_eq!(a.prompt, "");
 }
 
+#[test]
+fn guide_ctrl_p_opens_the_commands() {
+    let mut a = app(standby());
+    let (tx, _) = std::sync::mpsc::channel();
+    let h = Handle::new(tx, Arc::new(Mutex::new(Arc::new(TvState::seeded(None)))));
+    a.overlay = Overlay::Guide { tab: GuideTab::All, at: 0 };
+    // ":" filters (programme names have them)
+    a.guide_key(GuideTab::All, 0, KeyCode::Char(':'), KeyModifiers::NONE, &h);
+    assert_eq!(a.prompt, ":");
+    a.guide_key(GuideTab::All, 0, KeyCode::Char('p'), KeyModifiers::CONTROL, &h);
+    assert!(matches!(a.overlay, Overlay::Palette(_)), "{:?}", a.overlay);
+}
+
 /// Kodi playing from a catch-up add-on: a very long link.
 fn kodi_catchup() -> TvState {
     let mut st = kodi_paused();

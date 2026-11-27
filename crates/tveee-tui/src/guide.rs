@@ -292,6 +292,13 @@ impl App {
                 self.overlay = Overlay::None;
                 return;
             }
+            // the commands, from here too (":" is filter text: programme
+            // names have colons)
+            KeyCode::Char('p') if mods.contains(KeyModifiers::CONTROL) => {
+                self.overlay = Overlay::None;
+                self.open_palette();
+                return;
+            }
             KeyCode::Enter => {
                 self.watch_channel(at, actions);
                 return;
