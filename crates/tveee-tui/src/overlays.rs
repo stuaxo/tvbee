@@ -353,12 +353,25 @@ impl App {
             return;
         }
         let Some(o) = tveee_core::options::OPTIONS.get(i) else { return };
-        let on = !tveee_core::options::get(o.name);
-        self.note = match tveee_core::options::set(o.name, on) {
+        let on = !self.opt(o.name);
+        let saved = match &mut self.opts {
+            // this app's own options (tests): changed here, not saved
+            Some(v) => {
+                v.push((o.name.to_string(), on));
+                Ok(())
+            }
+            None => tveee_core::options::set(o.name, on),
+        };
+        self.note = match saved {
             Ok(()) => format!("{}: {}", o.label, if on { "on" } else { "off" }),
             Err(e) => format!("couldn't save the option: {e}"),
         };
         self.overlay = Overlay::Options(i);
+        // what the refresh reads changed: a read now, so it shows at once
+        // (load and memory back on weren't being read)
+        if [tveee_core::options::SHOW_LOAD, tveee_core::options::LOW_BANDWIDTH].contains(&o.name) {
+            let _ = self.engine.send(Action::Refresh);
+        }
     }
 
     /// Open the search box on `pkg` (or the app in front).

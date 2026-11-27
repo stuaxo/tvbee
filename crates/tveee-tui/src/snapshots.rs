@@ -451,4 +451,15 @@ fn load_hidden_and_system_watched() {
     a.info = Some(false);
     let _ = screen(&mut a, CORNER);
     assert!(rx.try_iter().any(|x| x == Action::WatchSystem(false)));
+    // toggled back on in the options: shown at once (from the figures it
+    // has), and a read asked for straight away
+    let row = tveee_core::options::OPTIONS.iter().position(|o| o.name == tveee_core::options::SHOW_LOAD).expect("the option");
+    a.toggle_option(row);
+    assert!(rx.try_iter().any(|x| x == Action::Refresh));
+    let s = screen(&mut a, CORNER);
+    assert!(s.lines().nth(1).unwrap_or_default().contains("load 4.82"), "{s}");
+    // and off again: gone at once
+    a.toggle_option(row);
+    let s = screen(&mut a, CORNER);
+    assert!(!s.lines().nth(1).unwrap_or_default().contains("load"), "{s}");
 }
