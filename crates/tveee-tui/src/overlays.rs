@@ -40,6 +40,9 @@ pub enum Overlay {
     /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
     /// the filter typed is `App::prompt`.
     Guide { tab: GuideTab, at: u32 },
+    /// The list the app in front shows (`t`), item `sel` (an index into it)
+    /// highlighted; the filter typed is `App::prompt`.
+    List { sel: usize },
 }
 
 /// An app the search box can search in, and how.
@@ -165,6 +168,8 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         Overlay::AppActions { tab, sel, at } => (Overlay::AppActions { tab, sel, at }, None),
         // handled by App::guide_key
         Overlay::Guide { tab, at } => (Overlay::Guide { tab, at }, None),
+        // handled by App::list_key
+        Overlay::List { sel } => (Overlay::List { sel }, None),
         // handled by App::options_key
         Overlay::Options(i) => (Overlay::Options(i), None),
         Overlay::Confirm { id, yes } => match code {
@@ -268,6 +273,8 @@ pub(super) const HELP: &str = " everywhere
             YouTube's storyboards; else a screenshot every few seconds)
    /        search the app in front (tab picks another app)
    z        music visualiser: show or hide it (Kodi, while it plays music)
+   t        the list the app shows (Kodi's folder or add-on): choose from it,
+            following Kodi's highlight (type to filter)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
@@ -410,6 +417,7 @@ impl App {
             Overlay::Menu(sel) => self.draw_menu(f, sel),
             Overlay::Options(sel) => self.draw_options(f, sel),
             Overlay::Guide { tab, at } => self.draw_guide(f, tab, at),
+            Overlay::List { sel } => self.draw_list(f, sel),
             Overlay::Apps { tab, sel } => self.draw_apps(f, tab, sel, false),
             Overlay::AppActions { tab, sel, at } => self.draw_app_actions(f, tab, sel, at),
             Overlay::Search(at) => self.draw_search(f, at),

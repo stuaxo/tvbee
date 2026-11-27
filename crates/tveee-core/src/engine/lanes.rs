@@ -24,7 +24,7 @@ pub enum Lane {
 pub fn lane(a: &Action) -> Lane {
     match a {
         Action::Key(_) | Action::Text(_) => Lane::Keys,
-        Action::LoadGuide | Action::CheckRunning | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) => Lane::Read,
+        Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => Lane::Read,
         Action::PrefetchInfo => Lane::Idle,
         _ => Lane::Act,
     }
@@ -50,6 +50,10 @@ pub fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender
         }
         if let Action::WatchSystem(on) = a {
             shared.system_watch.store(on, Ordering::Relaxed);
+            continue;
+        }
+        if let Action::WatchList(on) = a {
+            shared.list_watch.store(on, Ordering::Relaxed);
             continue;
         }
         let l = lane(&a);
@@ -152,6 +156,8 @@ pub struct Shared {
     pub preview: AtomicBool,
     /// The system panel is open: the refresh reads the system figures.
     pub system_watch: AtomicBool,
+    /// The list pane is open: the refresh reads where the list is.
+    pub list_watch: AtomicBool,
     /// A picture of what an app's player is playing, for the preview.
     pub art: std::sync::Mutex<Option<ArtNow>>,
 
@@ -186,6 +192,7 @@ impl Shared {
             panels: Default::default(),
             preview: AtomicBool::new(false),
             system_watch: AtomicBool::new(false),
+            list_watch: AtomicBool::new(false),
             art: Default::default(),
 
             apps_sent: std::sync::Mutex::new(false),
@@ -503,6 +510,11 @@ impl Refresher {
             },
             _ => activity,
         };
+        // where the list is, while the ui shows it (one small read)
+        let list_place = match (pkg.as_deref(), awake && self.shared.list_watch.load(Ordering::Relaxed)) {
+            (Some(p), true) => crate::provider::for_package(p).and_then(|pr| pr.player()).filter(|pl| pl.has_list()).and_then(|pl| pl.list_place(&self.tv).handled().flatten()),
+            _ => None,
+        };
         let activity = activity.map(|a| nowplaying::keep_title(self.last_activity.as_ref(), a));
         self.last_activity.clone_from(&activity);
         *lock(&self.shared.art) = art;
@@ -520,6 +532,7 @@ impl Refresher {
             focus: info::focus_window(&window),
             system,
             panels,
+            list_place,
         })
     }
 }
@@ -686,6 +699,20 @@ impl Actor {
                 String::new()
             }
             Action::Visualiser => crate::builtin::media::visualiser_of(&self.tv, None)?,
+            Action::ListGo(to) => {
+                let pkg = lock(&self.shared.pkg).clone().unwrap_or_default();
+                let player = crate::provider::for_package(&pkg).and_then(|p| p.player());
+                let said = match player.map(|p| p.go(&self.tv, &to).or_fallback()) {
+                    Some(Ok(Some(said))) => said,
+                    Some(Err(e)) => return Err(e),
+                    _ => crate::builtin::info::go(&self.tv, &pkg, &to)?,
+                };
+                // it changed what the app shows: its list, read again now
+                // rather than waiting for the refresh to notice
+                std::thread::sleep(Duration::from_millis(600));
+                let _ = tx.send(Msg::List(read_list(&self.shared, &self.tv)));
+                said
+            }
             Action::Refresh => "refreshed".into(),
             // other lanes' actions don't come here
             Action::PairStart(id) => {
@@ -703,9 +730,16 @@ impl Actor {
                 crate::pairing::save(id, &self.tv.ip, &saved)?;
                 "paired with the TV".into()
             }
-            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::CheckRunning | Action::PrefetchInfo | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) => String::new(),
+            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::PrefetchInfo | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => String::new(),
         })
     }
+}
+
+/// The app in front's list, if its player has one and is showing it.
+pub fn read_list(shared: &Shared, tv: &Tv) -> std::result::Result<Option<crate::provider::ContextList>, String> {
+    let pkg = lock(&shared.pkg).clone();
+    let Some(player) = pkg.as_deref().and_then(crate::provider::for_package).and_then(|p| p.player()).filter(|p| p.has_list()) else { return Ok(None) };
+    player.list(tv).or_fallback().map_err(|e| e.to_string())
 }
 
 /// The read lane: things the user is waiting to see, kept apart from
@@ -720,6 +754,9 @@ pub fn reads(shared: &Shared, actions: &Receiver<Action>, tx: &Sender<Msg>) {
             match a {
                 Action::LoadGuide => {
                     let _ = tx.send(Msg::Guide(load_guide(tv).map_err(|e| e.to_string())));
+                }
+                Action::LoadList => {
+                    let _ = tx.send(Msg::List(read_list(shared, tv)));
                 }
                 // the launcher is open: its apps can't wait for a lull
                 Action::CheckRunning => std::thread::scope(|sc| {

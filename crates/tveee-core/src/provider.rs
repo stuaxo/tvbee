@@ -309,6 +309,8 @@ pub struct ContextList {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListItem {
+    /// What it is, to find it again (Kodi: its path); may be empty.
+    pub id: String,
     pub label: String,
     /// More about it, to the right: a duration, a year, a count.
     pub meta: Option<String>,
@@ -317,6 +319,23 @@ pub struct ListItem {
     pub folder: bool,
     /// What choosing it does.
     pub go: crate::more::Go,
+}
+
+impl ContextList {
+    /// The item the app has highlighted, by its id, else its label.
+    pub fn find(&self, p: &ListPlace) -> Option<usize> {
+        self.items.iter().position(|i| !p.focus_id.is_empty() && i.id == p.focus_id).or_else(|| self.items.iter().position(|i| i.label == p.focus_label))
+    }
+}
+
+/// Where the app's list is now: which list ([`ContextList::key`]) and its
+/// highlighted row. Read every refresh while the ui shows the list, so it's
+/// cheap; the items are only read again when the key changes.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ListPlace {
+    pub key: String,
+    pub focus_label: String,
+    pub focus_id: String,
 }
 
 /// An app tveee can ask what it's playing and tell what to do, through an
@@ -330,6 +349,15 @@ pub trait Player: Sync {
     /// Show its music visualiser (`Some(true)`), go back from it
     /// (`Some(false)`) or switch (None); returns whether it's showing now.
     fn visualiser(&self, _tv: &crate::tv::Tv, _want: Option<bool>) -> Outcome<bool> {
+        Outcome::Fallback
+    }
+    /// Whether it can show lists ([`Player::list`]): the ui offers its list
+    /// pane for it.
+    fn has_list(&self) -> bool {
+        false
+    }
+    /// Where its list is now (cheap), or None when it isn't showing one.
+    fn list_place(&self, _tv: &crate::tv::Tv) -> Outcome<Option<ListPlace>> {
         Outcome::Fallback
     }
     /// The list on its screen to choose from, if there is one (fall back:

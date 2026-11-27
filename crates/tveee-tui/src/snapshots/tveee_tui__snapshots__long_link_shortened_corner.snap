@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 178
+assertion_line: 179
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
@@ -10,7 +10,7 @@ expression: s
 │progress ━━━━━━━━━━━━━┃───────── 27:56 / 48:47 (57%)      │
 │url      plugin://plugin.video.catchuptva…abcdef0123456789│
 │audio    AAC-LC  AAC                                      │
-│do        /  search                                       │
+│do        t  list   /  search                             │
 │                                                          │
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60   │
 │                                                          │

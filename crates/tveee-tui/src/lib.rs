@@ -33,6 +33,7 @@ mod drawing;
 mod links;
 mod logview;
 mod listnav;
+mod ctxlist;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -92,6 +93,11 @@ struct App {
     /// The pop-up the command palette opened over (the log, the guide, ...)
     /// and its typed text: back to it when the palette closes.
     under: Option<(Overlay, String)>,
+    /// Where the app's list was at the last refresh (the list pane follows
+    /// its highlight when it moves).
+    list_seen: Option<tveee_core::provider::ListPlace>,
+    /// The refresh has been asked to read where the list is.
+    list_watching: bool,
     /// The options dialog's tab: its options, or the plugins.
     options_plugins: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
@@ -321,6 +327,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     app.options_key(i, k.code);
                 } else if let Overlay::Guide { tab, at } = app.overlay {
                     app.guide_key(tab, at, k.code, k.modifiers, actions);
+                } else if let Overlay::List { sel } = app.overlay {
+                    app.list_key(sel, k.code, k.modifiers, actions);
                 } else if let Overlay::Search(at) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
                     let (next, action) = search_key(at, k.code, k.modifiers, &mut text, &app.search_targets);
@@ -534,6 +542,8 @@ impl App {
             opts: None,
             system_watching: false,
             under: None,
+            list_seen: None,
+            list_watching: false,
             options_plugins: false,
             plugins: Vec::new(),
             prompt: String::new(),
@@ -570,6 +580,7 @@ impl App {
                 if matches!(change, Change::Snapshot | Change::Seeked) {
                     self.frozen = None;
                 }
+                self.list_sync(change);
                 match change {
                     // while an action settles the latest snapshot is only
                     // shown once the action has got there
@@ -722,6 +733,7 @@ impl App {
                 self.note = "the music visualiser...".into();
                 let _ = actions.send(Action::Visualiser);
             }
+            Input::OpenList => self.open_list(actions),
             Input::OpenOptions => self.overlay = Overlay::Options(0),
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
@@ -921,6 +933,9 @@ impl App {
             (Overlay::Guide { .. }, Some(Hit::Popup)) => {}
             // clicking outside closes it
             (Overlay::Guide { .. }, _) => self.overlay = Overlay::None,
+            (Overlay::List { .. }, Some(Hit::ListRow(i))) => self.list_choose(i, actions),
+            (Overlay::List { .. }, Some(Hit::Popup)) => {}
+            (Overlay::List { .. }, _) => self.close_list(actions),
             (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) => {
                 let rows = tab_list(self.st.apps_list(), tab);
                 let target = rows.get(i).map(|e| e.target.clone());
@@ -995,6 +1010,7 @@ impl App {
             }
             Overlay::Options(i) => self.options_key(i, if up { KeyCode::Up } else { KeyCode::Down }),
             Overlay::Guide { tab, at } => self.guide_key(tab, at, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE, actions),
+            Overlay::List { sel } => self.list_key(sel, if up { KeyCode::Up } else { KeyCode::Down }, KeyModifiers::NONE, actions),
             Overlay::None => {
                 let _ = actions.send(Action::Volume(if up { 1 } else { -1 }));
             }

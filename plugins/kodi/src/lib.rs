@@ -520,6 +520,16 @@ impl tveee_core::provider::Player for Kodi {
             r => r.into(),
         }
     }
+    fn has_list(&self) -> bool {
+        true
+    }
+    fn list_place(&self, tv: &Tv) -> Outcome<Option<tveee_core::provider::ListPlace>> {
+        match browse::place(tv) {
+            Ok(p) => Outcome::Handled(p.as_ref().map(browse::list_place)),
+            Err(Error::Unavailable(_)) => Outcome::Fallback,
+            Err(e) => Outcome::Failed(e),
+        }
+    }
     fn list(&self, tv: &Tv) -> Outcome<tveee_core::provider::ContextList> {
         match browse::list(tv) {
             Ok(Some(l)) => Outcome::Handled(l),

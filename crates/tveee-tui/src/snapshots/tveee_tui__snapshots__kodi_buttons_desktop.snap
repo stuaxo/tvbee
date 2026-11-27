@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 333
+assertion_line: 334
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -9,7 +9,7 @@ expression: s
 │title    Episode 3 (Off-Road)                                          │power    Awake                               ││
 │progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │app      [player] org.xbmc.kodi              ││
 │audio    AAC-LC  AAC                                                   │memory   1032/1342 MB used, 310 MB free      ││
-│do        .k  next subtitles   .a  next audio track   /  search        │1342 MB                                      ││
+│do        .k  next subtitles   t  list   /  search                     │1342 MB                                      ││
 │                                                                       │                                             ││
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │last 0s                                      ││
 │                                                                       │swap     ━━━┃── 316/512 MB                   ││

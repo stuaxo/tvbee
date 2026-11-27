@@ -55,6 +55,11 @@ pub struct TvState {
     pub guide: Option<Arc<std::result::Result<Guide, String>>>,
     /// The guide is being read afresh (the last copy is still here).
     pub guide_loading: bool,
+    /// The app in front's list (the list pane), as last read: None until
+    /// read; Ok(None): it isn't showing one.
+    pub list: Option<Arc<std::result::Result<Option<crate::provider::ContextList>, String>>>,
+    /// A read of the list has been asked for and hasn't come yet.
+    pub list_loading: bool,
     /// Programme descriptions read so far (None: there is none), by
     /// (channel, start).
     pub infos: Arc<HashMap<(u32, i64), Option<String>>>,
@@ -80,6 +85,8 @@ impl TvState {
             panels: Vec::new(),
             guide: None,
             guide_loading: false,
+            list: None,
+            list_loading: false,
             infos: Arc::default(),
             mem_history: Vec::new(),
             // shown as old: it's from before
@@ -115,6 +122,7 @@ pub enum Change {
     Panels,
     Guide,
     Info,
+    List,
 }
 
 /// What the engine tells front ends.
@@ -166,6 +174,7 @@ impl Handle {
     pub fn send(&self, a: Action) -> std::result::Result<(), mpsc::SendError<Action>> {
         match &a {
             Action::LoadGuide => self.update(|s| s.guide_loading = true),
+            Action::LoadList | Action::ListGo(_) => self.update(|s| s.list_loading = true),
             Action::Favourite(ch, on) => self.update(|s| {
                 if let Some(Ok(g)) = s.guide.as_mut().map(Arc::make_mut) {
                     if let Some(row) = g.rows.iter_mut().find(|r| r.channel.id == ch.id) {
@@ -238,6 +247,13 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
             Msg::Panels(ids) => {
                 update(&mut |st| st.panels = ids.clone());
                 CoreEvent::Changed(Change::Panels)
+            }
+            Msg::List(l) => {
+                if let Err(e) = &l {
+                    crate::tlog!("list FAILED: {e}");
+                }
+                update(&mut |st| (st.list, st.list_loading) = (Some(Arc::new(l.clone())), false));
+                CoreEvent::Changed(Change::List)
             }
             Msg::Info(key, info) => {
                 let info = info.unwrap_or_else(|e| Some(format!("(couldn't read the description: {e})")));

@@ -10,7 +10,7 @@
 use super::{call, Result, Tv};
 use serde_json::Value;
 use tveee_core::more::Go;
-use tveee_core::provider::{ContextList, ListItem};
+use tveee_core::provider::{ContextList, ListItem, ListPlace};
 
 /// Most rows read (a library of thousands: the first ones).
 const MAX: usize = 500;
@@ -137,13 +137,23 @@ pub fn go_for(row: &Row, window: u64) -> Go {
 pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
     let items = rows
         .iter()
-        .map(|r| ListItem { label: r.label.clone(), meta: Some(r.label2.clone()).filter(|m| !m.is_empty()), folder: r.folder, go: go_for(r, p.window) })
+        .map(|r| ListItem { id: r.path.clone(), label: r.label.clone(), meta: Some(r.label2.clone()).filter(|m| !m.is_empty()), folder: r.folder, go: go_for(r, p.window) })
         .collect();
-    // the highlighted row: by its path, else its label
-    let (label, path) = &p.focus;
-    let at = rows.iter().position(|r| !path.is_empty() && r.path == *path).or_else(|| rows.iter().position(|r| r.label == *label));
     let title = if p.name.is_empty() { p.path.clone() } else { p.name.clone() };
-    ContextList { title, kind: "folder", key: format!("{}|{}", p.window, p.path), items, at }
+    let mut l = ContextList { title, kind: "folder", key: key_of(p), items, at: None };
+    // the highlighted row: by its path, else its label
+    l.at = l.find(&list_place(p));
+    l
+}
+
+/// What a list is: its window and folder (another folder, another list).
+pub fn key_of(p: &Place) -> String {
+    format!("{}|{}", p.window, p.path)
+}
+
+/// Where Kodi's list is, for the ui to follow.
+pub fn list_place(p: &Place) -> ListPlace {
+    ListPlace { key: key_of(p), focus_label: p.focus.0.clone(), focus_id: p.focus.1.clone() }
 }
 
 /// The list Kodi is showing, if it's showing one.

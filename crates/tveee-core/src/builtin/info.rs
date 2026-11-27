@@ -556,7 +556,9 @@ fn details_cmd(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 /// Carry out a `goto`: open a link in the app, or seek the video.
-fn go(tv: &Tv, pkg: &str, to: &crate::more::Go) -> Result<String> {
+/// Do what a [`crate::more::Go`] says, for the app `pkg`: seek its video,
+/// or open a link (in it, or wherever the link belongs).
+pub fn go(tv: &Tv, pkg: &str, to: &crate::more::Go) -> Result<String> {
     match to {
         crate::more::Go::Seek(t) => {
             let player = crate::provider::for_package(pkg).and_then(|p| p.player());
@@ -787,7 +789,7 @@ mod tests {
     #[test]
     fn list_printed() {
         use crate::provider::{ContextList, ListItem};
-        let item = |label: &str, folder, meta: Option<&str>| ListItem { label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
+        let item = |label: &str, folder, meta: Option<&str>| ListItem { id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
         let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], at: Some(1) };
         let lines = list_lines(&l, "Kodi");
         assert_eq!(lines[0], "Artists (Kodi, 3 items)");
