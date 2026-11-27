@@ -20,6 +20,9 @@ pub const UI: &[(&str, Input)] = &[
     ("ui: options", Input::OpenOptions),
     ("ui: preview on/off", Input::TogglePreview),
     ("ui: system info on/off", Input::ToggleInfo),
+    ("ui: show the whole link / shorten it", Input::ToggleUrl),
+    ("ui: copy the link", Input::CopyUrl),
+    ("ui: open the link in the browser", Input::OpenUrl),
     ("ui: remote / player mode", Input::ToggleMode),
     ("ui: quit", Input::Quit),
 ];

@@ -142,3 +142,40 @@ fn guide_filter_ctrl_u_clears() {
     a.guide_key(tab, 0, KeyCode::Char('u'), KeyModifiers::CONTROL, &h);
     assert_eq!(a.prompt, "");
 }
+
+/// Kodi playing from a catch-up add-on: a very long link.
+fn kodi_catchup() -> TvState {
+    let mut st = kodi_paused();
+    if let Some(a) = st.snap.as_mut().and_then(|s| s.activity.as_mut()) {
+        a.url = Some(
+            "plugin://plugin.video.catchuptvandmore/resources/lib/channels/uk/my5/get_video_url/?item_id=%22episode-12345678%22&video_id=%22C5-2026-11-27-the-long-programme-title%22&download_mode=false&token=abcdef0123456789"
+                .into(),
+        );
+    }
+    st
+}
+
+#[test]
+fn long_link_shortened_corner() {
+    let mut a = app(kodi_catchup());
+    let s = screen(&mut a, CORNER);
+    insta::assert_snapshot!(s);
+    // one row, cut in the middle, made a link to the whole thing
+    assert_eq!(a.links.len(), 1);
+    assert!(a.links[0].text.contains('…'));
+    assert!(a.links[0].url.ends_with("token=abcdef0123456789"));
+}
+
+#[test]
+fn long_link_whole_desktop() {
+    let mut a = app(kodi_catchup());
+    a.url_full = true;
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    // every row of it, and the open button, are links to it
+    assert_eq!(a.links.iter().filter(|l| l.text != "[open ↗]").map(|l| l.text.as_str()).collect::<String>(), a.links[0].url);
+    assert!(a.links.iter().any(|l| l.text == "[open ↗]"));
+    // its buttons answer clicks
+    assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::CopyUrl)));
+    assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::OpenUrl)));
+}

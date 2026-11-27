@@ -30,6 +30,7 @@ mod ambi;
 mod overlays;
 mod palette;
 mod drawing;
+mod links;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -100,6 +101,10 @@ struct App {
     want_info: Option<(u32, i64)>,
     /// Something asked to quit (the palette's ui: quit).
     quit: bool,
+    /// The link (what's on's URL) shown whole, not shortened to fit.
+    url_full: bool,
+    /// Links drawn this frame, made terminal hyperlinks after drawing.
+    links: Vec<links::Drawn>,
 }
 
 /// An action under way waits this long for its next step: each change on
@@ -249,6 +254,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
         }
         if dirty || app.animating() || drawn.is_none_or(|d| d.elapsed() >= TICK) {
             term.draw(|f| app.draw(f))?;
+            let _ = links::emit(&app.links);
             drawn = Some(Instant::now());
             dirty = false;
         }
@@ -487,6 +493,8 @@ impl App {
             infos_asked: std::collections::HashSet::new(),
             want_info: None,
             quit: false,
+            url_full: false,
+            links: Vec::new(),
         }
     }
 }
@@ -581,6 +589,11 @@ impl App {
     }
 
     /// Act on a key or button. Returns true to quit.
+    /// What's on's link, if it has one.
+    fn url(&self) -> Option<String> {
+        self.st.snap.as_ref()?.activity.as_ref()?.url.clone()
+    }
+
     fn apply(&mut self, input: Input, actions: &Handle) -> bool {
         match input {
             Input::Quit => return true,
@@ -642,6 +655,12 @@ impl App {
             Input::OpenMenu => self.note = "no menu items in this build".into(),
             Input::OpenPalette => self.open_palette(),
             Input::ShowLogs => self.overlay = Overlay::Logs(0),
+            Input::ToggleUrl => match self.url() {
+                Some(_) => self.url_full = !self.url_full,
+                None => self.note = "no link for what's on".into(),
+            },
+            Input::CopyUrl => self.note = self.url().map_or_else(|| "no link for what's on".into(), |u| links::copy(&u)),
+            Input::OpenUrl => self.note = self.url().map_or_else(|| "no link for what's on".into(), |u| links::open(&u)),
             Input::RestartFront => match self.st.snap.as_ref().and_then(front_pkg) {
                 Some(pkg) if !apps::passes_through(&pkg) => {
                     self.note = format!("restarting {}...", app_name(&pkg));
