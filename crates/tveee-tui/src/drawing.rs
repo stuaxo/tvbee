@@ -37,7 +37,18 @@ pub enum Hit {
     ConfirmNo,
     /// Inside a pop-up but on nothing in particular.
     Popup,
+    /// The whole link's buttons: copy, open (worked out by where).
+    UrlButtons,
 }
+
+/// Columns `s` takes.
+fn width_of(s: &str) -> u16 {
+    u16::try_from(Span::raw(s).width()).unwrap_or(u16::MAX)
+}
+
+/// The whole link's buttons, as drawn after the label.
+const COPY_BUTTON: &str = "[copy y]";
+const OPEN_BUTTON: &str = "[open ↗]";
 
 /// `(c + 0.5) / width`: the fraction that puts a bar's marker on cell `c`.
 pub fn bar_fraction(x: u16, x0: u16, width: u16) -> f64 {
@@ -250,6 +261,7 @@ pub(super) fn popup_titled(f: &mut Frame, title: &str, right: &str, text: Vec<Li
 impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
         self.hits.clear();
+        self.links.clear();
         let outer = Block::bordered()
             .title(Line::from(format!(" tveee ui - {} ", self.ip)).bold())
             .title(
@@ -381,6 +393,9 @@ impl App {
         let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(Color::DarkGray));
         // (line, what clicking it does)
         let mut lines: Vec<(Line, Option<Hit>)> = Vec::new();
+        // the link's rows: (line, text shown, where it goes), made terminal
+        // hyperlinks once drawn
+        let mut url_rows: Vec<(usize, String, String)> = Vec::new();
         let settling = self.settling_label();
         match &self.st.snap {
             None => lines.push((Line::from("waiting for the TV...").italic(), None)),
@@ -428,7 +443,33 @@ impl App {
                             lines.push((bar_line, hit));
                         }
                         if let Some(u) = &a.url {
-                            lines.push((Line::from(vec![label("url"), Span::raw(u.clone()).underlined()]), None));
+                            let u = links::clean(u);
+                            let room = width.saturating_sub(9).max(10);
+                            let style = Style::new().fg(Color::Cyan).underlined();
+                            let toggle = Some(Hit::Input(Input::ToggleUrl));
+                            if self.url_full {
+                                for (i, row) in links::rows(&u, room).into_iter().enumerate() {
+                                    let head = if i == 0 { label("url") } else { Span::raw(" ".repeat(9)) };
+                                    url_rows.push((lines.len(), row.clone(), u.clone()));
+                                    lines.push((Line::from(vec![head, Span::styled(row, style)]), toggle.clone()));
+                                }
+                                let button = Style::new().fg(Color::Black).bg(Color::Cyan);
+                                url_rows.push((lines.len(), OPEN_BUTTON.to_string(), u.clone()));
+                                lines.push((
+                                    Line::from(vec![
+                                        Span::raw(" ".repeat(9)),
+                                        Span::styled(COPY_BUTTON, button),
+                                        Span::raw(" "),
+                                        Span::styled(OPEN_BUTTON, button),
+                                        Span::styled("   u shortens it", Style::new().fg(Color::DarkGray)),
+                                    ]),
+                                    Some(Hit::UrlButtons),
+                                ));
+                            } else {
+                                let short = links::shorten_middle(&u, room);
+                                url_rows.push((lines.len(), short.clone(), u.clone()));
+                                lines.push((Line::from(vec![label("url"), Span::styled(short, style)]), toggle));
+                            }
                         }
                         lines.extend(a.fields.iter().filter(|f| f.place == nowplaying::Place::Bottom).map(field));
                     }
@@ -462,7 +503,7 @@ impl App {
             }
         }
         let mut y = body.y;
-        for (line, hit) in lines {
+        for (n, (line, hit)) in lines.into_iter().enumerate() {
             let para = Paragraph::new(line).wrap(Wrap { trim: false });
             let h = u16::try_from(para.line_count(body.width).max(1)).unwrap_or(1);
             if y + h > body.y + body.height {
@@ -470,6 +511,20 @@ impl App {
             }
             let rect = ratatui::layout::Rect { x: body.x, y, width: body.width, height: h };
             f.render_widget(para, rect);
+            for (_, text, url) in url_rows.iter().filter(|(i, _, _)| *i == n) {
+                // the open button sits after the copy button
+                let x = if text == OPEN_BUTTON { body.x + LABEL + width_of(COPY_BUTTON) + 1 } else { body.x + LABEL };
+                self.links.push(links::Drawn { x, y, text: text.clone(), url: url.clone() });
+            }
+            if hit == Some(Hit::UrlButtons) {
+                let copy_w = width_of(COPY_BUTTON);
+                let copy = ratatui::layout::Rect { x: body.x + LABEL, y, width: copy_w, height: 1 };
+                let open = ratatui::layout::Rect { x: copy.x + copy_w + 1, y, width: width_of(OPEN_BUTTON), height: 1 };
+                self.hits.push((copy, Hit::Input(Input::CopyUrl)));
+                self.hits.push((open, Hit::Input(Input::OpenUrl)));
+                y += h;
+                continue;
+            }
             if let Some(hit) = hit {
                 let r = match hit {
                     Hit::Progress { x0, width } | Hit::Volume { x0, width } => {

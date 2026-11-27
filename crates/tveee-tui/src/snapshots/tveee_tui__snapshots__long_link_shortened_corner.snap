@@ -1,0 +1,21 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 162
+expression: s
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
+│load 4.82▲ │ 310 MB [F]ree │ [:] commands                 │
+│what     Paused in Kodi                                   │
+│title    Episode 3 (Off-Road)                             │
+│progress ━━━━━━━━━━━━━┃───────── 27:56 / 48:47 (57%)      │
+│url      plugin://plugin.video.catchuptva…abcdef0123456789│
+│audio    AAC-LC  AAC                                      │
+│                                                          │
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60   │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

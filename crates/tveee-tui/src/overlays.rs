@@ -218,6 +218,8 @@ pub(super) const HELP: &str = " everywhere
    F        free memory (force-stop idle apps)   S  sleep   R  restart the app
             in front, coming back where it was (YouTube, Kodi)
    i        system info      a      launch an app (space there: front / restart / close)
+   u        the link whole / shortened    y  copy the link (click it: the same;
+            its buttons copy or open it; ctrl+click opens it in most terminals)
    l        Ambilight panel (TVs with one; P there pairs if needed)
    L        change the Ambilight: power, style and setting, Hue, any light's colour
    v        preview: a picture of what's on (scrcpy if installed, 1 a second;
