@@ -416,11 +416,12 @@ fn options_plugins_tab_desktop() {
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
     let row = |name: &str| s.lines().find(|l| l.contains(&format!(" {name} "))).unwrap_or_default().to_string();
-    assert!(row("kodi").contains("on") && row("kodi").contains("on now"), "{s}");
-    assert!(row("philips").contains("auto"), "{s}");
-    assert!(row("youtube").contains("off now"), "{s}");
-    // the built-in ones are listed, not chosen
-    assert!(s.contains("built in: always on") && s.contains("apps, media, power"), "{s}");
+    // ticked as the options are: kodi chosen on, philips on (auto), youtube off (auto)
+    assert!(row("kodi").contains("[x] kodi") && !row("kodi").contains("(auto)"), "{s}");
+    assert!(row("philips").contains("[x] philips") && row("philips").contains("(auto)"), "{s}");
+    assert!(row("youtube").contains("[ ] youtube") && row("youtube").contains("(auto)"), "{s}");
+    // the built-in ones are listed ticked, not chosen
+    assert!(s.contains("built in (always on)") && row("media").contains("[x] media"), "{s}");
     let rows = a.hits.iter().filter(|(_, h)| matches!(h, Hit::OptionItem(_))).count();
     assert_eq!(rows, 3, "only the vendor plugins can be chosen");
     // ↓ moves among them; Tab goes back

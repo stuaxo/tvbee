@@ -307,25 +307,33 @@ impl App {
             KeyCode::Up => self.overlay = Overlay::Options((i + n - 1) % n),
             KeyCode::Down => self.overlay = Overlay::Options((i + 1) % n),
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
+            KeyCode::Char('a') if self.options_plugins => self.plugin_choice(i, None),
             _ => {}
         }
     }
 
-    /// Change row `i` of the tab shown: flip an option, or move a vendor
-    /// plugin on to its next choice (auto, on, off); saved.
+    /// Whether vendor plugin `p` is ticked: its saved choice, else whether
+    /// it's on now.
+    pub(super) fn plugin_ticked(p: &tveee_core::plugin::PluginState) -> bool {
+        tveee_core::options::plugin(p.name).unwrap_or(p.enabled)
+    }
+
+    /// Save vendor plugin row `i`'s choice (None: back to checking the TV).
+    pub(super) fn plugin_choice(&mut self, i: usize, choice: Option<bool>) {
+        let Some(p) = self.vendor_plugins().get(i).map(|p| p.name) else { return };
+        self.note = match tveee_core::options::set_plugin(p, choice) {
+            Ok(()) => format!("plugin {p}: {} (from tveee's next start)", tveee_core::options::choice_word(choice)),
+            Err(e) => format!("couldn't save it: {e}"),
+        };
+        self.overlay = Overlay::Options(i);
+    }
+
+    /// Change row `i` of the tab shown: flip an option, or a vendor
+    /// plugin's tick (saved as its choice).
     pub(super) fn toggle_option(&mut self, i: usize) {
         if self.options_plugins {
-            let Some(p) = self.vendor_plugins().get(i).map(|p| p.name) else { return };
-            let next = match tveee_core::options::plugin(p) {
-                None => Some(true),
-                Some(true) => Some(false),
-                Some(false) => None,
-            };
-            self.note = match tveee_core::options::set_plugin(p, next) {
-                Ok(()) => format!("plugin {p}: {} (from tveee's next start)", tveee_core::options::choice_word(next)),
-                Err(e) => format!("couldn't save it: {e}"),
-            };
-            self.overlay = Overlay::Options(i);
+            let Some(on) = self.vendor_plugins().get(i).map(|p| Self::plugin_ticked(p)) else { return };
+            self.plugin_choice(i, Some(!on));
             return;
         }
         let Some(o) = tveee_core::options::OPTIONS.get(i) else { return };
@@ -411,24 +419,29 @@ impl App {
         if self.options_plugins {
             let vendor: Vec<_> = self.vendor_plugins().into_iter().cloned().collect();
             rows = vendor.len();
-            text.push(Line::from(Span::styled(" vendor: on when the TV has what they're for", dim)));
+            text.push(Line::from(Span::styled(" vendor", dim)));
             // the rows start under that heading
             let first_row_shift = 1;
             for (i, p) in vendor.iter().enumerate() {
-                let choice = tveee_core::options::choice_word(tveee_core::options::plugin(p.name));
-                let now = if p.enabled { "on now" } else { "off now" };
-                let line = Line::from(vec![Span::raw(format!(" {:<10} {choice:<5}", p.name)), Span::styled(format!(" {:<10} {}", format!("({now})"), p.desc), dim)]);
+                let choice = tveee_core::options::plugin(p.name);
+                let ticked = Self::plugin_ticked(p);
+                let tick = if ticked { "[x]" } else { "[ ]" };
+                let note = match choice {
+                    None => "  (auto)".to_string(),
+                    Some(on) if on != p.enabled => "  (from the next start)".to_string(),
+                    Some(_) => String::new(),
+                };
+                let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", p.name)), Span::styled(format!("  {}{note}", p.desc), dim)]);
                 text.push(if i == sel { line.reversed() } else { line });
             }
             text.push(Line::default());
-            let builtin: Vec<&str> = self.plugins.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin).map(|p| p.name).collect();
-            text.push(Line::from(Span::styled(" built in: always on", dim)));
-            for l in super::drawing::textwrap(&builtin.join(", "), 70) {
-                text.push(Line::from(Span::styled(format!("   {l}"), dim)));
+            text.push(Line::from(Span::styled(" built in (always on)", dim)));
+            for p in self.plugins.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin) {
+                text.push(Line::from(Span::styled(format!(" [x] {:<20}  {}", p.name, p.desc), dim)));
             }
             text.push(Line::default());
-            text.push(Line::from("↑/↓ choose  space/⏎/click: auto → on → off  tab: options  esc closes").fg(Color::DarkGray));
-            text.push(Line::from("auto: on when checking the TV finds it; changes apply from tveee's next start").fg(Color::DarkGray));
+            text.push(Line::from("↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes").fg(Color::DarkGray));
+            text.push(Line::from("changes apply from tveee's next start").fg(Color::DarkGray));
             let r = popup(f, " options ", text, Color::Blue);
             self.option_hits(r, first_row + first_row_shift, rows);
         } else {
