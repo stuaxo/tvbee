@@ -804,6 +804,11 @@ impl App {
     fn click(&mut self, x: u16, y: u16, actions: &Handle) -> bool {
         let hit = self.hit_at(x, y);
         match (self.overlay, hit) {
+            // a button on the now-playing card: as if chosen from the menu
+            (Overlay::None, Some(Hit::Chip(i))) => {
+                let (next, action) = pick(&self.menu, i);
+                self.apply_overlay(next, action, actions);
+            }
             (Overlay::Menu(_), Some(Hit::MenuItem(i))) => {
                 let (next, action) = pick(&self.menu, i);
                 self.apply_overlay(next, action, actions);

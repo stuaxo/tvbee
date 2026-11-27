@@ -1,6 +1,6 @@
 /// Every vendor plugin's apps and providers, as the binary installs them
 /// (call before looking any up).
-fn install_all() {
+pub(super) fn install_all() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         tveee_core::labels::ignore_cache();

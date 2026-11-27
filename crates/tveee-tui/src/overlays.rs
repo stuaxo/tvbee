@@ -271,7 +271,7 @@ pub(super) const HELP: &str = " everywhere
    q Esc    quit
 
  player mode
-   ← →      seek -/+ 10s (exact in YouTube; ff/rew keys elsewhere)
+   ← →      seek -/+ 10s (exact in YouTube; ff/rw keys elsewhere)
    ↑ ↓      volume
 
  remote mode: the keyboard is the TV's (tab leaves, ctrl-c quits)

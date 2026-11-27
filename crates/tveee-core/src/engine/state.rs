@@ -217,7 +217,7 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
                 });
                 CoreEvent::Changed(Change::Seeked)
             }
-            Msg::Note(n) => CoreEvent::Note(n),
+            Msg::Note(n) => CoreEvent::Note(note_line(&n)),
             Msg::Failed(e) => {
                 crate::tlog!("failed: {e}");
                 update(&mut |st| st.error = Some(e.clone()));
@@ -268,5 +268,29 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
         if events.send(event).is_err() {
             return;
         }
+    }
+}
+
+/// A note for the one status line: a note of several lines (a list) goes
+/// to the log whole, and its first line says so.
+pub fn note_line(n: &str) -> String {
+    let mut lines = n.trim_end().lines();
+    let first = lines.next().unwrap_or("").to_string();
+    let more = lines.count();
+    if more == 0 {
+        return first;
+    }
+    for l in n.trim_end().lines() {
+        crate::tlog!("  {l}");
+    }
+    format!("{first}  (+{more} more: the log has it all, : log)")
+}
+
+#[cfg(test)]
+mod note_tests {
+    #[test]
+    fn long_notes_point_to_the_log() {
+        assert_eq!(super::note_line("muted"), "muted");
+        assert_eq!(super::note_line("a\nb\nc\n"), "a  (+2 more: the log has it all, : log)");
     }
 }

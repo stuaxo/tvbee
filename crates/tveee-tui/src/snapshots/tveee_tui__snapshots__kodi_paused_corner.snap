@@ -1,5 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 97
 expression: "screen(&mut app(kodi_paused()), CORNER)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
@@ -8,9 +9,9 @@ expression: "screen(&mut app(kodi_paused()), CORNER)"
 │title    Episode 3 (Off-Road)                             │
 │progress ━━━━━━━━━━━━━┃───────── 27:56 / 48:47 (57%)      │
 │audio    AAC-LC  AAC                                      │
+│do        /  search                                       │
 │                                                          │
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60   │
-│                                                          │
 │                                                          │
 │                                                          │
 │                                                          │

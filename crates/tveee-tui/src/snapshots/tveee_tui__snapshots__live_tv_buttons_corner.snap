@@ -1,0 +1,21 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 356
+expression: s
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
+│[F]ree memory │ [:] commands                              │
+│what     Watching live TV                                 │
+│title    This is BBC Three                                │
+│do        g  guide   /  search                            │
+│                                                          │
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60   │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

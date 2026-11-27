@@ -39,6 +39,11 @@ pub enum Hit {
     Popup,
     /// The whole link's buttons: copy, open (worked out by where).
     UrlButtons,
+    /// The row of things to do with what's playing (see [`App::chips`]);
+    /// each has its own hit, this marks the row.
+    Chips,
+    /// Menu item N, from a button on the now-playing card.
+    Chip(usize),
 }
 
 /// Columns `s` takes.
@@ -74,8 +79,8 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
         Mode::Player => vec![
             button("space", "play/pause", Do(PlayPause)),
             // exact seeking (YouTube) vs fast-forward/rewind key presses
-            button("←", if exact { "-10s" } else { "rew" }, Do(Seek(-10.0))),
-            button("→", if exact { "+10s" } else { "ffw" }, Do(Seek(10.0))),
+            button("←", if exact { "-10s" } else { "rw" }, Do(Seek(-10.0))),
+            button("→", if exact { "+10s" } else { "ff" }, Do(Seek(10.0))),
             button("↑", "vol+", Do(Volume(1))),
             button("↓", "vol-", Do(Volume(-1))),
             button("m", "mute", Do(Mute)),
@@ -158,6 +163,16 @@ pub(super) fn one_row(mut bs: Vec<Button>, width: u16) -> Vec<Button> {
         }
     }
     bs
+}
+
+/// A button on the now-playing card: " key " and " what".
+fn chip_width(key: &str, text: &str) -> u16 {
+    u16::try_from(key.chars().count() + 2 + text.chars().count() + 1).unwrap_or(u16::MAX)
+}
+
+/// A row of them, with two spaces between.
+fn chips_width(chips: &[(String, String, Hit)]) -> usize {
+    chips.iter().map(|(k, t, _)| usize::from(chip_width(k, t)) + 2).sum::<usize>().saturating_sub(2)
 }
 
 /// From this wide (inside the border), the panels get a column of their
@@ -550,6 +565,13 @@ impl App {
         // hyperlinks once drawn
         let mut url_rows: Vec<(usize, String, String)> = Vec::new();
         let settling = self.settling_label();
+        // what can be done with it, fitted to one row
+        let mut chips = self.chips();
+        while !chips.is_empty() && 9 + chips_width(&chips) > width {
+            // the app's later actions go before guide and search
+            let at = chips.iter().rposition(|(_, _, h)| matches!(h, Hit::Chip(_))).unwrap_or(chips.len() - 1);
+            chips.remove(at);
+        }
         match &self.st.snap {
             None => lines.push((Line::from("waiting for the TV...").italic(), None)),
             Some(s) => {
@@ -626,6 +648,17 @@ impl App {
                             }
                         }
                         lines.extend(a.fields.iter().filter(|f| f.place == nowplaying::Place::Bottom).map(field));
+                        if !chips.is_empty() {
+                            let mut spans = vec![label("do")];
+                            for (i, (key, text, _)) in chips.iter().enumerate() {
+                                if i > 0 {
+                                    spans.push(Span::raw("  "));
+                                }
+                                spans.push(Span::styled(format!(" {key} "), Style::new().fg(Color::Black).bg(Color::Gray)));
+                                spans.push(Span::styled(format!(" {text}"), Style::new().fg(Color::Gray)));
+                            }
+                            lines.push((Line::from(spans), Some(Hit::Chips)));
+                        }
                     }
                     None => lines.push((Line::from("nothing playing that tveee recognises").italic(), None)),
                 }
@@ -670,6 +703,16 @@ impl App {
                 let x = if text == OPEN_BUTTON { body.x + LABEL + width_of(COPY_BUTTON) + 1 } else { body.x + LABEL };
                 self.links.push(links::Drawn { x, y, text: text.clone(), url: url.clone() });
             }
+            if hit == Some(Hit::Chips) {
+                let mut x = body.x + LABEL;
+                for (key, text, h) in &chips {
+                    let w = chip_width(key, text);
+                    self.hits.push((ratatui::layout::Rect { x, y, width: w, height: 1 }, h.clone()));
+                    x += w + 2;
+                }
+                y += h;
+                continue;
+            }
             if hit == Some(Hit::UrlButtons) {
                 let copy_w = width_of(COPY_BUTTON);
                 let copy = ratatui::layout::Rect { x: body.x + LABEL, y, width: copy_w, height: 1 };
@@ -690,6 +733,35 @@ impl App {
             }
             y += h;
         }
+    }
+
+    /// Things to do with what's playing, as (key, what, click): the
+    /// actions of the app in front (Kodi's subtitles and audio, ...; their
+    /// key is in the menu, so ".k"), the guide on live TV, and search where
+    /// tveee knows how. None in standby, or before the first reading.
+    pub(super) fn chips(&self) -> Vec<(String, String, Hit)> {
+        let Some(s) = self.st.snap.as_ref().filter(|s| !s.standby && !self.st.seeded) else { return Vec::new() };
+        let pkg = s.focus.as_deref().map(|f| f.split('/').next().unwrap_or(f));
+        let provider = pkg.and_then(tveee_core::provider::for_package);
+        let live = s.kind.as_deref().is_some_and(|k| k.starts_with("live-tv"));
+        let mut out = Vec::new();
+        if live {
+            out.push(("g".to_string(), "guide".to_string(), Hit::Input(Input::OpenGuide)));
+        }
+        if let Some(p) = provider {
+            for (i, a) in self.menu.iter().enumerate() {
+                if a.category != p.id() {
+                    continue;
+                }
+                let Some(key) = a.key else { continue };
+                let what = a.title.strip_prefix(&format!("{}: ", a.category)).unwrap_or(a.title);
+                out.push((format!(".{key}"), what.to_string(), Hit::Chip(i)));
+            }
+        }
+        if live || provider.is_some() {
+            out.push(("/".to_string(), "search".to_string(), Hit::Input(Input::OpenSearch)));
+        }
+        out
     }
 
     pub(super) fn panel_disks(&self) -> Vec<(&'static str, info::Disk)> {

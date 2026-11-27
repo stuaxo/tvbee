@@ -35,6 +35,6 @@ expression: "screen(&mut app(standby()), DESKTOP)"
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│ space  play/pause   ←  rew   →  ffw   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit        │
+│ space  play/pause   ←  rw   →  ff   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit          │
 │                                                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
