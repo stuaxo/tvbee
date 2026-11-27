@@ -550,8 +550,8 @@ impl Actor {
             }
             Action::Mute => {
                 let now = media::is_muted(&self.tv)?.unwrap_or(false);
-                media::set_mute(&self.tv, !now)?;
-                if now { "unmuted".into() } else { "muted".into() }
+                let after = media::set_mute(&self.tv, !now)?;
+                media::mute_said(!now, after)?.text
             }
             Action::MuteKnown(now) => {
                 self.tv.keyevent(164)?;
