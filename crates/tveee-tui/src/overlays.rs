@@ -355,6 +355,18 @@ impl App {
     }
 
     pub(super) fn draw_overlay(&mut self, f: &mut Frame) {
+        // the commands over another pop-up: that first, under them
+        if let (Overlay::Palette(_), Some((under, text))) = (self.overlay, self.under.clone()) {
+            let (palette_text, over) = (std::mem::replace(&mut self.prompt, text), self.overlay);
+            self.overlay = under;
+            self.draw_one(f);
+            self.overlay = over;
+            self.prompt = palette_text;
+        }
+        self.draw_one(f);
+    }
+
+    fn draw_one(&mut self, f: &mut Frame) {
         match self.overlay {
             Overlay::None => {}
             Overlay::Help(top) => self.draw_help(f, top),

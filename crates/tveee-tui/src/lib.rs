@@ -68,6 +68,9 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// The pop-up the command palette opened over (the log, the guide, ...)
+    /// and its typed text: back to it when the palette closes.
+    under: Option<(Overlay, String)>,
     /// The options dialog's tab: its options, or the plugins.
     options_plugins: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
@@ -284,6 +287,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     app.switch_view(v, actions);
                 }
             }
+            // the commands open over anything (: where it isn't typed text)
+            Event::Key(k) if k.kind != KeyEventKind::Release && app.palette_wanted(k.code, k.modifiers) => app.palette_over(),
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
@@ -483,6 +488,7 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            under: None,
             options_plugins: false,
             plugins: Vec::new(),
             prompt: String::new(),
@@ -872,7 +878,11 @@ impl App {
             (Overlay::Logs(_), _) => self.overlay = Overlay::None,
             // a click elsewhere closes the pop-up (cancelling a confirmation)
             (Overlay::Help(_) | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
-                self.apply_overlay(Overlay::None, None, actions)
+                let palette = matches!(self.overlay, Overlay::Palette(_));
+                self.apply_overlay(Overlay::None, None, actions);
+                if palette {
+                    self.palette_closed();
+                }
             }
             (Overlay::None, Some(Hit::Input(i))) => return self.apply(i, actions),
             (Overlay::None, Some(Hit::Progress { x0, width })) => {
