@@ -267,6 +267,32 @@ pub struct Refresher {
     /// The last window dump that said what's in front: a busy TV's dumpsys
     /// sometimes answers with nothing, which isn't "nothing in front".
     pub last_window: String,
+    /// The last power dump that said whether it's awake: like the window
+    /// dump, it sometimes comes back empty, which isn't standby.
+    pub last_power: String,
+    /// What the last refresh said was on: a title the media session drops
+    /// for a moment is kept while the same thing plays.
+    pub last_activity: Option<Activity>,
+    /// The state last shown, as [`state_line`] says it: a change is logged.
+    pub said: String,
+}
+
+/// What a refresh shows, in one line for the log: the what line, the
+/// title, the app in front, and whether there's a position. The position
+/// itself is left out (it moves every refresh).
+pub fn state_line(s: &Snapshot) -> String {
+    let a = s.activity.as_ref();
+    let position = match (s.exact, a.is_some_and(|a| a.progress.is_some())) {
+        (true, _) => "exact position",
+        (false, true) => "position",
+        (false, false) => "no position",
+    };
+    format!(
+        "{} | {} | {} | {position}",
+        a.map_or("(nothing)", |a| a.what.as_str()),
+        a.and_then(|a| a.title.as_deref()).unwrap_or("-"),
+        s.focus.as_deref().unwrap_or("-"),
+    )
 }
 
 impl Refresher {
@@ -282,10 +308,21 @@ impl Refresher {
             if self.shared.stopping() {
                 break;
             }
+            let started = Instant::now();
             let msg = match self.snapshot() {
-                Ok(s) => Msg::Snap(Box::new(s), Instant::now()),
+                Ok(s) => {
+                    let now = state_line(&s);
+                    if now != self.said {
+                        crate::tlog!("state: {now}  (was: {}; read in {}ms)", self.said, started.elapsed().as_millis());
+                        self.said = now;
+                    }
+                    Msg::Snap(Box::new(s), Instant::now())
+                }
                 // e.g. while it reboots; keep trying every second
-                Err(e) => Msg::Failed(format!("waiting for the TV ({e})")),
+                Err(e) => {
+                    crate::tlog!("refresh FAILED: {e}");
+                    Msg::Failed(format!("waiting for the TV ({e})"))
+                }
             };
             if tx.send(msg).is_err() {
                 break;
@@ -338,14 +375,27 @@ impl Refresher {
             let y = y.join().ok().and_then(|r| r.ok()).unwrap_or_default();
             (j(p), j(w), j(m), a, y, l.join().unwrap_or_default())
         });
-        let (power, mut window, audio) = (power?, window?, audio?);
+        let (mut power, mut window, audio) = (power?, window?, audio?);
+        if !power.lines().any(|l| l.trim().starts_with("mWakefulness=")) {
+            crate::tlog!("refresh: power dump without mWakefulness ({} bytes); asking again", power.len());
+            power = tv
+                .shell(&["dumpsys", "power"])
+                .ok()
+                .filter(|p| p.lines().any(|l| l.trim().starts_with("mWakefulness=")))
+                .unwrap_or_else(|| self.last_power.clone());
+        } else {
+            self.last_power.clone_from(&power);
+        }
         if !window.contains("mCurrentFocus") {
             crate::tlog!("refresh: empty window dump ({} bytes); asking again", window.len());
             window = tv.window_dump().ok().filter(|w| w.contains("mCurrentFocus")).unwrap_or_else(|| self.last_window.clone());
         } else {
             self.last_window.clone_from(&window);
         }
-        let media_dump = media_dump.unwrap_or_default();
+        let media_dump = media_dump.unwrap_or_else(|e| {
+            crate::tlog!("refresh: no media sessions read ({e}); taken as none");
+            String::new()
+        });
         let awake = power.lines().any(|l| l.trim() == "mWakefulness=Awake");
         let pkg = info::focus_package(&window);
         *lock(&self.shared.pkg) = pkg.clone();
@@ -373,7 +423,7 @@ impl Refresher {
         let activity = match (pkg.as_deref(), awake) {
             (Some(p), true) => match crate::provider::for_package(p).and_then(|pr| pr.player()) {
                 Some(player) => {
-                    let (a, playing) = nowplaying::with_player(&self.tv, p, player, activity);
+                    let (a, playing) = nowplaying::with_player(&self.tv, p, player, activity, &sessions);
                     exact = a.as_ref().is_some_and(|a| a.progress.is_some());
                     art = playing.and_then(|pl| {
                         let progress = pl.progress;
@@ -392,6 +442,8 @@ impl Refresher {
             },
             _ => activity,
         };
+        let activity = activity.map(|a| nowplaying::keep_title(self.last_activity.as_ref(), a));
+        self.last_activity.clone_from(&activity);
         *lock(&self.shared.art) = art;
         Ok(Snapshot {
             activity,
@@ -498,8 +550,8 @@ impl Actor {
             }
             Action::Mute => {
                 let now = media::is_muted(&self.tv)?.unwrap_or(false);
-                media::set_mute(&self.tv, !now)?;
-                if now { "unmuted".into() } else { "muted".into() }
+                let after = media::set_mute(&self.tv, !now)?;
+                media::mute_said(!now, after)?.text
             }
             Action::MuteKnown(now) => {
                 self.tv.keyevent(164)?;

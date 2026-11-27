@@ -280,6 +280,10 @@ pub struct Playing {
     pub art_moves: bool,
     /// More to say: ("video", "1080p H.264"), ("audio", "English AC3 5.1"), ...
     pub extra: Vec<(&'static str, String)>,
+    /// The app says for certain that nothing is playing (Kodi's API: no
+    /// active player). Its media session can linger after the end, saying
+    /// playing or paused: this outweighs it.
+    pub idle: bool,
 }
 
 /// An app tveee can ask what it's playing and tell what to do, through an

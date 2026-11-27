@@ -216,7 +216,7 @@ impl Engine {
         spawn_named("preview", move || preview_lane(&sh, &preview_msgs));
         let sh = Arc::clone(&shared);
         spawn_named("push", move || push_lane(&sh, &push_wake));
-        let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None, last_window: String::new() };
+        let refresher = Refresher { tv: shared.tv(), shared: Arc::clone(&shared), channel: None, named: None, last_window: String::new(), last_power: String::new(), last_activity: None, said: String::new() };
         spawn_named("refresh", move || refresher.run(&wake_rx, msg_tx));
         let _ = act_tx.send(Action::Refresh);
         // the keeper: what the lanes find, into the state

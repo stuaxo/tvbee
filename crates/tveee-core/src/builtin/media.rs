@@ -44,22 +44,48 @@ pub fn is_muted(tv: &Tv) -> Result<Option<bool>> {
     Ok(parse_muted(&tv.shell(&["dumpsys", "audio"])?))
 }
 
-/// KEYCODE_VOLUME_MUTE only toggles, so check the state first.
-pub fn set_mute(tv: &Tv, want: bool) -> Result<()> {
-    if is_muted(tv)? != Some(want) {
-        tv.keyevent(164)?;
+/// KEYCODE_VOLUME_MUTE only toggles, so check the state first, and after:
+/// the key can be lost (in standby; just after waking, seen live), so it's
+/// sent once more if the TV doesn't say it took. Returns what the TV says
+/// after (None: it doesn't say).
+pub fn set_mute(tv: &Tv, want: bool) -> Result<Option<bool>> {
+    let now = is_muted(tv)?;
+    if now == Some(want) {
+        return Ok(now);
     }
-    Ok(())
+    if now.is_none() {
+        tv.keyevent(164)?;
+        return Ok(None);
+    }
+    for _ in 0..2 {
+        tv.keyevent(164)?;
+        for _ in 0..6 {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            if is_muted(tv)? == Some(want) {
+                return Ok(Some(want));
+            }
+        }
+        crate::tlog!("mute: the key didn't take; again");
+    }
+    is_muted(tv)
+}
+
+/// What [`set_mute`] did, said.
+pub fn mute_said(want: bool, after: Option<bool>) -> Result<Output> {
+    let (done, not) = if want { ("muted", "not muted") } else { ("unmuted", "muted") };
+    match after {
+        Some(a) if a == want => Ok(done.into()),
+        Some(_) => crate::error::failed(format!("sent the mute key twice, but the TV still says {not} (in standby it ignores it)")),
+        None => Ok(format!("sent the mute key (the TV doesn't say whether it's {done})").into()),
+    }
 }
 
 fn mute(c: &Cx, _: &[String]) -> Result<Output> {
-    set_mute(c.tv, true)?;
-    Ok("muted".into())
+    mute_said(true, set_mute(c.tv, true)?)
 }
 
 fn unmute(c: &Cx, _: &[String]) -> Result<Output> {
-    set_mute(c.tv, false)?;
-    Ok("unmuted".into())
+    mute_said(false, set_mute(c.tv, false)?)
 }
 
 fn vol(c: &Cx, args: &[String]) -> Result<Output> {
@@ -573,5 +599,19 @@ Audio playback (lastly played comes first)
     #[test]
     fn missing_is_unknown() {
         assert_eq!(parse_muted("nothing here"), None);
+    }
+}
+
+#[cfg(test)]
+mod mute_tests {
+    use super::*;
+
+    #[test]
+    fn mute_says_what_the_tv_says() {
+        assert_eq!(mute_said(true, Some(true)).unwrap().text, "muted");
+        assert_eq!(mute_said(false, Some(false)).unwrap().text, "unmuted");
+        // the key lost (standby): not "muted"
+        assert!(mute_said(true, Some(false)).is_err());
+        assert!(mute_said(true, None).unwrap().text.starts_with("sent the mute key"));
     }
 }
