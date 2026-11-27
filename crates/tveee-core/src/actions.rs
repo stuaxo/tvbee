@@ -11,6 +11,7 @@
 
 use crate::error::Result;
 use crate::registry::Command;
+use crate::builtin::apps::Front;
 use crate::tv::Tv;
 use crate::Ctx;
 
@@ -30,7 +31,7 @@ pub const NO_FRONT: &str = "--no-front";
 /// `args` without [`NO_FRONT`], and whether the app may come to the front.
 /// Only for an action that brings one forward (`fronts`): others get their
 /// arguments as they are.
-pub fn front_flag(fronts: Option<&str>, args: &[String]) -> (bool, Vec<String>) {
+pub fn front_flag(fronts: Option<Front>, args: &[String]) -> (bool, Vec<String>) {
     if fronts.is_none() {
         return (true, args.to_vec());
     }
@@ -77,7 +78,7 @@ impl Run {
     /// Run it from the command line: what a [`Run::Do`] action says goes to
     /// stdout (when it says anything). `fronts`: the app it brings to the
     /// front, if it does (then `--no-front` is taken out and kept from it).
-    pub fn call(self, fronts: Option<&str>, c: &Ctx, args: &[String]) -> Result<()> {
+    pub fn call(self, fronts: Option<Front>, c: &Ctx, args: &[String]) -> Result<()> {
         let (front, args) = front_flag(fronts, args);
         let args = &args[..];
         match self {
@@ -136,7 +137,7 @@ pub struct ActionDescriptor {
     pub media: Option<&'static str>,
     /// The app it brings to the front ("live TV"): the command line takes
     /// `--no-front` to leave what's in front alone.
-    pub fronts: Option<&'static str>,
+    pub fronts: Option<Front>,
     pub run: Run,
 }
 
@@ -175,7 +176,7 @@ impl ActionDescriptor {
     /// what it did): the command line takes `--no-front` to leave what's in
     /// front alone, and its help says so. A [`Run::Do`] action reads
     /// [`Cx::front`].
-    pub const fn brings_to_front(mut self, app: &'static str) -> Self {
+    pub const fn brings_to_front(mut self, app: Front) -> Self {
         self.fronts = Some(app);
         self
     }
@@ -254,14 +255,14 @@ mod tests {
     fn no_front_flag() {
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         // an action that brings its app forward: the flag is taken out
-        assert_eq!(front_flag(Some("live TV"), &a(&["up"])), (true, a(&["up"])));
-        assert_eq!(front_flag(Some("live TV"), &a(&["--no-front", "up"])), (false, a(&["up"])));
-        assert_eq!(front_flag(Some("live TV"), &a(&["up", "--no-front"])), (false, a(&["up"])));
+        assert_eq!(front_flag(Some(Front::Package("x")), &a(&["up"])), (true, a(&["up"])));
+        assert_eq!(front_flag(Some(Front::Package("x")), &a(&["--no-front", "up"])), (false, a(&["up"])));
+        assert_eq!(front_flag(Some(Front::Package("x")), &a(&["up", "--no-front"])), (false, a(&["up"])));
         // after "--" it's the action's own
-        assert_eq!(front_flag(Some("Kodi"), &a(&["--", "--no-front"])), (true, a(&["--", "--no-front"])));
+        assert_eq!(front_flag(Some(Front::Package("x")), &a(&["--", "--no-front"])), (true, a(&["--", "--no-front"])));
         // one that doesn't: left as it is
         assert_eq!(front_flag(None, &a(&["--no-front"])), (true, a(&["--no-front"])));
-        let d = ActionDescriptor::new("x.go", "x", "go", said).args("<where>").brings_to_front("X");
+        let d = ActionDescriptor::new("x.go", "x", "go", said).args("<where>").brings_to_front(Front::Package("x"));
         assert_eq!(d.call_line("go"), "go <where> [--no-front]");
         assert_eq!(ActionDescriptor::new("x.say", "x", "say it", said).call_line("say"), "say");
     }

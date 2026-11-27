@@ -926,7 +926,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             .text("Find in Kodi:", "a film or show's title"),
         A::new("kodi.play", "kodi", "kodi: play from the library", |cx, a| play(cx.tv, &words(a, "a title")?, cx.front).map(Into::into))
             .args("<words>")
-            .brings_to_front("Kodi")
+            .brings_to_front(tveee_core::builtin::apps::Front::Package(PACKAGE))
             .text("Play in Kodi:", "a film or show's title"),
         A::new("kodi.clean", "kodi", "kodi: forget videos that are gone (library clean)", |cx, _| clean(cx.tv))
             .confirm("Remove the videos Kodi can't find any more from its library?"),

@@ -97,35 +97,9 @@ fn inputs(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Whether `window` (`pkg/activity`) is `pkg`'s.
-fn is_of(window: Option<&str>, pkg: &str) -> bool {
-    window.is_some_and(|w| w.split('/').next() == Some(pkg))
-}
-
-/// The TV's own live TV app at the front (the channel keys only change
-/// channel there): brought forward if something else is, and waited for.
-/// Returns what to say about it ("" when it was there already, or there's
-/// no live TV app here).
-fn live_tv_in_front(tv: &crate::tv::Tv) -> Result<String> {
-    use crate::builtin::apps;
-    let Some(app) = apps::all().iter().find(|a| matches!(a.kind, apps::Kind::LiveTv)) else { return Ok(String::new()) };
-    let pkg = app.package();
-    let front = || crate::builtin::info::focus_window(&tv.window_dump().unwrap_or_default());
-    if is_of(front().as_deref(), pkg) {
-        return Ok(String::new());
-    }
-    apps::bring_to_front(tv, app.target)?;
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
-    while !is_of(front().as_deref(), pkg) {
-        if std::time::Instant::now() >= until {
-            return crate::error::failed(format!("channel: couldn't bring {} to the front (it's showing {})", app.name, front().unwrap_or_else(|| "nothing".into())));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
-    // it takes the keys a moment after it shows
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    Ok(format!("brought {} to the front; ", app.name))
-}
+/// What `channel` brings to the front: its keys only change channel in the
+/// TV's own live TV app.
+const LIVE_TV: crate::builtin::apps::Front = crate::builtin::apps::Front::Kind(crate::builtin::apps::Kind::LiveTv);
 
 fn channel(c: &Cx, args: &[String]) -> Result<Output> {
     let arg = args.first().map(String::as_str);
@@ -133,7 +107,7 @@ fn channel(c: &Cx, args: &[String]) -> Result<Output> {
     if !matches!(arg, Some("up" | "down")) && number.is_none() {
         return usage("usage: tveee channel up|down|<number>");
     }
-    let first = if c.front { live_tv_in_front(c.tv)? } else { String::new() };
+    let first = if c.front { LIVE_TV.bring(c.tv)? } else { String::new() };
     let said = match (arg, number) {
         (Some("up"), _) => c.tv.key(166).map(|()| "channel up".to_string())?,
         (Some("down"), _) => c.tv.key(167).map(|()| "channel down".to_string())?,
@@ -192,7 +166,7 @@ pub fn actions() -> Vec<A> {
         A::terminal("input.list", CAT, "list inputs", inputs)
             .cli("inputs", "[--all]", "list the TV's input sources")
             .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
-        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).args("up|down|<number>").brings_to_front("live TV"),
+        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).args("up|down|<number>").brings_to_front(LIVE_TV),
         input_item!("input.tuner", 't', "TV tuner", 170),
         input_item!("input.hdmi1", '1', "HDMI 1", 243),
         input_item!("input.hdmi2", '2', "HDMI 2", 244),
@@ -203,15 +177,6 @@ pub fn actions() -> Vec<A> {
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn whose_window() {
-        use super::is_of;
-        assert!(is_of(Some("org.droidtv.zapster/org.droidtv.zapster.playtv.activity.PlayTvActivity"), "org.droidtv.zapster"));
-        assert!(!is_of(Some("org.droidtv.zapster2/x"), "org.droidtv.zapster"));
-        assert!(!is_of(Some("org.xbmc.kodi/.Splash"), "org.droidtv.zapster"));
-        assert!(!is_of(None, "org.droidtv.zapster"));
-    }
 
     use super::*;
 
