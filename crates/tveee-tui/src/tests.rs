@@ -1,6 +1,6 @@
 /// Every vendor plugin's apps and providers, as the binary installs them
 /// (call before looking any up).
-fn install_all() {
+pub(super) fn install_all() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         tveee_core::labels::ignore_cache();
@@ -293,6 +293,14 @@ fn buttons_wrap_and_have_unique_keys() {
         assert!(places.iter().any(|(r, _)| *r > 0));
         for (b, (_, x)) in bs.iter().zip(&places) {
             assert!(x + button_width(b) <= 40, "{} overflows", b.label);
+        }
+        // cut to one row: what matters most stays
+        for width in [70, 100, 120, 200] {
+            let row = one_row(buttons(mode, true, true), width);
+            assert!(flow(&row, width).iter().all(|(r, _)| *r == 0), "{mode:?} at {width}: more than a row");
+            for must in ["quit", "cmds"] {
+                assert!(row.iter().any(|b| b.label == must), "{mode:?} at {width}: no {must}");
+            }
         }
     }
 }

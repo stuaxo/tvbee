@@ -38,6 +38,8 @@ pub struct TvState {
     pub at: Instant,
     /// `snap` is what was last seen in an earlier run, not read yet.
     pub seeded: bool,
+    /// When that was (unix seconds), while `seeded`.
+    pub seen_at: Option<i64>,
     /// Why the last refresh or action failed; cleared by the next refresh.
     pub error: Option<String>,
     /// The launcher's rows; None until read.
@@ -69,6 +71,7 @@ impl TvState {
             snap: seen.map(last::seed),
             at: Instant::now(),
             seeded: seen.is_some(),
+            seen_at: seen.map(|l| l.at),
             error: None,
             apps: None,
             searchable: None,
@@ -214,7 +217,7 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
                 });
                 CoreEvent::Changed(Change::Seeked)
             }
-            Msg::Note(n) => CoreEvent::Note(n),
+            Msg::Note(n) => CoreEvent::Note(note_line(&n)),
             Msg::Failed(e) => {
                 crate::tlog!("failed: {e}");
                 update(&mut |st| st.error = Some(e.clone()));
@@ -244,6 +247,10 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
                 CoreEvent::Changed(Change::Info)
             }
             Msg::Guide(g) => {
+                if let Err(e) = &g {
+                    // the ui shows it short: the whole of it goes here
+                    crate::tlog!("guide FAILED: {e}");
+                }
                 let news = g.as_ref().ok().and_then(|g| g.news.clone());
                 update(&mut |st| (st.guide, st.guide_loading) = (Some(Arc::new(g.clone())), false));
                 if events.send(CoreEvent::Changed(Change::Guide)).is_err() {
@@ -261,5 +268,29 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
         if events.send(event).is_err() {
             return;
         }
+    }
+}
+
+/// A note for the one status line: a note of several lines (a list) goes
+/// to the log whole, and its first line says so.
+pub fn note_line(n: &str) -> String {
+    let mut lines = n.trim_end().lines();
+    let first = lines.next().unwrap_or("").to_string();
+    let more = lines.count();
+    if more == 0 {
+        return first;
+    }
+    for l in n.trim_end().lines() {
+        crate::tlog!("  {l}");
+    }
+    format!("{first}  (+{more} more: the log has it all, : log)")
+}
+
+#[cfg(test)]
+mod note_tests {
+    #[test]
+    fn long_notes_point_to_the_log() {
+        assert_eq!(super::note_line("muted"), "muted");
+        assert_eq!(super::note_line("a\nb\nc\n"), "a  (+2 more: the log has it all, : log)");
     }
 }

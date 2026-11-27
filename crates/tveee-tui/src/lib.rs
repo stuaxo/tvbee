@@ -61,8 +61,11 @@ struct App {
     actions: Vec<ActionDescriptor>,
     /// Where the clickable things were drawn last frame.
     hits: Vec<(ratatui::layout::Rect, Hit)>,
-    /// Show the system panel (memory, storage, ...).
-    info: bool,
+    /// Show the system panel (memory, storage, ...): None until `i` is
+    /// pressed (then shown when the screen is wide, see `wide`).
+    info: Option<bool>,
+    /// Whether the last frame was wide enough for the side column.
+    wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
     /// What has been typed into the open prompt.
@@ -472,7 +475,8 @@ impl App {
             menu: actions.iter().filter(|a| a.key.is_some()).copied().collect(),
             actions,
             hits: Vec::new(),
-            info: false,
+            info: None,
+            wide: false,
             apps_tab: AppTab::Known,
             prompt: String::new(),
             search_targets: Vec::new(),
@@ -604,8 +608,8 @@ impl App {
                     Mode::Player => "player mode: arrows seek and change volume".into(),
                 };
             }
-            Input::ToggleHelp => self.overlay = Overlay::Help,
-            Input::ToggleInfo => self.info = !self.info,
+            Input::ToggleHelp => self.overlay = Overlay::Help(0),
+            Input::ToggleInfo => self.info = Some(!self.info_shown()),
             Input::ToggleAmbilight if self.panel_id().is_none() => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
@@ -800,6 +804,11 @@ impl App {
     fn click(&mut self, x: u16, y: u16, actions: &Handle) -> bool {
         let hit = self.hit_at(x, y);
         match (self.overlay, hit) {
+            // a button on the now-playing card: as if chosen from the menu
+            (Overlay::None, Some(Hit::Chip(i))) => {
+                let (next, action) = pick(&self.menu, i);
+                self.apply_overlay(next, action, actions);
+            }
             (Overlay::Menu(_), Some(Hit::MenuItem(i))) => {
                 let (next, action) = pick(&self.menu, i);
                 self.apply_overlay(next, action, actions);
@@ -851,7 +860,7 @@ impl App {
             (Overlay::Logs(_), Some(Hit::Popup)) => {}
             (Overlay::Logs(_), _) => self.overlay = Overlay::None,
             // a click elsewhere closes the pop-up (cancelling a confirmation)
-            (Overlay::Help | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
+            (Overlay::Help(_) | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
                 self.apply_overlay(Overlay::None, None, actions)
             }
             (Overlay::None, Some(Hit::Input(i))) => return self.apply(i, actions),

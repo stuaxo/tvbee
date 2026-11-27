@@ -13,7 +13,7 @@ pub enum Overlay {
     Ambilight { row: usize, col: usize },
     /// Typing a colour for option `col` of the dialog's lights row (0: all).
     AmbiColour { row: usize, col: usize },
-    Help,
+    Help(usize),
     /// The "more" menu, with the highlighted item.
     Menu(usize),
     /// "Are you sure?" for menu item N; `yes` is the highlighted answer.
@@ -125,8 +125,14 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
     let pick_item = |i: usize| pick(items, i);
     match overlay {
         Overlay::None => (Overlay::None, None),
-        // any key closes the help
-        Overlay::Help => (Overlay::None, None),
+        // arrows scroll the help; any other key closes it
+        Overlay::Help(top) => match code {
+            KeyCode::Up => (Overlay::Help(top.saturating_sub(1)), None),
+            KeyCode::Down => (Overlay::Help(top.saturating_add(1)), None),
+            KeyCode::PageUp => (Overlay::Help(top.saturating_sub(10)), None),
+            KeyCode::PageDown => (Overlay::Help(top.saturating_add(10)), None),
+            _ => (Overlay::None, None),
+        },
         Overlay::Menu(sel) => match code {
             KeyCode::Esc | KeyCode::Char('.') | KeyCode::Char('q') | KeyCode::Backspace => (Overlay::None, None),
             KeyCode::Up => (Overlay::Menu(sel.checked_sub(1).unwrap_or(items.len().saturating_sub(1))), None),
@@ -206,6 +212,37 @@ pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
     items.get(i).map_or((Overlay::None, None), choose)
 }
 
+/// [`HELP`] in rows of at most `w`: as it is when it fits; else its two
+/// columns one under the other, and long rows wrapped under their text.
+pub(super) fn help_lines(w: usize) -> Vec<String> {
+    if HELP.lines().all(|l| l.chars().count() <= w) {
+        return HELP.lines().map(str::to_string).collect();
+    }
+    const COL2: usize = 29;
+    let mut out = Vec::new();
+    for line in HELP.lines() {
+        let c: Vec<char> = line.chars().collect();
+        // a key row ("   m        mute/unmute      r      refresh"): its
+        // second column has a row of its own
+        let key_row = c.len() > 3 && c[..3].iter().all(|&x| x == ' ') && c[3] != ' ';
+        let two = key_row && c.len() > COL2 && c[COL2 - 3..COL2].iter().all(|&x| x == ' ') && c[COL2] != ' ';
+        let rows = if two {
+            // the second column's keys are narrower: lined up with the first's
+            let second: String = c[COL2..].iter().collect();
+            let (key, what) = second.split_once("  ").unwrap_or((&second, ""));
+            vec![c[..COL2].iter().collect::<String>(), format!("   {key:<9}{}", what.trim_start())]
+        } else {
+            vec![line.to_string()]
+        };
+        for row in rows {
+            let lead = row.chars().take_while(|&x| x == ' ').count();
+            let hang = if lead == 3 { 12 } else { lead };
+            out.extend(super::drawing::wrap_keep(&row, w, hang));
+        }
+    }
+    out
+}
+
 pub(super) const HELP: &str = " everywhere
    space p  play/pause       ⌫      back
    h        home             [ ]    seek -/+ 60s
@@ -234,7 +271,7 @@ pub(super) const HELP: &str = " everywhere
    q Esc    quit
 
  player mode
-   ← →      seek -/+ 10s (exact in YouTube; ff/rew keys elsewhere)
+   ← →      seek -/+ 10s (exact in YouTube; ff/rw keys elsewhere)
    ↑ ↓      volume
 
  remote mode: the keyboard is the TV's (tab leaves, ctrl-c quits)
@@ -286,7 +323,7 @@ impl App {
     pub(super) fn draw_overlay(&mut self, f: &mut Frame) {
         match self.overlay {
             Overlay::None => {}
-            Overlay::Help => self.draw_help(f),
+            Overlay::Help(top) => self.draw_help(f, top),
             Overlay::Menu(sel) => self.draw_menu(f, sel),
             Overlay::Options(sel) => self.draw_options(f, sel),
             Overlay::Guide { tab, at } => self.draw_guide(f, tab, at),
@@ -303,9 +340,22 @@ impl App {
         }
     }
 
-    pub(super) fn draw_help(&mut self, f: &mut Frame) {
-        let text: Vec<Line> = HELP.lines().map(Line::from).collect();
-        let r = popup(f, " keys - any key closes ", text, Color::DarkGray);
+    /// The keys, from row `top`: fitted to the terminal's width, and
+    /// scrolling (↑/↓) when they don't all fit its height.
+    pub(super) fn draw_help(&mut self, f: &mut Frame, top: usize) {
+        let area = f.area();
+        let lines = help_lines(usize::from(area.width.saturating_sub(4)));
+        let room = usize::from(area.height.saturating_sub(2)).max(1);
+        let top = top.min(lines.len().saturating_sub(room));
+        // remembered as shown, so ↑ moves at once from the end
+        self.overlay = Overlay::Help(top);
+        let (title, right) = if lines.len() > room {
+            (" keys - ↑/↓ scroll, any other key closes ", format!(" {}-{} of {} ", top + 1, (top + room).min(lines.len()), lines.len()))
+        } else {
+            (" keys - any key closes ", String::new())
+        };
+        let text: Vec<Line> = lines.into_iter().skip(top).take(room).map(Line::from).collect();
+        let r = popup_titled(f, title, &right, text, Color::DarkGray);
         self.hits.push((r, Hit::Popup));
     }
 

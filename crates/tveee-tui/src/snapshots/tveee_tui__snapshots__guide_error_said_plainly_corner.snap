@@ -1,0 +1,21 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 231
+expression: s
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
+│[F]ree memory │ [:] commands                              │
+│what     In standby                                       │
+│press . then w to wake the TV                             │
+│                                                          │
+│┌ guide ────────────────────────────────────────────────┐ │
+││couldn't read the guide: the TV didn't answer (it may  │ │
+││be busy or still starting)                             │ │
+││esc, g: try again · details in the log (: log)         │ │
+│└───────────────────────────────────────────────────────┘ │
+│                                                          │
+│                                                          │
+│                                                          │
+│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

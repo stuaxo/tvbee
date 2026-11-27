@@ -39,6 +39,11 @@ pub enum Hit {
     Popup,
     /// The whole link's buttons: copy, open (worked out by where).
     UrlButtons,
+    /// The row of things to do with what's playing (see [`App::chips`]);
+    /// each has its own hit, this marks the row.
+    Chips,
+    /// Menu item N, from a button on the now-playing card.
+    Chip(usize),
 }
 
 /// Columns `s` takes.
@@ -74,8 +79,8 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
         Mode::Player => vec![
             button("space", "play/pause", Do(PlayPause)),
             // exact seeking (YouTube) vs fast-forward/rewind key presses
-            button("←", if exact { "-10s" } else { "rew" }, Do(Seek(-10.0))),
-            button("→", if exact { "+10s" } else { "ffw" }, Do(Seek(10.0))),
+            button("←", if exact { "-10s" } else { "rw" }, Do(Seek(-10.0))),
+            button("→", if exact { "+10s" } else { "ff" }, Do(Seek(10.0))),
             button("↑", "vol+", Do(Volume(1))),
             button("↓", "vol-", Do(Volume(-1))),
             button("m", "mute", Do(Mute)),
@@ -92,6 +97,7 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
                 button("⌫", "delete", Do(Key(KEY_DEL))),
                 button("home", "home", Do(Key(KEY_HOME))),
                 button("tab", "player mode", ToggleMode),
+                button("^p", "cmds", Input::OpenPalette),
                 button("^c", "quit", Quit),
                 button("", "play/pause", Do(PlayPause)),
                 button("", "vol+", Do(Volume(1))),
@@ -120,6 +126,7 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
         button("g", "guide", Input::OpenGuide),
         button(",", "options", Input::OpenOptions),
         button(".", "more", OpenMenu),
+        button(":", "cmds", Input::OpenPalette),
         button("?", "help", ToggleHelp),
         button("q", "quit", Quit),
     ]);
@@ -128,6 +135,52 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
     }
     b
 }
+
+/// What goes first when the keys don't fit one row, by label: the least
+/// used first (they're all still keys, in the help and the palette).
+const DROP_FIRST: &[&str] = &[
+    // remote mode's click-only buttons
+    "help", "more", "options", "guide", "search", "apps", "preview", "ambilight", "info", "vol-", "vol+", "play/pause",
+    // then remote mode's keys, the obvious ones last
+    "back", "home", "delete", "ok", "right", "left", "down", "up",
+];
+
+/// `bs` cut down to one row of `width`: the least used go first (see
+/// [`DROP_FIRST`]); playback, the mode, commands, help and quit stay.
+pub(super) fn one_row(mut bs: Vec<Button>, width: u16) -> Vec<Button> {
+    let fits = |bs: &[Button]| flow(bs, width).iter().all(|(r, _)| *r == 0);
+    // player mode's own order of going: the panels, then the rest
+    let player_first = ["preview", "options", "info", "ambilight", "more", "back", "home", "search", "apps", "guide", "mute"];
+    let order: Vec<&str> = player_first.iter().chain(DROP_FIRST).copied().collect();
+    for label in order {
+        if fits(&bs) {
+            break;
+        }
+        // a click-only button (remote mode) before a key with the same name
+        let at = bs.iter().rposition(|b| b.label == label && b.key.is_empty()).or_else(|| bs.iter().position(|b| b.label == label));
+        if let Some(i) = at {
+            bs.remove(i);
+        }
+    }
+    bs
+}
+
+/// A button on the now-playing card: " key " and " what".
+fn chip_width(key: &str, text: &str) -> u16 {
+    u16::try_from(key.chars().count() + 2 + text.chars().count() + 1).unwrap_or(u16::MAX)
+}
+
+/// A row of them, with two spaces between.
+fn chips_width(chips: &[(String, String, Hit)]) -> usize {
+    chips.iter().map(|(k, t, _)| usize::from(chip_width(k, t)) + 2).sum::<usize>().saturating_sub(2)
+}
+
+/// From this wide (inside the border), the panels get a column of their
+/// own on the right.
+pub(super) const SIDE_FROM: u16 = 100;
+
+/// The D-pad's height: three rows of keys and a border.
+const DPAD_ROWS: u16 = 5;
 
 /// A small pane (an editor split, a corner of the screen): one row of keys.
 pub(super) fn compact(area: ratatui::layout::Rect) -> bool {
@@ -228,6 +281,37 @@ pub(super) fn textwrap(s: &str, w: usize) -> Vec<String> {
     out
 }
 
+/// Where the memory graph starts (MB): 0, unless memory has stayed well up
+/// all along; then just under the lowest, so changes near the top show
+/// instead of a solid block.
+pub(super) fn graph_floor(used: &[u64], total: u64) -> u64 {
+    let (Some(&lo), Some(&hi)) = (used.iter().min(), used.iter().max()) else { return 0 };
+    if total == 0 || lo * 2 < total {
+        return 0;
+    }
+    // room below the lowest: as much again as it moves, and a little more
+    let floor = lo.saturating_sub((hi - lo) + total / 20);
+    floor / 50 * 50
+}
+
+/// `line` in rows of at most `w` characters, broken at spaces where it can;
+/// the rows after the first start with `hang` spaces. Unlike [`textwrap`]
+/// the spacing inside a row is kept (lined-up columns stay lined up).
+pub(super) fn wrap_keep(line: &str, w: usize, hang: usize) -> Vec<String> {
+    let w = w.max(hang + 8);
+    let mut out = Vec::new();
+    let mut rest: Vec<char> = line.trim_end().chars().collect();
+    while rest.len() > w {
+        let start = if out.is_empty() { 1 } else { hang + 1 };
+        let cut = (start..=w).rev().find(|&i| rest[i] == ' ').unwrap_or(w);
+        out.push(rest[..cut].iter().collect::<String>().trim_end().to_string());
+        let tail: String = rest[cut..].iter().collect();
+        rest = format!("{}{}", " ".repeat(hang), tail.trim_start()).chars().collect();
+    }
+    out.push(rest.into_iter().collect());
+    out
+}
+
 /// A bordered box centred over the screen, sized to its text. Returns where.
 pub(super) fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {
     popup_titled(f, title, "", text, border)
@@ -282,9 +366,10 @@ impl App {
         let small = compact(area);
         let bs = buttons(self.mode, self.st.snap.as_ref().is_some_and(|s| s.exact), self.panel_id().is_some());
         let bs = if small { compact_buttons(self.mode) } else { bs };
+        // one row of keys at any width (the rest: the palette, help)
+        let bs = one_row(bs, area.width);
         let places = flow(&bs, area.width);
-        // a small pane keeps one row of keys (the rest: the palette, help)
-        let rows = if small { 1 } else { places.iter().map(|(r, _)| r + 1).max().unwrap_or(1) };
+        let rows = places.iter().map(|(r, _)| r + 1).max().unwrap_or(1);
         let [top, body, _, footer, status] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(4),
@@ -295,40 +380,16 @@ impl App {
         .areas(area);
         self.draw_spine(f, top);
 
-        // the preview: beside the rest when there's room, else below it
-        let body = if self.preview_open {
-            if body.width >= 90 {
-                let w = (body.width / 2).min(64);
-                let [left, right] = Layout::horizontal([Constraint::Min(40), Constraint::Length(w)]).areas(body);
-                self.draw_preview(f, right);
-                left
-            } else {
-                let h = (body.height / 2).clamp(6, 14);
-                let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
-                self.draw_preview(f, panel);
-                top
-            }
+        // wide: a column on the right for the D-pad (remote mode) and the
+        // panels; else the panels go below what's playing
+        self.wide = body.width >= SIDE_FROM;
+        let body = if self.wide {
+            let w = (body.width * 2 / 5).clamp(44, 64);
+            let [left, side] = Layout::horizontal([Constraint::Min(50), Constraint::Length(w)]).areas(body);
+            self.draw_side(f, side);
+            left
         } else {
-            body
-        };
-        let body = if self.ambi_open && self.panel_id().is_some() {
-            let want = self.ambilight_height();
-            let h = want.min(body.height.saturating_sub(4));
-            let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
-            self.draw_ambilight(f, panel);
-            top
-        } else {
-            body
-        };
-        let body = if self.info {
-            let want = self.panel_height();
-            // keep at least 4 rows for what's playing
-            let h = want.min(body.height.saturating_sub(4));
-            let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
-            self.draw_panel(f, panel);
-            top
-        } else {
-            body
+            self.stack_panels(f, body)
         };
         self.draw_body(f, body);
 
@@ -358,6 +419,113 @@ impl App {
         f.render_widget(Paragraph::new(line), status);
 
         self.draw_overlay(f);
+    }
+
+    /// Whether the system panel shows: as `i` last left it, else when the
+    /// screen is wide (there's a column for it) and there's something to
+    /// show (not in standby, or before the first reading).
+    pub(super) fn info_shown(&self) -> bool {
+        let read = self.st.snap.as_ref().is_some_and(|s| s.system.mem.is_some() && !s.standby && !self.st.seeded);
+        self.info.unwrap_or(self.wide && read)
+    }
+
+    /// A narrow screen: the open panels below what's playing (preview,
+    /// Ambilight, system), each leaving it at least 4 rows. Returns what's
+    /// left for it.
+    pub(super) fn stack_panels(&mut self, f: &mut Frame, body: ratatui::layout::Rect) -> ratatui::layout::Rect {
+        // (rows below what's playing, the rest above)
+        let below = |body: ratatui::layout::Rect, want: u16| {
+            let h = want.min(body.height.saturating_sub(4));
+            let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
+            (panel, top)
+        };
+        let mut body = body;
+        if self.preview_open {
+            let (panel, top) = below(body, (body.height / 2).clamp(6, 14));
+            self.draw_preview(f, panel);
+            body = top;
+        }
+        if self.ambi_open && self.panel_id().is_some() {
+            let (panel, top) = below(body, self.ambilight_height());
+            self.draw_ambilight(f, panel);
+            body = top;
+        }
+        if self.info_shown() {
+            let (panel, top) = below(body, self.panel_height());
+            self.draw_panel(f, panel);
+            body = top;
+        }
+        body
+    }
+
+    /// A wide screen's right-hand column, top to bottom: the D-pad (remote
+    /// mode), the preview, the Ambilight and the system panel, each as
+    /// tall as it wants while there's room.
+    pub(super) fn draw_side(&mut self, f: &mut Frame, side: ratatui::layout::Rect) {
+        let mut rest = side;
+        let mut take = |want: u16| -> Option<ratatui::layout::Rect> {
+            if rest.height < 3 {
+                return None;
+            }
+            let h = want.min(rest.height);
+            let [top, more] = Layout::vertical([Constraint::Length(h), Constraint::Min(0)]).areas(rest);
+            rest = more;
+            Some(top)
+        };
+        if self.mode == Mode::Remote
+            && let Some(r) = take(DPAD_ROWS)
+        {
+            self.draw_dpad(f, r);
+        }
+        if self.preview_open {
+            // about 16:9 in cells twice as tall as wide, and a border
+            let want = (side.width.saturating_sub(2) * 9 / 32 + 3).max(6);
+            if let Some(r) = take(want) {
+                self.draw_preview(f, r);
+            }
+        }
+        if self.ambi_open
+            && self.panel_id().is_some()
+            && let Some(r) = take(self.ambilight_height())
+        {
+            self.draw_ambilight(f, r);
+        }
+        if self.info_shown()
+            && let Some(r) = take(self.panel_height())
+        {
+            self.draw_panel(f, r);
+        }
+    }
+
+    /// The remote's keys to click (remote mode, wide screens): arrows and
+    /// OK, back, home, and play/pause and volume.
+    pub(super) fn draw_dpad(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
+        use Action::{Key, PlayPause, Volume};
+        let block = Block::bordered().title(" remote - click, or type ").border_style(Style::new().fg(Color::DarkGray));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        // (row, column, label, what it does): columns of 7 cells
+        let keys: [(u16, u16, &str, Action); 11] = [
+            (0, 1, "  ↑  ", Key(19)),
+            (1, 0, "  ←  ", Key(21)),
+            (1, 1, " ok  ", Key(KEY_OK)),
+            (1, 2, "  →  ", Key(22)),
+            (2, 1, "  ↓  ", Key(20)),
+            (0, 3, "back ", Key(KEY_BACK)),
+            (1, 3, "home ", Key(KEY_HOME)),
+            (2, 3, " del ", Key(KEY_DEL)),
+            (0, 4, " ⏯   ", PlayPause),
+            (1, 4, "vol+ ", Volume(1)),
+            (2, 4, "vol- ", Volume(-1)),
+        ];
+        for (row, col, label, act) in keys {
+            let r = ratatui::layout::Rect { x: inner.x + 1 + col * 7, y: inner.y + row, width: 5, height: 1 };
+            if r.right() > inner.right() || r.y >= inner.bottom() {
+                continue;
+            }
+            f.render_widget(Paragraph::new(Span::styled(label, Style::new().fg(Color::Black).bg(Color::Gray))), r);
+            self.hits.push((r, Hit::Input(Input::Do(act))));
+        }
     }
 
     /// The top line ([`spine`]), each part clickable.
@@ -397,6 +565,13 @@ impl App {
         // hyperlinks once drawn
         let mut url_rows: Vec<(usize, String, String)> = Vec::new();
         let settling = self.settling_label();
+        // what can be done with it, fitted to one row
+        let mut chips = self.chips();
+        while !chips.is_empty() && 9 + chips_width(&chips) > width {
+            // the app's later actions go before guide and search
+            let at = chips.iter().rposition(|(_, _, h)| matches!(h, Hit::Chip(_))).unwrap_or(chips.len() - 1);
+            chips.remove(at);
+        }
         match &self.st.snap {
             None => lines.push((Line::from("waiting for the TV...").italic(), None)),
             Some(s) => {
@@ -409,7 +584,8 @@ impl App {
                     Some(a) => {
                         let mut what = vec![label("what"), Span::raw(a.what.clone()).bold()];
                         if self.st.seeded {
-                            what.push(Span::styled("  (last seen; waiting for the TV...)", Style::new().fg(Color::DarkGray).italic()));
+                            let when = self.st.seen_at.map_or_else(|| "last seen".to_string(), tveee_core::engine::last::ago);
+                            what.push(Span::styled(format!("  ({when}; reading the TV...)"), Style::new().fg(Color::DarkGray).italic()));
                         }
                         lines.push((Line::from(what), None));
                         // fields that open something look like links
@@ -472,6 +648,17 @@ impl App {
                             }
                         }
                         lines.extend(a.fields.iter().filter(|f| f.place == nowplaying::Place::Bottom).map(field));
+                        if !chips.is_empty() {
+                            let mut spans = vec![label("do")];
+                            for (i, (key, text, _)) in chips.iter().enumerate() {
+                                if i > 0 {
+                                    spans.push(Span::raw("  "));
+                                }
+                                spans.push(Span::styled(format!(" {key} "), Style::new().fg(Color::Black).bg(Color::Gray)));
+                                spans.push(Span::styled(format!(" {text}"), Style::new().fg(Color::Gray)));
+                            }
+                            lines.push((Line::from(spans), Some(Hit::Chips)));
+                        }
                     }
                     None => lines.push((Line::from("nothing playing that tveee recognises").italic(), None)),
                 }
@@ -516,6 +703,16 @@ impl App {
                 let x = if text == OPEN_BUTTON { body.x + LABEL + width_of(COPY_BUTTON) + 1 } else { body.x + LABEL };
                 self.links.push(links::Drawn { x, y, text: text.clone(), url: url.clone() });
             }
+            if hit == Some(Hit::Chips) {
+                let mut x = body.x + LABEL;
+                for (key, text, h) in &chips {
+                    let w = chip_width(key, text);
+                    self.hits.push((ratatui::layout::Rect { x, y, width: w, height: 1 }, h.clone()));
+                    x += w + 2;
+                }
+                y += h;
+                continue;
+            }
             if hit == Some(Hit::UrlButtons) {
                 let copy_w = width_of(COPY_BUTTON);
                 let copy = ratatui::layout::Rect { x: body.x + LABEL, y, width: copy_w, height: 1 };
@@ -536,6 +733,35 @@ impl App {
             }
             y += h;
         }
+    }
+
+    /// Things to do with what's playing, as (key, what, click): the
+    /// actions of the app in front (Kodi's subtitles and audio, ...; their
+    /// key is in the menu, so ".k"), the guide on live TV, and search where
+    /// tveee knows how. None in standby, or before the first reading.
+    pub(super) fn chips(&self) -> Vec<(String, String, Hit)> {
+        let Some(s) = self.st.snap.as_ref().filter(|s| !s.standby && !self.st.seeded) else { return Vec::new() };
+        let pkg = s.focus.as_deref().map(|f| f.split('/').next().unwrap_or(f));
+        let provider = pkg.and_then(tveee_core::provider::for_package);
+        let live = s.kind.as_deref().is_some_and(|k| k.starts_with("live-tv"));
+        let mut out = Vec::new();
+        if live {
+            out.push(("g".to_string(), "guide".to_string(), Hit::Input(Input::OpenGuide)));
+        }
+        if let Some(p) = provider {
+            for (i, a) in self.menu.iter().enumerate() {
+                if a.category != p.id() {
+                    continue;
+                }
+                let Some(key) = a.key else { continue };
+                let what = a.title.strip_prefix(&format!("{}: ", a.category)).unwrap_or(a.title);
+                out.push((format!(".{key}"), what.to_string(), Hit::Chip(i)));
+            }
+        }
+        if live || provider.is_some() {
+            out.push(("/".to_string(), "search".to_string(), Hit::Input(Input::OpenSearch)));
+        }
+        out
     }
 
     pub(super) fn panel_disks(&self) -> Vec<(&'static str, info::Disk)> {
@@ -561,7 +787,9 @@ impl App {
         let sys = &s.system;
         let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(Color::DarkGray));
         let width = usize::from(inner.width);
-        let bar_w = width.saturating_sub(9 + 34).clamp(10, 40);
+        // in the side column (or a narrow pane): shorter bars and words
+        let narrow = width < 60;
+        let bar_w = if narrow { 6 } else { width.saturating_sub(9 + 34).clamp(10, 40) };
         let gauge = |frac: f64, text: String| {
             let hot = frac >= 0.9;
             let colour = if hot { Color::Red } else { Color::Green };
@@ -577,19 +805,19 @@ impl App {
             Line::from(vec![
                 label("app"),
                 Span::styled(kind, Style::new().fg(Color::Cyan)),
-                Span::raw(s.focus.clone().unwrap_or_default()),
+                // narrow: the package (the activity's name says little more)
+                Span::raw(s.focus.as_deref().map_or("", |f| if narrow { f.split('/').next().unwrap_or(f) } else { f }).to_string()),
             ]),
             1,
         ));
         match sys.mem {
             Some(m) => {
                 let mb = |k: u64| k / 1024;
-                let text = format!(
-                    "{} MB used of {} MB ({} MB available)",
-                    mb(m.used()),
-                    mb(m.total),
-                    mb(m.available)
-                );
+                let text = if narrow {
+                    format!("{}/{} MB used, {} MB free", mb(m.used()), mb(m.total), mb(m.available))
+                } else {
+                    format!("{} MB used of {} MB ({} MB available)", mb(m.used()), mb(m.total), mb(m.available))
+                };
                 rows.push((Line::from(vec![label("memory"), Span::raw(text)]), 1));
                 rows.push((Line::default(), GRAPH_ROWS)); // the graph goes here
                 let swap = if m.swap_total > 0 {
@@ -603,8 +831,16 @@ impl App {
         }
         for (name, d) in self.panel_disks() {
             let frac = if d.total_kb > 0 { d.used_kb as f64 / d.total_kb as f64 } else { 0.0 };
-            let text = info::disk_summary(name, &d);
-            rows.push((Line::from([vec![label("storage")], gauge(frac, text)].concat()), 1));
+            if narrow {
+                // the disk's name as the label: "internal  ━━┃─ 3.5/3.6 GB, 101 MB free"
+                let used = info::size(d.used_kb);
+                let used = used.trim_end_matches(" GB").trim_end_matches(" MB");
+                let text = format!("{used}/{}, {} free", info::size(d.total_kb), info::size(d.avail_kb));
+                rows.push((Line::from([vec![label(name)], gauge(frac, text)].concat()), 1));
+            } else {
+                let text = info::disk_summary(name, &d);
+                rows.push((Line::from([vec![label("storage")], gauge(frac, text)].concat()), 1));
+            }
         }
         if let Some((a, b, c)) = sys.load {
             let cores = sys.cores.map_or(String::new(), |n| format!(" ({n} cores)"));
@@ -633,15 +869,27 @@ impl App {
         let n = usize::from(w).min(self.st.mem_history.len());
         let recent = &self.st.mem_history[self.st.mem_history.len() - n..];
         let hot = recent.last().is_some_and(|u| total_mb > 0 && *u * 10 >= total_mb * 9);
+        let floor = graph_floor(recent, total_mb);
+        let shifted: Vec<u64> = recent.iter().map(|u| u.saturating_sub(floor)).collect();
         let graph = ratatui::widgets::Sparkline::default()
-            .data(recent)
-            .max(total_mb.max(1))
+            .data(&shifted)
+            .max(total_mb.saturating_sub(floor).max(1))
             .style(Style::new().fg(if hot { Color::Yellow } else { Color::Cyan }));
         f.render_widget(graph, ratatui::layout::Rect { x, y: rect.y, width: w, height: rect.height });
-        let note = format!("last {}s", recent.len());
-        f.render_widget(
-            Paragraph::new(Line::from(note).fg(Color::DarkGray)),
-            ratatui::layout::Rect { x: rect.x, y: rect.y + rect.height - 1, width: 9.min(rect.width), height: 1 },
-        );
+        // the scale on the left: top, bottom (when it isn't 0), how long
+        let bottom = rect.height.saturating_sub(1);
+        let last = format!("last {}s", recent.len());
+        let notes = if floor > 0 && rect.height >= 3 {
+            // the scale's ends at its ends, how long between
+            vec![(0, format!("{total_mb} MB")), (bottom - 1, last), (bottom, format!("{floor} MB"))]
+        } else {
+            vec![(0, format!("{total_mb} MB")), (bottom, last)]
+        };
+        for (dy, note) in notes {
+            f.render_widget(
+                Paragraph::new(Line::from(note).fg(Color::DarkGray)),
+                ratatui::layout::Rect { x: rect.x, y: rect.y + dy, width: 9.min(rect.width), height: 1 },
+            );
+        }
     }
 }

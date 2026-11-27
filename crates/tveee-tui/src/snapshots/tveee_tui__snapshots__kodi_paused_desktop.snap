@@ -1,21 +1,20 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 92
 expression: "screen(&mut app(kodi_paused()), DESKTOP)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
 │load 4.82▲ │ 310 MB [F]ree │ [:] commands                                                                             │
-│what     Paused in Kodi                                                                                               │
-│title    Episode 3 (Off-Road)                                                                                         │
-│progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┃─────────────────────────────────── 27:56 / 48:47 (57%)      │
-│audio    AAC-LC  AAC                                                                                                  │
-│                                                                                                                      │
-│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
+│what     Paused in Kodi                                                ┌ system - i hides ───────────────────────────┐│
+│title    Episode 3 (Off-Road)                                          │power    Awake                               ││
+│progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │app      [player] org.xbmc.kodi              ││
+│audio    AAC-LC  AAC                                                   │memory   1032/1342 MB used, 310 MB free      ││
+│do        /  search                                                    │1342 MB                                      ││
+│                                                                       │                                             ││
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │last 0s                                      ││
+│                                                                       │swap     ━━━┃── 316/512 MB                   ││
+│                                                                       │load     4.82 3.10 2.40                      ││
+│                                                                       └─────────────────────────────────────────────┘│
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
@@ -33,7 +32,9 @@ expression: "screen(&mut app(kodi_paused()), DESKTOP)"
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   ⌫  back   h  home   tab  remote   i  info      │
-│ v  preview   a  apps   /  search   g  guide   ,  options   .  more   ?  help   q  quit                               │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit      │
 │                                                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -1,17 +1,20 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 174
+assertion_line: 190
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
 │load 4.82▲ │ 310 MB [F]ree │ [:] commands                                                                             │
-│what     Paused in Kodi                                                                                               │
-│title    Episode 3 (Off-Road)                                                                                         │
-│progress ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┃─────────────────────────────────── 27:56 / 48:47 (57%)      │
-│url      plugin://plugin.video.catchuptvandmore/resources/lib/channels/uk/my5/get_video_url/?item_id=%22episode-123456│
-│         78%22&video_id=%22C5-2026-11-27-the-long-programme-title%22&download_mode=false&token=abcdef0123456789       │
-│         [copy y] [open ↗]   u shortens it                                                                            │
-│audio    AAC-LC  AAC                                                                                                  │
+│what     Paused in Kodi                                                ┌ system - i hides ───────────────────────────┐│
+│title    Episode 3 (Off-Road)                                          │power    Awake                               ││
+│progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │app      [player] org.xbmc.kodi              ││
+│url      plugin://plugin.video.catchuptvandmore/resources/lib/channels/│memory   1032/1342 MB used, 310 MB free      ││
+│         uk/my5/get_video_url/?item_id=%22episode-12345678%22&video_id=│1342 MB                                      ││
+│         %22C5-2026-11-27-the-long-programme-title%22&download_mode=fal│                                             ││
+│         se&token=abcdef0123456789                                     │last 0s                                      ││
+│         [copy y] [open ↗]   u shortens it                             │swap     ━━━┃── 316/512 MB                   ││
+│audio    AAC-LC  AAC                                                   │load     4.82 3.10 2.40                      ││
+│do        /  search                                                    └─────────────────────────────────────────────┘│
 │                                                                                                                      │
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
 │                                                                                                                      │
@@ -32,9 +35,6 @@ expression: s
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   ⌫  back   h  home   tab  remote   i  info      │
-│ v  preview   a  apps   /  search   g  guide   ,  options   .  more   ?  help   q  quit                               │
+│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit      │
 │                                                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

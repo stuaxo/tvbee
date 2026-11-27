@@ -292,6 +292,13 @@ impl App {
                 self.overlay = Overlay::None;
                 return;
             }
+            // the commands, from here too (":" is filter text: programme
+            // names have colons)
+            KeyCode::Char('p') if mods.contains(KeyModifiers::CONTROL) => {
+                self.overlay = Overlay::None;
+                self.open_palette();
+                return;
+            }
             KeyCode::Enter => {
                 self.watch_channel(at, actions);
                 return;
@@ -376,7 +383,9 @@ impl App {
                 " guide ".to_string()
             }
             Some(Err(e)) => {
-                text.extend(textwrap(e, total).into_iter().map(|l| Line::from(l).fg(Color::Yellow)));
+                text.extend(textwrap(&guide_failed(e), total).into_iter().map(|l| Line::from(l).fg(Color::Yellow)));
+                let hint = "esc, g: try again  ·  details in the log (: log)";
+                text.extend(textwrap(hint, total).into_iter().map(|l| Line::from(l).fg(Color::DarkGray)));
                 " guide ".to_string()
             }
             Some(Ok(g)) => {
@@ -591,5 +600,33 @@ impl App {
             self.hits.push((ratatui::layout::Rect { x, y: r.y + 1, width: w, height: 1 }, Hit::GuideTab(*t)));
             x += w + 1;
         }
+    }
+}
+
+/// Why the guide couldn't be read, in a line: a connection error is said
+/// plainly (curl's own words go to the log).
+pub(super) fn guide_failed(e: &str) -> String {
+    let low = e.to_lowercase();
+    let unreachable = ["failed to connect", "could not connect", "connection refused", "couldn't connect", "no route to host"];
+    if unreachable.iter().any(|s| low.contains(s)) {
+        "couldn't read the guide: the TV didn't answer (it may be busy or still starting)".into()
+    } else if low.contains("timed out") || low.contains("timeout") || low.contains("didn't answer within") {
+        "couldn't read the guide: the TV took too long to answer (it may be busy)".into()
+    } else {
+        format!("couldn't read the guide: {e}")
+    }
+}
+
+#[cfg(test)]
+mod failed_tests {
+    use super::guide_failed;
+
+    #[test]
+    fn connection_errors_are_said_plainly() {
+        let curl = "https https://192.168.1.19:1926/6/channeldb/tv/channelLists/all: curl: (7) Failed to connect to 192.168.1.19 port 1926 after 26 ms: Could not connect to server";
+        let s = guide_failed(curl);
+        assert!(s.contains("didn't answer") && !s.contains("curl"), "{s}");
+        assert!(guide_failed("curl: (28) Operation timed out after 10001 milliseconds").contains("too long"));
+        assert_eq!(guide_failed("no live TV guide on this TV"), "couldn't read the guide: no live TV guide on this TV");
     }
 }
