@@ -74,8 +74,8 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
         Mode::Player => vec![
             button("space", "play/pause", Do(PlayPause)),
             // exact seeking (YouTube) vs fast-forward/rewind key presses
-            button("←", if exact { "-10s" } else { "rew" }, Do(Seek(-10.0))),
-            button("→", if exact { "+10s" } else { "ffw" }, Do(Seek(10.0))),
+            button("←", if exact { "-10s" } else { "rw" }, Do(Seek(-10.0))),
+            button("→", if exact { "+10s" } else { "ff" }, Do(Seek(10.0))),
             button("↑", "vol+", Do(Volume(1))),
             button("↓", "vol-", Do(Volume(-1))),
             button("m", "mute", Do(Mute)),

@@ -8,7 +8,7 @@ const KEYS: &[(&str, u32)] = &[
     ("up", 19), ("down", 20), ("left", 21), ("right", 22), ("ok", 23), ("enter", 66),
     ("back", 4), ("home", 3), ("menu", 82), ("info", 165), ("guide", 172), ("power", 26),
     ("wake", 224), ("sleep", 223), ("play", 126), ("pause", 127), ("stop", 86),
-    ("playpause", 85), ("next", 87), ("prev", 88), ("ff", 90), ("rew", 89), ("mute", 164),
+    ("playpause", 85), ("next", 87), ("prev", 88), ("ff", 90), ("rw", 89), ("rew", 89), ("mute", 164),
     ("volup", 24), ("voldown", 25), ("chup", 166), ("chdown", 167),
     ("red", 183), ("green", 184), ("yellow", 185), ("blue", 186),
 ];
@@ -123,7 +123,7 @@ pub fn actions() -> Vec<A> {
     vec![
         A::new("input.key", CAT, "press a remote key", key)
             .cli("key", "<name|code>", "send any remote key")
-            .long("Names: up down left right ok enter back home menu info guide power wake sleep\nplay pause stop playpause next prev ff rew mute volup voldown chup chdown\nred green yellow blue, or a numeric Android keycode."),
+            .long("Names: up down left right ok enter back home menu info guide power wake sleep\nplay pause stop playpause next prev ff rw mute volup voldown chup chdown\nred green yellow blue, or a numeric Android keycode."),
         A::terminal("input.home", CAT, "home screen", super::apps::home)
             .cli("home", "[--list | --set <app>]", "go to the home screen, or choose the home app")
             .long(

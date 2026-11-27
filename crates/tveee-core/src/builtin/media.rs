@@ -394,11 +394,11 @@ fn skip(c: &Cx, name: &str, args: &[String], sign: f64) -> Result<Output> {
 }
 
 fn ffw(c: &Cx, args: &[String]) -> Result<Output> {
-    skip(c, "ffw", args, 1.0)
+    skip(c, "ff", args, 1.0)
 }
 
 fn rew(c: &Cx, args: &[String]) -> Result<Output> {
-    skip(c, "rew", args, -1.0)
+    skip(c, "rw", args, -1.0)
 }
 
 /// Jump to an absolute position by skipping the difference from where we are.
@@ -438,10 +438,10 @@ pub fn actions() -> Vec<A> {
         A::new("media.playpause", CAT, "play/pause", playpause).cli("playpause", "", "toggle play/pause"),
         A::new("media.mute", CAT, "mute", mute).cli("mute", "", "mute (no-op if already muted)"),
         A::new("media.unmute", CAT, "unmute", unmute).cli("unmute", "", "unmute (no-op if not muted)"),
-        A::new("media.ffw", CAT, "fast-forward", ffw).cli("ffw", SKIP_USAGE, "fast-forward by an amount").long(SKIP_LONG),
-        A::new("media.rew", CAT, "rewind", rew).cli("rew", SKIP_USAGE, "rewind by an amount").long(SKIP_LONG),
+        A::new("media.ffw", CAT, "fast-forward", ffw).cli("ff", SKIP_USAGE, "fast-forward by an amount").aliases(&["ffw"]).long(SKIP_LONG),
+        A::new("media.rew", CAT, "rewind", rew).cli("rw", SKIP_USAGE, "rewind by an amount").aliases(&["rew"]).long(SKIP_LONG),
         A::new("media.seek", CAT, "seek", seek).cli("seek", SKIP_USAGE, "jump to a position (time or percent of the way through)").long(
-            "Like ffw/rew but absolute. Apps tveee can control directly (Kodi, with its\nremote control on) seek exactly. Otherwise it reads the current position from\nthe TV's media session, then skips the difference. Needs an app that publishes a media session\nwith a position (and a duration for percentages). Approximate: accuracy is\nlimited by --step, so seeking lands within about one step of the target.",
+            "Like ff/rw but absolute. Apps tveee can control directly (Kodi, with its\nremote control on) seek exactly. Otherwise it reads the current position from\nthe TV's media session, then skips the difference. Needs an app that publishes a media session\nwith a position (and a duration for percentages). Approximate: accuracy is\nlimited by --step, so seeking lands within about one step of the target.",
         ),
         A::new("media.volume", CAT, "volume", vol)
             .cli("vol", "up|down|<level>", "change volume")
@@ -589,11 +589,11 @@ Audio playback (lastly played comes first)
     #[test]
     fn skip_args() {
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(parse_skip_args("ffw", &a(&["30s"])).unwrap(), (Amount::Seconds(30.0), 10.0));
+        assert_eq!(parse_skip_args("ff", &a(&["30s"])).unwrap(), (Amount::Seconds(30.0), 10.0));
         assert_eq!(parse_skip_args("seek", &a(&["50%", "--step", "30s"])).unwrap(), (Amount::Fraction(0.5), 30.0));
-        assert!(parse_skip_args("ffw", &a(&[])).is_err());
-        assert!(parse_skip_args("ffw", &a(&["1m", "2m"])).is_err());
-        assert!(parse_skip_args("ffw", &a(&["1m", "--step"])).is_err());
+        assert!(parse_skip_args("ff", &a(&[])).is_err());
+        assert!(parse_skip_args("ff", &a(&["1m", "2m"])).is_err());
+        assert!(parse_skip_args("ff", &a(&["1m", "--step"])).is_err());
     }
 
     #[test]
