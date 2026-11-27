@@ -228,6 +228,37 @@ pub(super) fn textwrap(s: &str, w: usize) -> Vec<String> {
     out
 }
 
+/// Where the memory graph starts (MB): 0, unless memory has stayed well up
+/// all along; then just under the lowest, so changes near the top show
+/// instead of a solid block.
+pub(super) fn graph_floor(used: &[u64], total: u64) -> u64 {
+    let (Some(&lo), Some(&hi)) = (used.iter().min(), used.iter().max()) else { return 0 };
+    if total == 0 || lo * 2 < total {
+        return 0;
+    }
+    // room below the lowest: as much again as it moves, and a little more
+    let floor = lo.saturating_sub((hi - lo) + total / 20);
+    floor / 50 * 50
+}
+
+/// `line` in rows of at most `w` characters, broken at spaces where it can;
+/// the rows after the first start with `hang` spaces. Unlike [`textwrap`]
+/// the spacing inside a row is kept (lined-up columns stay lined up).
+pub(super) fn wrap_keep(line: &str, w: usize, hang: usize) -> Vec<String> {
+    let w = w.max(hang + 8);
+    let mut out = Vec::new();
+    let mut rest: Vec<char> = line.trim_end().chars().collect();
+    while rest.len() > w {
+        let start = if out.is_empty() { 1 } else { hang + 1 };
+        let cut = (start..=w).rev().find(|&i| rest[i] == ' ').unwrap_or(w);
+        out.push(rest[..cut].iter().collect::<String>().trim_end().to_string());
+        let tail: String = rest[cut..].iter().collect();
+        rest = format!("{}{}", " ".repeat(hang), tail.trim_start()).chars().collect();
+    }
+    out.push(rest.into_iter().collect());
+    out
+}
+
 /// A bordered box centred over the screen, sized to its text. Returns where.
 pub(super) fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {
     popup_titled(f, title, "", text, border)
@@ -633,15 +664,23 @@ impl App {
         let n = usize::from(w).min(self.st.mem_history.len());
         let recent = &self.st.mem_history[self.st.mem_history.len() - n..];
         let hot = recent.last().is_some_and(|u| total_mb > 0 && *u * 10 >= total_mb * 9);
+        let floor = graph_floor(recent, total_mb);
+        let shifted: Vec<u64> = recent.iter().map(|u| u.saturating_sub(floor)).collect();
         let graph = ratatui::widgets::Sparkline::default()
-            .data(recent)
-            .max(total_mb.max(1))
+            .data(&shifted)
+            .max(total_mb.saturating_sub(floor).max(1))
             .style(Style::new().fg(if hot { Color::Yellow } else { Color::Cyan }));
         f.render_widget(graph, ratatui::layout::Rect { x, y: rect.y, width: w, height: rect.height });
-        let note = format!("last {}s", recent.len());
-        f.render_widget(
-            Paragraph::new(Line::from(note).fg(Color::DarkGray)),
-            ratatui::layout::Rect { x: rect.x, y: rect.y + rect.height - 1, width: 9.min(rect.width), height: 1 },
-        );
+        // the scale on the left: top, bottom (when it isn't 0), how long
+        let mut notes = vec![(0, format!("{total_mb} MB")), (rect.height.saturating_sub(1), format!("last {}s", recent.len()))];
+        if floor > 0 && rect.height >= 3 {
+            notes.push((rect.height - 2, format!("{floor} MB")));
+        }
+        for (dy, note) in notes {
+            f.render_widget(
+                Paragraph::new(Line::from(note).fg(Color::DarkGray)),
+                ratatui::layout::Rect { x: rect.x, y: rect.y + dy, width: 9.min(rect.width), height: 1 },
+            );
+        }
     }
 }

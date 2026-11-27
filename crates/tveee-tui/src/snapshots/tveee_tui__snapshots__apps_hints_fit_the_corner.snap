@@ -1,0 +1,21 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 218
+expression: s
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
+│[F]ree memory │ [:] commands                              │
+┌ launch an app ──────────────────────────────────────────┐│
+│ Apps (0)   Other TV apps (0)                            ││
+│                                                         ││
+│looking for installed apps...                            ││
+│                                                         ││
+│↑/↓ choose  ⏎ open (or to front)  space actions  /       ││
+│search                                                   ││
+│● running  ⊘ always running: Android won't let it close  ││
+│letter = jump  tab/←/→ switch  # package names  click /  ││
+│right-click  esc closes   F1 guide  F3 remote            ││
+└─────────────────────────────────────────────────────────┘│
+│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

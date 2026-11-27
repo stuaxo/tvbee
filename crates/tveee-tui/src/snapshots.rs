@@ -179,3 +179,66 @@ fn long_link_whole_desktop() {
     assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::CopyUrl)));
     assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::OpenUrl)));
 }
+
+#[test]
+fn help_fits_the_corner() {
+    let mut a = app(standby());
+    a.overlay = Overlay::Help(0);
+    let s = screen(&mut a, CORNER);
+    insta::assert_snapshot!(s);
+    // nothing runs past the box, and it says it scrolls
+    assert!(s.lines().all(|l| l.chars().count() <= usize::from(CORNER.0)));
+    assert!(s.contains("↑/↓ scroll"));
+    // scrolled to the end: the last of it shows, and ↑ moves straight away
+    a.overlay = Overlay::Help(999);
+    let end = screen(&mut a, CORNER);
+    assert!(end.contains("Shift+drag selects text"), "{end}");
+    let Overlay::Help(top) = a.overlay else { panic!("help closed") };
+    let (up, _) = overlays::overlay_key(a.overlay, KeyCode::Up, &[]);
+    assert_eq!(up, Overlay::Help(top - 1));
+}
+
+#[test]
+fn help_whole_on_the_desktop() {
+    // wide enough: the two columns as written
+    let lines = overlays::help_lines(116);
+    assert_eq!(lines.len(), overlays::HELP.lines().count());
+    // narrow: no row too long, and no words lost
+    let narrow = overlays::help_lines(56);
+    assert!(narrow.iter().all(|l| l.chars().count() <= 56), "{narrow:#?}");
+    let words = |t: &str| t.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+    assert_eq!(words(&narrow.join(" ")), words(overlays::HELP));
+}
+
+#[test]
+fn apps_hints_fit_the_corner() {
+    let mut a = app(standby());
+    a.overlay = Overlay::Apps { tab: AppTab::Known, sel: 0 };
+    let s = screen(&mut a, CORNER);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("F3 remote"), "the last hint is cut off:\n{s}");
+}
+
+#[test]
+fn guide_error_said_plainly_corner() {
+    let mut st = standby();
+    st.guide = Some(Arc::new(Err(
+        "https https://192.168.1.19:1926/6/channeldb/tv/channelLists/all: curl: (7) Failed to connect to 192.168.1.19 port 1926 after 26 ms: Could not connect to server".into(),
+    )));
+    let mut a = app(st);
+    a.overlay = Overlay::Guide { tab: GuideTab::All, at: 0 };
+    let s = screen(&mut a, CORNER);
+    insta::assert_snapshot!(s);
+    assert!(!s.contains("curl") && s.contains("didn't answer"), "{s}");
+}
+
+#[test]
+fn memory_graph_zooms_when_it_stays_high() {
+    use super::drawing::graph_floor;
+    // up and down from low: from 0
+    assert_eq!(graph_floor(&[300, 900, 600], 1342), 0);
+    // stuck near the top: just under the lowest
+    let f = graph_floor(&[1290, 1309, 1300], 1342);
+    assert!(f > 1000 && f < 1290 && f.is_multiple_of(50), "{f}");
+    assert_eq!(graph_floor(&[], 1342), 0);
+}
