@@ -35,26 +35,12 @@ pub fn lane(a: &Action) -> Lane {
 /// something. Ends when the UI hangs up.
 pub fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender<Action>)]) {
     for a in actions {
-        // not work for anyone: what the refresh should read
-        if let Action::WatchPanel(id, on) = a {
-            let mut open = lock(&shared.panels);
-            if on {
-                open.insert(id);
-            } else {
-                open.remove(id);
+        // not work for anyone: what the refresh should read. Opened, it's
+        // read now (the user is looking), not at the next refresh
+        if let Some(opened) = watch(&a, shared) {
+            if opened && let Some((_, to)) = lanes.iter().find(|(x, _)| *x == Lane::Act) {
+                let _ = to.send(Action::Wake);
             }
-            continue;
-        }
-        if let Action::PreviewPanel(on) = a {
-            shared.preview.store(on, Ordering::Relaxed);
-            continue;
-        }
-        if let Action::WatchSystem(on) = a {
-            shared.system_watch.store(on, Ordering::Relaxed);
-            continue;
-        }
-        if let Action::WatchList(on) = a {
-            shared.list_watch.store(on, Ordering::Relaxed);
             continue;
         }
         let l = lane(&a);
@@ -65,6 +51,36 @@ pub fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender
         if to.send(a).is_err() {
             return;
         }
+    }
+}
+
+/// What the refresh should read, set: for the actions that say so (a panel,
+/// the preview, the system figures, the list opened or closed), whether
+/// it was opened; None for any other action.
+fn watch(a: &Action, shared: &Shared) -> Option<bool> {
+    match a {
+        Action::WatchPanel(id, on) => {
+            let mut open = lock(&shared.panels);
+            if *on {
+                open.insert(id);
+            } else {
+                open.remove(id);
+            }
+            Some(*on)
+        }
+        Action::PreviewPanel(on) => {
+            shared.preview.store(*on, Ordering::Relaxed);
+            Some(*on)
+        }
+        Action::WatchSystem(on) => {
+            shared.system_watch.store(*on, Ordering::Relaxed);
+            Some(*on)
+        }
+        Action::WatchList(on) => {
+            shared.list_watch.store(*on, Ordering::Relaxed);
+            Some(*on)
+        }
+        _ => None,
     }
 }
 
@@ -701,6 +717,8 @@ impl Actor {
                 said
             }
             Action::Refresh => "refreshed".into(),
+            // the refresh is woken after every action: nothing more to do
+            Action::Wake => String::new(),
             // other lanes' actions don't come here
             Action::PairStart(id) => {
                 let finish = match crate::pairing::by_id(id).and_then(|p| p.start(&self.tv)) {
@@ -875,6 +893,27 @@ pub fn push_lane(shared: &Shared, wake: &Sender<()>) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn opening_reads_now() {
+        use super::*;
+        let shared = Shared::new("192.0.2.1".into(), Arc::new(AtomicBool::new(false)));
+        let (to_route, from_ui) = std::sync::mpsc::channel();
+        let (act_tx, act_rx) = std::sync::mpsc::channel();
+        let (read_tx, read_rx) = std::sync::mpsc::channel();
+        for a in [Action::WatchList(true), Action::WatchList(false), Action::WatchSystem(true), Action::LoadList, Action::Volume(1)] {
+            to_route.send(a).unwrap();
+        }
+        drop(to_route);
+        route(&from_ui, &shared, &[(Lane::Act, act_tx), (Lane::Read, read_tx)]);
+        // opened: a read now (twice: the list, the system panel); closed: nothing
+        let acts: Vec<Action> = act_rx.try_iter().collect();
+        assert_eq!(acts, vec![Action::Wake, Action::Wake, Action::Volume(1)]);
+        assert_eq!(read_rx.try_iter().collect::<Vec<_>>(), vec![Action::LoadList]);
+        // and what the refresh reads is set
+        assert!(!shared.list_watch.load(Ordering::Relaxed) && shared.system_watch.load(Ordering::Relaxed));
+    }
+
 
     #[test]
     fn low_bandwidth_waits() {

@@ -135,6 +135,10 @@ pub enum Action {
     /// Choose an item from it; its list is read again after.
     ListGo(crate::more::Go),
     Refresh,
+    /// Read the TV now, saying nothing: something the refresh feeds (the
+    /// list pane, a panel) was just opened, and shouldn't wait for the next
+    /// read (4s with low bandwidth).
+    Wake,
 }
 
 #[derive(Default, Clone)]
