@@ -218,7 +218,11 @@ library and show a message (also in the ui's menu); `tveee kodi-rpc <method>
 `tveee kodi-addons [available] [words]` lists its add-ons (or those its
 repositories offer), `tveee kodi-addon <name>` opens one's page in Kodi and
 `tveee kodi-install <name>` installs one (Kodi's API can't, so tveee opens
-the page and presses Install). With `TVEEE_KODI_PATHS`
+the page and presses Install). `tveee kodi-install <file.zip>` installs an
+add-on from a zip on this computer with no Kodi screens: it checks the zip
+and what the add-on needs, copies it into Kodi over adb and restarts Kodi
+(back where it was); `tveee kodi-uninstall <id>` takes one off the same way.
+With `TVEEE_KODI_PATHS`
 (see `.env.example`) the ui's preview shows frames of the video, not its
 artwork. The ui hears Kodi's play/pause/seek at once (its port 9090, on with
 "Allow remote control from applications on other systems"). `tveee pair kodi`
