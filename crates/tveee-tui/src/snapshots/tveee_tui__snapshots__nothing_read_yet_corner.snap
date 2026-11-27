@@ -1,0 +1,20 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+expression: "screen(&mut app(TvState::seeded(None)), CORNER)"
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
+│waiting for the TV...                                     │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│ space  play/pause   ←  rew   →  ffw   ↑  vol+   ↓  vol-  │
+│ m  mute   ⌫  back   h  home   tab  remote   i  info      │
+│ v  preview   a  apps   /  search   g  guide   ,  options │
+│ .  more   ?  help   q  quit                              │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

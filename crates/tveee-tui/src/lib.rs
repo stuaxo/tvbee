@@ -31,6 +31,8 @@ mod overlays;
 mod drawing;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod snapshots;
 
 use tveee_core::engine::*;
 pub use self::keymap::*;
@@ -361,36 +363,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         return tveee_core::error::usage("ui needs a terminal");
     }
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
-    let mut app = App {
-        ip: c.tv.ip.clone(),
-        st: engine.handle.state(),
-        engine: engine.handle.clone(),
-        note: String::new(),
-        mode: Mode::Player,
-        overlay: Overlay::None,
-        menu: c.menu.clone(),
-        hits: Vec::new(),
-        info: false,
-        apps_tab: AppTab::Known,
-        prompt: String::new(),
-        search_targets: Vec::new(),
-        settling: None,
-        settle,
-        ambi_open: false,
-        preview_open: false,
-        preview: None,
-        preview_source: "",
-        preview_note: String::new(),
-        picker: None,
-        guide_later: 0,
-        guide_view: 0,
-        guide_slid: Instant::now(),
-        details: Details::Closed,
-        details_scroll: 0,
-        details_of: None,
-        infos_asked: std::collections::HashSet::new(),
-        want_info: None,
-    };
+    let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.menu.clone(), settle);
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -451,6 +424,42 @@ pub fn actions() -> Vec<ActionDescriptor> {
          the TV passes through, until the action has arrived and settled.\n\
          --no-settle shows every step as it comes (for debugging).",
     )]
+}
+
+impl App {
+    /// A screen on `engine`'s state, nothing open yet.
+    fn new(ip: String, engine: Handle, menu: Vec<ActionDescriptor>, settle: bool) -> App {
+        App {
+            ip,
+            st: engine.state(),
+            engine,
+            note: String::new(),
+            mode: Mode::Player,
+            overlay: Overlay::None,
+            menu,
+            hits: Vec::new(),
+            info: false,
+            apps_tab: AppTab::Known,
+            prompt: String::new(),
+            search_targets: Vec::new(),
+            settling: None,
+            settle,
+            ambi_open: false,
+            preview_open: false,
+            preview: None,
+            preview_source: "",
+            preview_note: String::new(),
+            picker: None,
+            guide_later: 0,
+            guide_view: 0,
+            guide_slid: Instant::now(),
+            details: Details::Closed,
+            details_scroll: 0,
+            details_of: None,
+            infos_asked: std::collections::HashSet::new(),
+            want_info: None,
+        }
+    }
 }
 
 impl App {
