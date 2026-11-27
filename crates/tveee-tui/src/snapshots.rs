@@ -436,6 +436,8 @@ fn options_plugins_tab_desktop() {
     assert_eq!(a.overlay, Overlay::Options(1));
     a.options_key(1, KeyCode::Tab);
     assert!(!a.options_plugins);
+}
+
 #[test]
 fn palette_pages_and_ends() {
     let mut a = app_with(kodi_paused(), actions());
