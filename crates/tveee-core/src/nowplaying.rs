@@ -180,7 +180,7 @@ pub fn activity(tv: &Tv, pkg: &str, sessions: &[MediaInfo]) -> Option<Activity> 
     };
     let a = live(tv, pkg).or_else(|| activity_with(pkg, named(tv, pkg, who), sessions));
     match crate::provider::for_package(pkg).and_then(|p| p.player()) {
-        Some(player) => with_player(tv, pkg, player, a).0,
+        Some(player) => with_player(tv, pkg, player, a, sessions).0,
         None => a,
     }
 }
@@ -222,7 +222,7 @@ pub fn named(tv: &Tv, pkg: &str, who: Option<(String, Kind)>) -> Option<(String,
 /// `a`, filled in from an app's own player API when it says what's playing
 /// (title, show, exact position, stream details); and the picture of it,
 /// if there is one. Anything amiss there: `a` as it was.
-pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: Option<Activity>) -> (Option<Activity>, Option<crate::provider::Playing>) {
+pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: Option<Activity>, sessions: &[MediaInfo]) -> (Option<Activity>, Option<crate::provider::Playing>) {
     // can't say, or broke: what the media session said
     let p = match player.playing(tv) {
         crate::provider::Outcome::Handled(p) => p,
@@ -232,15 +232,32 @@ pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: 
             return (a, None);
         }
     };
-    (Some(merge_playing(pkg, a, p.clone())), Some(p))
+    (Some(merge_playing(pkg, a, p.clone(), sessions)), Some(p))
 }
 
-/// `a` (from the media session) with what the player said.
-pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing) -> Activity {
+/// `a` (from the media session) with what the player said. The player is
+/// the better witness: when it has a position, something is on even if the
+/// media session is between states (YouTube's says neither playing nor
+/// paused for a moment while a video loads): then it's Watching or Paused,
+/// not Browsing, with the session's title.
+pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing, sessions: &[MediaInfo]) -> Activity {
     let what = a.as_ref().map_or_else(
         || format!("Watching {}", apps::by_package(pkg).map_or(pkg, |x| x.name)),
         |a| a.what.clone(),
     );
+    let between = p.progress.is_some() && what.starts_with("Browsing ");
+    let what = match (&p.progress, what.strip_prefix("Browsing ")) {
+        (Some(pr), Some(name)) if pr.paused => format!("Paused in {name}"),
+        (Some(_), Some(name)) => format!("Watching {name}"),
+        _ => what,
+    };
+    let a = match a {
+        Some(mut a) if between && a.title.is_none() => {
+            a.title = sessions.iter().find(|s| s.package == pkg).and_then(title_of);
+            Some(a)
+        }
+        a => a,
+    };
     let mut out = a.unwrap_or_else(|| Activity::just(what.clone()));
     out.what = what;
     if p.title.is_some() {
@@ -259,6 +276,16 @@ pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing
     out
 }
 
+
+/// `now`, with the title `before` had when `now` lost it but plays the same
+/// link (the media session drops its title for a moment around a video
+/// loading, an ad, or for no reason seen).
+pub fn keep_title(before: Option<&Activity>, mut now: Activity) -> Activity {
+    if let Some(b) = before.filter(|b| now.title.is_none() && now.url.is_some() && b.url == now.url && b.what == now.what) {
+        now.title.clone_from(&b.title);
+    }
+    now
+}
 
 /// As [`activity`], with the devtools pages coming from `pages` (called only
 /// when the app has a devtools hook and something is playing or paused).
@@ -284,13 +311,41 @@ mod tests {
             art_moves: false,
             extra: vec![("video", "1080p H264".into())],
         };
-        let a = merge_playing("org.xbmc.kodi", session, p.clone());
+        let a = merge_playing("org.xbmc.kodi", session, p.clone(), &[]);
         assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching Kodi", Some("A Very Nuanced Character")));
         assert_eq!(a.progress.map(|p| p.position), Some(200.0));
         assert_eq!(a.field("from").map(|f| f.value.as_str()), Some("Taskmaster S03E04"));
         assert_eq!(a.field("video").map(|f| f.place), Some(Place::Bottom));
         // no media session at all: still says what's on
-        assert_eq!(merge_playing("org.xbmc.kodi", None, p).what, "Watching Kodi");
+        assert_eq!(merge_playing("org.xbmc.kodi", None, p, &[]).what, "Watching Kodi");
+    }
+
+    #[test]
+    fn the_player_outweighs_a_session_between_states() {
+        use crate::provider::Playing;
+        const YT: &str = "com.google.android.youtube.tv";
+        // YouTube loading the video: its session says neither playing nor
+        // paused (seen live: Watching, Browsing for 3s, Watching)
+        let s = MediaInfo { package: YT.into(), state: Some(8), title: Some("Never Gonna Give You Up".into()), subtitle: Some("Rick Astley".into()) };
+        let browsing = activity_with(YT, Some(("YouTube".into(), Kind::Video)), std::slice::from_ref(&s));
+        assert_eq!(browsing.as_ref().map(|a| a.what.as_str()), Some("Browsing YouTube"));
+        let at = |paused| Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused }), ..Playing::default() };
+        let a = merge_playing(YT, browsing.clone(), at(false), std::slice::from_ref(&s));
+        assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching YouTube", Some("Never Gonna Give You Up (Rick Astley)")));
+        assert_eq!(merge_playing(YT, browsing.clone(), at(true), std::slice::from_ref(&s)).what, "Paused in YouTube");
+        // the title comes and goes for a moment: kept while the link is the same
+        let mut on = merge_playing(YT, None, at(false), &[]);
+        on.title = Some("Never Gonna Give You Up".into());
+        on.url = Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ".into());
+        let mut lost = on.clone();
+        lost.title = None;
+        assert_eq!(keep_title(Some(&on), lost.clone()).title, on.title);
+        let mut other = lost.clone();
+        other.url = Some("https://www.youtube.com/watch?v=jNQXAC9IVRw".into());
+        assert_eq!(keep_title(Some(&on), other).title, None);
+        assert_eq!(keep_title(None, lost).title, None);
+        // no position from the player: browsing it is
+        assert_eq!(merge_playing(YT, browsing, Playing::default(), &[s]).what, "Browsing YouTube");
     }
 
     #[test]
