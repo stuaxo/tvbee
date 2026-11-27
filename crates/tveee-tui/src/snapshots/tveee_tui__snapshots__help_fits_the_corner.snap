@@ -3,19 +3,19 @@ source: crates/tveee-tui/src/snapshots.rs
 assertion_line: 205
 expression: s
 ---
-┌ keys - ↑/↓ scroll, any other key closes ──── 1-14 of 72 ┐┐
-│ everywhere                                              ││
-│   space p  play/pause                                   ││
-│   ⌫        back                                         ││
-│   h        home                                         ││
-│   [ ]      seek -/+ 60s                                 ││
-│   0-9      jump to 0%-90%                               ││
-│   + -      volume                                       ││
-│   m        mute/unmute                                  ││
-│   r        refresh                                      ││
-│   tab      switch mode                                  ││
-│   .        more (power, mirror, ...)                    ││
-│   lists    ↑ ↓ one, pgup pgdn a page, home end the      ││
-│            first and last                               ││
-│   : ctrl+p commands: everything tveee can do, found by  ││
-└─────────────────────────────────────────────────────────┘┘
+┌ keys - ↑/↓ scroll, any other key closes ───── 1-14 of 72 ┐
+│ everywhere                                               │
+│   space p  play/pause                                    │
+│   ⌫        back                                          │
+│   h        home                                          │
+│   [ ]      seek -/+ 60s                                  │
+│   0-9      jump to 0%-90%                                │
+│   + -      volume                                        │
+│   m        mute/unmute                                   │
+│   r        refresh                                       │
+│   tab      switch mode                                   │
+│   .        more (power, mirror, ...)                     │
+│   lists    ↑ ↓ one, pgup pgdn a page, home end the       │
+│            first and last                                │
+│   : ctrl+p commands: everything tveee can do, found by   │
+└──────────────────────────────────────────────────────────┘

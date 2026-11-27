@@ -428,7 +428,15 @@ impl App {
     /// scrolling (↑/↓) when they don't all fit its height.
     pub(super) fn draw_help(&mut self, f: &mut Frame, top: usize) {
         let area = f.area();
-        let lines = help_lines(usize::from(area.width.saturating_sub(4)));
+        let w = usize::from(area.width.saturating_sub(4));
+        let mut lines = help_lines(w);
+        // wrapped to fit: the whole width (else a column of the screen's
+        // own border shows beside it)
+        if HELP.lines().any(|l| l.chars().count() > w)
+            && let Some(first) = lines.first_mut()
+        {
+            *first = format!("{first:<w$}");
+        }
         let room = usize::from(area.height.saturating_sub(2)).max(1);
         let top = top.min(lines.len().saturating_sub(room));
         // remembered as shown, so ↑ moves at once from the end
