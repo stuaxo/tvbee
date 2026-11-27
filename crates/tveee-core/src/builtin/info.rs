@@ -743,8 +743,9 @@ pub fn actions() -> Vec<ActionDescriptor> {
             .cli("list", "[app] [N]", "the list the app in front shows, or choose item N from it")
             .long(
                 "Prints the list the app in front is showing, numbered, the highlighted one\n\
-                 marked (›): in Kodi, the folder or add-on listing on its screen, as Kodi\n\
-                 shows it. Reading it doesn't change what's on the screen.\n\
+                 marked (› or ▶): in Kodi, the folder or add-on listing on its screen, as\n\
+                 Kodi shows it; in YouTube, the video's chapters (choosing one seeks there)\n\
+                 and links. Reading it doesn't change what's on the screen.\n\
                  \n\
                  \x20 tveee list          the app in front's list\n\
                  \x20 tveee list kodi     Kodi's, even behind another app\n\

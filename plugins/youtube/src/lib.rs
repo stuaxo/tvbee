@@ -129,6 +129,24 @@ fn deep_link_expr(link: &str) -> String {
 // --- the player: what's playing, seeking, and a picture of it ----------------
 
 impl tveee_core::provider::Player for YouTube {
+    // the video's chapters and links, as a list to choose from
+    fn has_list(&self) -> bool {
+        true
+    }
+    fn list_place(&self, tv: &Tv) -> Outcome<Option<tveee_core::provider::ListPlace>> {
+        let Some((link, pos)) = link_and_position(tv) else { return Outcome::Handled(None) };
+        // which chapter: only from what's cached (never yt-dlp every refresh)
+        let at = cached_details(&link).and_then(|d| Some(d.chapters[chapter_at(&d.chapters, pos?)?].clone()));
+        let (focus_id, focus_label) = at.map_or_else(Default::default, |c| (chapter_id(&c), c.title));
+        Outcome::Handled(Some(tveee_core::provider::ListPlace { key: link, focus_label, focus_id }))
+    }
+    fn list(&self, tv: &Tv) -> Outcome<tveee_core::provider::ContextList> {
+        let Some((link, pos)) = link_and_position(tv) else { return Outcome::Fallback };
+        match details(&link) {
+            Ok(d) => chapters_list(&link, &d, pos).map_or(Outcome::Fallback, Outcome::Handled),
+            Err(e) => Outcome::Failed(e),
+        }
+    }
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {
         let pages = match devtools::with_conn(tv, PACKAGE, |c| c.pages()) {
             Ok(p) => p,
@@ -480,6 +498,56 @@ fn cache_file(id: &str) -> Option<std::path::PathBuf> {
     Some(base.parent()?.join("youtube").join(format!("{id}.txt")))
 }
 
+/// Details for a watch link only if they're cached already (never runs
+/// yt-dlp: for reads made often, as the list pane's).
+pub fn cached_details(link: &str) -> Option<Details> {
+    let p = cache_file(&video_id(link)?)?;
+    let age = std::fs::metadata(&p).ok()?.modified().ok()?.elapsed().ok()?;
+    (age < std::time::Duration::from_secs(24 * 3600)).then(|| std::fs::read_to_string(&p).ok().map(|t| parse_details(&t))).flatten()
+}
+
+/// The chapter playing at `pos`: the last one to start by then.
+pub fn chapter_at(chapters: &[Chapter], pos: f64) -> Option<usize> {
+    chapters.iter().rposition(|c| c.start <= pos + 0.5)
+}
+
+/// A chapter's id in the list (to find the one playing again).
+fn chapter_id(c: &Chapter) -> String {
+    format!("chapter:{}", c.start)
+}
+
+/// The video's chapters (each seeks there; the one playing at `pos` marked),
+/// then where else it leads (the channel, links in its description). None
+/// when it has neither.
+pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_core::provider::ContextList> {
+    use tveee_core::provider::{ContextList, ListItem};
+    let mut items: Vec<ListItem> = d
+        .chapters
+        .iter()
+        .map(|c| ListItem { id: chapter_id(c), label: c.title.clone(), meta: Some(tveee_core::nowplaying::clock(c.start)), folder: false, go: Go::Seek(c.start) })
+        .collect();
+    // the links (the chapters are in them too, as seeks: those are above)
+    items.extend(d.links.iter().filter(|l| !matches!(l.go, Go::Seek(_))).map(|l| {
+        let id = match &l.go {
+            Go::Link(u) => format!("link:{u}"),
+            Go::Seek(t) => format!("seek:{t}"),
+        };
+        ListItem { id, label: l.label.clone(), meta: Some("link".into()), folder: false, go: l.go.clone() }
+    }));
+    if items.is_empty() {
+        return None;
+    }
+    let title = if d.chapters.is_empty() { "Links" } else { "Chapters & links" };
+    Some(ContextList { title: title.into(), kind: "chapters", key: link.to_string(), items, at: pos.and_then(|p| chapter_at(&d.chapters, p)) })
+}
+
+/// The video playing: its link and position (devtools).
+fn link_and_position(tv: &Tv) -> Option<(String, Option<f64>)> {
+    let pages = devtools::with_conn(tv, PACKAGE, |c| c.pages()).ok()?;
+    let link = pages.iter().find_map(|p| watch_link(&p.url))?;
+    Some((link, pages.iter().find_map(|p| p.progress).map(|p| p.position)))
+}
+
 /// Details for a watch link, from yt-dlp (cached a day per video).
 pub fn details(link: &str) -> Result<Details> {
     let Some(id) = video_id(link) else { return failed("youtube: that isn't a video link") };
@@ -539,6 +607,33 @@ pub fn actions() -> Vec<ActionDescriptor> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn chapters_as_a_list() {
+        let d = Details {
+            chapters: vec![Chapter { start: 0.0, title: "Intro".into() }, Chapter { start: 54.0, title: "Could anybody do this?".into() }],
+            links: vec![
+                Link { label: "channel: RelfWolf".into(), go: Go::Link("https://www.youtube.com/@RelfWolf".into()) },
+                Link { label: "chapter 1: Intro (0:00)".into(), go: Go::Seek(0.0) },
+                Link { label: "chapter 2: Could anybody do this? (0:54)".into(), go: Go::Seek(54.0) },
+                Link { label: "Claude Code".into(), go: Go::Link("https://claude.com".into()) },
+            ],
+            ..Details::default()
+        };
+        let link = "https://www.youtube.com/watch?v=aN-65z6bvKk";
+        let l = chapters_list(link, &d, Some(60.0)).expect("a list");
+        // the chapters (seeking), then the links once each (no chapter twice)
+        let labels: Vec<&str> = l.items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, ["Intro", "Could anybody do this?", "channel: RelfWolf", "Claude Code"]);
+        assert_eq!(l.items[1].go, Go::Seek(54.0));
+        assert_eq!(l.items[1].meta.as_deref(), Some("0:54"));
+        // the chapter playing at 1:00 is the second
+        assert_eq!((l.at, l.kind, l.key.as_str()), (Some(1), "chapters", link));
+        assert_eq!(chapter_at(&d.chapters, 10.0), Some(0));
+        // nothing to list
+        assert!(chapters_list(link, &Details::default(), None).is_none());
+    }
+
     use super::*;
 
     #[test]
