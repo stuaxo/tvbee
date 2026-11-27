@@ -69,6 +69,9 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// Where the progress bar stays after a pause, seek or stop asked for
+    /// here, until the next read says what it's doing (no prediction).
+    frozen: Option<f64>,
     /// The log as it was before saving it was asked for (back to it after).
     log_back: Option<Overlay>,
     /// The file name ⏎ was pressed for that's there already (⏎ again
@@ -522,6 +525,7 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            frozen: None,
             log_back: None,
             save_confirm: None,
             log_top: None,
@@ -561,6 +565,10 @@ impl App {
         match e {
             CoreEvent::Changed(change) => {
                 self.st = self.engine.state();
+                // a read (or a seek landing) says where it is now
+                if matches!(change, Change::Snapshot | Change::Seeked) {
+                    self.frozen = None;
+                }
                 match change {
                     // while an action settles the latest snapshot is only
                     // shown once the action has got there
@@ -652,6 +660,13 @@ impl App {
     }
 
     fn apply(&mut self, input: Input, actions: &Handle) -> bool {
+        // playback asked to change: the bar stays where it is until a read
+        // says what happened
+        if let Input::Do(a) = &input
+            && stops_prediction(a)
+        {
+            self.frozen = self.progress_now().map(|p| p.position);
+        }
         match input {
             Input::Quit => return true,
             Input::ToggleMode => {

@@ -179,6 +179,25 @@ fn chips_width(chips: &[(String, String, Hit)]) -> usize {
     chips.iter().map(|(k, t, _)| usize::from(chip_width(k, t)) + 2).sum::<usize>().saturating_sub(2)
 }
 
+/// Whether asking for `a` changes how playback goes (pause, seek, stop, the
+/// media keys): the bar's prediction holds until the next read.
+pub(super) fn stops_prediction(a: &Action) -> bool {
+    matches!(a, Action::PlayPause | Action::Seek(_) | Action::Jump(_) | Action::Key(85 | 86 | 89 | 90 | 126 | 127))
+}
+
+/// `p` moved on `secs` at its speed (paused: where it is), kept between the
+/// start and the end.
+pub(super) fn predict(mut p: tveee_core::devtools::Progress, secs: f64) -> tveee_core::devtools::Progress {
+    if !p.paused {
+        p.position += secs * p.rate;
+        p.position = p.position.max(0.0);
+        if let Some(d) = p.duration {
+            p.position = p.position.min(d);
+        }
+    }
+    p
+}
+
 /// From this wide (inside the border), the panels get a column of their
 /// own on the right.
 pub(super) const SIDE_FROM: u16 = 100;
@@ -609,13 +628,7 @@ impl App {
                         if let Some(t) = &a.title {
                             lines.push((Line::from(vec![label("title"), Span::raw(t.clone())]), None));
                         }
-                        if let Some(mut p) = a.progress {
-                            if !p.paused {
-                                p.position += self.st.at.elapsed().as_secs_f64();
-                                if let Some(d) = p.duration {
-                                    p.position = p.position.min(d);
-                                }
-                            }
+                        if let Some(p) = self.progress_now() {
                             // leave room for the label and " 1:02:03 / 1:02:03 (100%)"
                             let w = width.saturating_sub(9 + 26).max(10);
                             // jumping needs a video tveee can seek in (not live TV)
@@ -744,6 +757,21 @@ impl App {
             }
             y += h;
         }
+    }
+
+    /// Where what's playing is now, as the bar shows it: as last read, moved
+    /// on at its speed since (the "predict position" option), or held where
+    /// it was after a pause or seek asked for here.
+    pub(super) fn progress_now(&self) -> Option<tveee_core::devtools::Progress> {
+        let mut p = self.st.snap.as_ref()?.activity.as_ref()?.progress?;
+        if let Some(at) = self.frozen {
+            p.position = at;
+            return Some(p);
+        }
+        if !self.opt(tveee_core::options::PREDICT_POSITION) {
+            return Some(p);
+        }
+        Some(predict(p, self.st.at.elapsed().as_secs_f64()))
     }
 
     /// Things to do with what's playing, as (key, what, click): the

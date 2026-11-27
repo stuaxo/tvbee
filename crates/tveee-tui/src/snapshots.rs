@@ -63,7 +63,7 @@ fn kodi_paused() -> TvState {
     let mut st = TvState::seeded(None);
     let mut a = Activity::just("Paused in Kodi");
     a.title = Some("Episode 3 (Off-Road)".into());
-    a.progress = Some(Progress { position: 27.0 * 60.0 + 56.0, duration: Some(48.0 * 60.0 + 47.0), paused: true });
+    a.progress = Some(Progress { position: 27.0 * 60.0 + 56.0, duration: Some(48.0 * 60.0 + 47.0), paused: true, rate: 1.0 });
     a.fields.push(Field { label: "audio", value: "AAC-LC  AAC".into(), place: Place::Bottom, open: None });
     a.media = Some("video");
     st.snap = Some(Snapshot {
@@ -543,4 +543,51 @@ fn log_select_and_save() {
     a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
     assert!(a.note.starts_with("saved"), "{}", a.note);
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn position_predicted() {
+    use super::drawing::{predict, stops_prediction};
+    let p = |position, paused, rate| Progress { position, duration: Some(100.0), paused, rate };
+    // playing: on at its speed; fast-forward faster; rewinding back
+    assert_eq!(predict(p(10.0, false, 1.0), 2.0).position, 12.0);
+    assert_eq!(predict(p(10.0, false, 4.0), 2.0).position, 18.0);
+    assert_eq!(predict(p(10.0, false, -8.0), 2.0).position, 0.0);
+    // kept within the bar; paused stays
+    assert_eq!(predict(p(99.0, false, 1.0), 5.0).position, 100.0);
+    assert_eq!(predict(p(10.0, true, 1.0), 5.0).position, 10.0);
+    // what stops it
+    assert!(stops_prediction(&Action::PlayPause) && stops_prediction(&Action::Seek(10.0)) && stops_prediction(&Action::Key(86)));
+    assert!(!stops_prediction(&Action::Volume(1)));
+
+    // in the app: playing Kodi, moved on since the read
+    let mut st = kodi_paused();
+    if let Some(pr) = st.snap.as_mut().and_then(|s| s.activity.as_mut()).and_then(|a| a.progress.as_mut()) {
+        pr.paused = false;
+    }
+    st.at = std::time::Instant::now() - std::time::Duration::from_secs(3);
+    let read = 27.0 * 60.0 + 56.0;
+    let (mut a, _rx, h) = app_seeing_predict(st);
+    let now = a.progress_now().unwrap().position;
+    assert!((now - (read + 3.0)).abs() < 0.5, "{now}");
+    // pause asked for: held where it is until a read
+    a.apply(Input::Do(Action::PlayPause), &h);
+    let held = a.progress_now().unwrap().position;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(a.progress_now().unwrap().position, held);
+    a.handle(CoreEvent::Changed(Change::Snapshot));
+    assert!(a.frozen.is_none());
+    // the option off: as read
+    a.opts = Some(vec![(tveee_core::options::PREDICT_POSITION.to_string(), false)]);
+    assert_eq!(a.progress_now().unwrap().position, read);
+}
+
+/// An app on `st` with its own options, and a handle that keeps what it's asked.
+fn app_seeing_predict(st: TvState) -> (App, std::sync::mpsc::Receiver<Action>, Handle) {
+    super::tests::install_all();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(st))));
+    let mut a = App::new("192.168.1.19".into(), handle.clone(), Vec::new(), true);
+    a.opts = Some(Vec::new());
+    (a, rx, handle)
 }
