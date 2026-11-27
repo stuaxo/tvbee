@@ -12,6 +12,8 @@ pub enum Hit {
     Input(Input),
     /// An option in the Ambilight dialog (row, option).
     AmbiOption(usize, usize),
+    /// A colour in the picker (column, row).
+    AmbiPick(usize, usize),
     /// The progress bar: clicking jumps there.
     Progress { x0: u16, width: u16 },
     /// The volume bar: clicking sets that level.
@@ -477,7 +479,7 @@ impl App {
             body = top;
         }
         if self.ambi_open && self.panel_id().is_some() {
-            let (panel, top) = below(body, self.ambilight_height());
+            let (panel, top) = below(body, self.ambilight_height(body.width));
             self.draw_ambilight(f, panel);
             body = top;
         }
@@ -517,7 +519,7 @@ impl App {
         }
         if self.ambi_open
             && self.panel_id().is_some()
-            && let Some(r) = take(self.ambilight_height())
+            && let Some(r) = take(self.ambilight_height(side.width))
         {
             self.draw_ambilight(f, r);
         }

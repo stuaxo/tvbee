@@ -1,0 +1,40 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 828
+expression: s
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
+│load 4.82▲ │ 310 MB [F]ree │ [l] panel │ [:] commands                                                                 │
+│what     Paused in Kodi                                                ┌ panel: ←→ change, ⏎ colour, esc done ───────┐│
+│title    Episode 3 (Off-Road)                                          │control  the TV                              ││
+│progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │power     on   off                           ││
+│audio    AAC-LC  AAC                                                   │style     video   sound   colour             ││
+│do        t  list   /  search                                          │setting   standard   natural   vivid   game  ││
+│                                                                       │          comfort   relax                    ││
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │hue       on   off                           ││
+│                                                                       │lights    all     ▐▌    │                    ││
+│                            ┌ panel colour ──────────────────────────────────────────────┐───────────────────────────┘│
+│                            │Colour for left 1                                           │───────────────────────────┐│
+│                            │                                                            │                           ││
+│                            │                                     lighter                │org.xbmc.kodi              ││
+│                            │▐▌                                   full                   │ MB used, 310 MB free      ││
+│                            │                                     darker                 │                           ││
+│                            │ white   warm   off                                         │                           ││
+│                            │                                                            │                           ││
+│                            │or type: █                                                  │6/512 MB                   ││
+│                            │red, warm, #ff8800                                          │ 2.40                      ││
+│                            │                                                            │───────────────────────────┘│
+│                            │now       →                                                 │                            │
+│                            │arrows or click pick  type a name or #hex  ⏎ set  esc back  │                            │
+│                            └────────────────────────────────────────────────────────────┘                            │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit      │
+│panel: sound...                                                                                                       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
