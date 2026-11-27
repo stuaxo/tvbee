@@ -34,6 +34,12 @@ pub enum Input {
     ShowLogs,
     /// Restart the app in front, coming back where it was if it can.
     RestartFront,
+    /// What's on's link: whole, or shortened to fit.
+    ToggleUrl,
+    /// Copy what's on's link to the clipboard.
+    CopyUrl,
+    /// Open what's on's link in this computer's browser.
+    OpenUrl,
     OpenApps,
     OpenSearch,
     OpenGuide,
@@ -82,6 +88,8 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('F'), _) => act(Run { id: "apps.free", args: Vec::new() }),
         (KeyCode::Char('S'), _) => act(Run { id: "power.sleep", args: Vec::new() }),
         (KeyCode::Char('R'), _) => Input::RestartFront,
+        (KeyCode::Char('u'), _) => Input::ToggleUrl,
+        (KeyCode::Char('y'), _) => Input::CopyUrl,
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
         (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
         (KeyCode::Char('P'), _) => Input::Pair,
