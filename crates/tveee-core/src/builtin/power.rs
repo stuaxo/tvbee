@@ -8,20 +8,10 @@ fn sleep(cx: &Cx, _: &[String]) -> Result<Output> {
     Ok("sent the TV to standby".into())
 }
 
-/// `mWakefulness` from `dumpsys power` ("Awake", "Asleep", "Dreaming").
-pub fn parse_wakefulness(dump: &str) -> Option<&str> {
-    dump.lines().find_map(|l| l.trim().strip_prefix("mWakefulness="))
-}
-
 /// What the TV says: awake or not. None when it doesn't say (dumpsys
 /// sometimes answers with nothing; asked twice).
 pub fn awake(tv: &crate::tv::Tv) -> Result<Option<bool>> {
-    for _ in 0..2 {
-        if let Some(w) = parse_wakefulness(&tv.shell(&["dumpsys", "power"])?) {
-            return Ok(Some(w == "Awake"));
-        }
-    }
-    Ok(None)
+    Ok(tv.read_whole::<crate::readings::Power>()?.map(|p| p.awake()))
 }
 
 /// Up to `ms` for the TV to say it's awake.
@@ -86,16 +76,4 @@ pub fn actions() -> Vec<A> {
                 "Power off the TV? It can't be woken over the network afterwards;\nyou'll need the remote or the TV's power button.",
             ),
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wakefulness() {
-        assert_eq!(parse_wakefulness("Power Manager State:\n  mDirty=0x0\n  mWakefulness=Asleep\n  mWakefulnessChanging=false\n"), Some("Asleep"));
-        // dumpsys sometimes answers with nothing: that says nothing
-        assert_eq!(parse_wakefulness(""), None);
-    }
 }

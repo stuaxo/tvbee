@@ -318,8 +318,11 @@ impl Tv {
     }
 
     /// `dumpsys window` output, for foreground-app detection.
+    /// The lines of `dumpsys window` tveee reads: what has focus, and which
+    /// uid owns each app's windows (~0.6 KB of ~23 KB). For a checked
+    /// reading, [`crate::readings::Window`].
     pub fn window_dump(&self) -> Result<String> {
-        self.shell(&["dumpsys", "window"])
+        self.shell(&[<crate::readings::Window as crate::readings::Reading>::CMD])
     }
 
     /// Forward a free local TCP port to a device abstract socket. The forward

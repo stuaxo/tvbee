@@ -1,6 +1,7 @@
 //! The worker lanes: actions are routed to keys, act, read or idle lanes,
 //! and the refresh reads the TV's state; they share [`Shared`].
 
+use crate::readings::{Power, Window};
 use super::*;
 
 /// A thread with a name (shown in the debug log, `TVEEE_LOG`).
@@ -278,12 +279,11 @@ pub struct Refresher {
     /// The app's better name ([`nowplaying::named`]): for which package,
     /// when it was read, and the name.
     pub named: Option<(String, Instant, Who)>,
-    /// The last window dump that said what's in front: a busy TV's dumpsys
-    /// sometimes answers with nothing, which isn't "nothing in front".
-    pub last_window: String,
-    /// The last power dump that said whether it's awake: like the window
-    /// dump, it sometimes comes back empty, which isn't standby.
-    pub last_power: String,
+    /// The last whole power and window readings: a busy TV's dumpsys
+    /// sometimes answers with nothing, which isn't standby or "nothing in
+    /// front" (see [`crate::readings::Kept`]).
+    pub kept_power: crate::readings::Kept<crate::readings::Power>,
+    pub kept_window: crate::readings::Kept<crate::readings::Window>,
     /// What the last refresh said was on: a title the media session drops
     /// for a moment is kept while the same thing plays.
     pub last_activity: Option<Activity>,
@@ -421,15 +421,17 @@ impl Refresher {
         let want_system = system_wanted(shown, low, self.system.as_ref().map(|(_, at)| at.elapsed()));
         let (power, window, media_dump, audio, system, panels) = std::thread::scope(|sc| {
             let l = sc.spawn(move || open.iter().map(|p| (p.id, (p.read)(tv))).collect::<Vec<_>>());
-            let p = sc.spawn(|| tv.shell(&["dumpsys", "power"]));
-            let w = sc.spawn(|| tv.window_dump());
+            let p = sc.spawn(|| tv.read_whole::<Power>());
+            let w = sc.spawn(|| tv.read_whole::<Window>());
             let m = sc.spawn(|| tv.shell(&["dumpsys", "media_session"]));
             // the system figures: only while shown (and less often with low bandwidth)
             let y = sc.spawn(|| if want_system { info::read_system(tv).map(Some) } else { Ok(None) });
             let a = tv.shell(&["dumpsys", "audio"]);
             let j = |h: std::thread::ScopedJoinHandle<'_, Result<String>>| h.join().unwrap_or_else(|_| Ok(String::new()));
             let y = y.join().ok().and_then(|r| r.ok()).flatten();
-            (j(p), j(w), j(m), a, y, l.join().unwrap_or_default())
+            let p = p.join().unwrap_or(Ok(None));
+            let w = w.join().unwrap_or(Ok(None));
+            (p, w, j(m), a, y, l.join().unwrap_or_default())
         });
         // fresh figures, else the last ones while they're still shown
         let system = match system {
@@ -443,33 +445,18 @@ impl Refresher {
                 info::System::default()
             }
         };
-        let (mut power, mut window, audio) = (power?, window?, audio?);
-        if !power.lines().any(|l| l.trim().starts_with("mWakefulness=")) {
-            crate::tlog!("refresh: power dump without mWakefulness ({} bytes); asking again", power.len());
-            power = tv
-                .shell(&["dumpsys", "power"])
-                .ok()
-                .filter(|p| p.lines().any(|l| l.trim().starts_with("mWakefulness=")))
-                .unwrap_or_else(|| self.last_power.clone());
-        } else {
-            self.last_power.clone_from(&power);
-        }
-        if !window.contains("mCurrentFocus") {
-            crate::tlog!("refresh: empty window dump ({} bytes); asking again", window.len());
-            window = tv.window_dump().ok().filter(|w| w.contains("mCurrentFocus")).unwrap_or_else(|| self.last_window.clone());
-        } else {
-            self.last_window.clone_from(&window);
-        }
+        // not a whole answer (asked twice): the last whole one
+        let (power, window, audio) = (self.kept_power.settle(power)?, self.kept_window.settle(window)?, audio?);
         let media_dump = media_dump.unwrap_or_else(|e| {
             crate::tlog!("refresh: no media sessions read ({e}); taken as none");
             String::new()
         });
-        let awake = power.lines().any(|l| l.trim() == "mWakefulness=Awake");
-        let pkg = info::focus_package(&window);
+        let awake = power.awake();
+        let pkg = window.package();
         *lock(&self.shared.pkg) = pkg.clone();
         let sessions = media::parse_media_sessions(&media_dump);
         let sessions = match &pkg {
-            Some(p) => media::with_audio_players(sessions, p, info::window_uid(&window, p), &media::parse_audio_players(&audio)),
+            Some(p) => media::with_audio_players(sessions, p, window.uid(p), &media::parse_audio_players(&audio)),
             None => sessions,
         };
         let guesses = lock(&self.shared.guesses).clone();
@@ -528,8 +515,8 @@ impl Refresher {
                 let known = apps::by_package(p).is_some();
                 apps::identify(p, &guesses).map(|(_, k)| if known { k.as_str().to_string() } else { format!("{}, guessed", k.as_str()) })
             }),
-            power: power.lines().find_map(|l| l.trim().strip_prefix("mWakefulness=")).map(str::to_string),
-            focus: info::focus_window(&window),
+            power: Some(power.wakefulness.clone()),
+            focus: window.focus.clone(),
             system,
             panels,
             list_place,
