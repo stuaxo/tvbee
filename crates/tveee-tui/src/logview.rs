@@ -9,9 +9,6 @@
 
 use super::*;
 
-/// How far PgUp/PgDn move the highlight.
-const LOG_PAGE: usize = 10;
-
 /// A day's date and the time, local, as a file name's part: 20261127-2130.
 pub fn stamp(unix: i64, offset: i64) -> String {
     let t = unix + offset;
@@ -65,8 +62,8 @@ impl App {
         let to = match code {
             KeyCode::Up => Some(moved(cur.saturating_sub(1))),
             KeyCode::Down => Some(moved(cur + 1)),
-            KeyCode::PageUp => Some(moved(cur.saturating_sub(LOG_PAGE))),
-            KeyCode::PageDown => Some(moved(cur + LOG_PAGE)),
+            KeyCode::PageUp => Some(moved(cur.saturating_sub(listnav::PAGE))),
+            KeyCode::PageDown => Some(moved(cur + listnav::PAGE)),
             KeyCode::Home => Some(first),
             _ => None,
         };
