@@ -259,6 +259,13 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
         }
         dirty = true;
         match event::read()? {
+            // F1-F3 (Alt+1-3): the guide, the launcher, remote mode; from the
+            // player or from either list, not while typing into a box
+            Event::Key(k) if k.kind != KeyEventKind::Release && app.can_switch_view() && view_key(k.code, k.modifiers).is_some() => {
+                if let Some(v) = view_key(k.code, k.modifiers) {
+                    app.switch_view(v, actions);
+                }
+            }
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 if let Overlay::AppActions { tab, sel, at } = app.overlay {
                     app.choice_key(tab, sel, at, k.code, actions);
@@ -405,6 +412,8 @@ pub fn actions() -> Vec<ActionDescriptor> {
          \x20 :  commands (or Ctrl-P): everything tveee can do, found by typing a\n\
          \x20    few letters of it\n\
          \x20 F  free memory   S  sleep   R  restart the app in front, where it was\n\
+         \x20 F1 F2 F3  the guide, the apps, remote mode (Alt+1-3 too), from the\n\
+         \x20    player or from the guide or the apps\n\
          \x20 The top line: the TV's load and free memory, [F]ree, [l] the Ambilight,\n\
          \x20 [:] commands (click them too). A small pane keeps one row of keys.\n\
          \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
@@ -657,6 +666,34 @@ impl App {
             Input::Nothing => {}
         }
         false
+    }
+
+    /// Whether F1-F3 switch view now: in the player, remote mode, or the
+    /// guide or launcher (not a box being typed into, or a question).
+    fn can_switch_view(&self) -> bool {
+        matches!(self.overlay, Overlay::None | Overlay::Guide { .. } | Overlay::Apps { .. } | Overlay::AppActions { .. })
+    }
+
+    /// Go to view `v`, leaving whatever list is open.
+    fn switch_view(&mut self, v: View, actions: &Handle) {
+        match v {
+            View::Guide if matches!(self.overlay, Overlay::Guide { .. }) => {}
+            View::Guide => {
+                self.overlay = Overlay::None;
+                self.open_guide(None, actions);
+            }
+            View::Apps if matches!(self.overlay, Overlay::Apps { .. }) => {}
+            View::Apps => {
+                self.overlay = Overlay::None;
+                self.apply(Input::OpenApps, actions);
+            }
+            View::Remote => {
+                self.overlay = Overlay::None;
+                if self.mode != Mode::Remote {
+                    self.apply(Input::ToggleMode, actions);
+                }
+            }
+        }
     }
 
     /// Move to the overlay `next`, running `action` if there is one.

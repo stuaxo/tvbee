@@ -193,7 +193,7 @@ impl App {
         let more = if scrolls { "  (scrolls)" } else { "" };
         text.push(Line::from(format!("↑/↓ choose  ⏎ open (or to front)  space actions  / search{more}")).fg(Color::DarkGray));
         text.push(Line::from("● running  ⊘ always running: Android won't let it close").fg(Color::DarkGray));
-        text.push(Line::from("letter = jump  tab/←/→ switch  # package names  click / right-click  esc closes").fg(Color::DarkGray));
+        text.push(Line::from("letter = jump  tab/←/→ switch  # package names  click / right-click  esc closes   F1 guide  F3 remote").fg(Color::DarkGray));
         let r = popup(f, " launch an app ", text, Color::Green);
         if behind {
             // under another pop-up: dim, and not clickable

@@ -87,7 +87,7 @@ pub(super) const DETAILS_ROWS: usize = 7;
 pub(super) const DETAILS_MIN: usize = 3;
 
 /// The guide's key help (under 80 columns), and the details panel's.
-pub(super) const GUIDE_KEYS: &str = "↑↓ choose  ←→ ½ hour  tab tabs  ⏎ watch  * favourite  ⇧tab details  esc close";
+pub(super) const GUIDE_KEYS: &str = "↑↓ choose  ←→ ½ hour  tab tabs  ⏎ watch  * favourite  ⇧tab details  esc close   F2 apps  F3 remote";
 pub(super) const GUIDE_KEYS_DETAILS: &str = "details: ↑↓ pgup/pgdn scroll  esc/⇧tab back to the guide  h hide";
 
 /// Freeview's tags at the end of a description ("... [S,AD]"), as words.

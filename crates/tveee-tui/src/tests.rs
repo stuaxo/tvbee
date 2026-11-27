@@ -606,3 +606,15 @@ fn quick_keys() {
     // typed into the TV in remote mode
     assert_eq!(input_for(KeyCode::Char('F'), KeyModifiers::NONE, Mode::Remote), Input::Do(Action::Text("F".into())));
 }
+
+#[test]
+fn view_keys() {
+    let none = KeyModifiers::NONE;
+    assert_eq!(view_key(KeyCode::F(1), none), Some(View::Guide));
+    assert_eq!(view_key(KeyCode::F(2), none), Some(View::Apps));
+    assert_eq!(view_key(KeyCode::F(3), none), Some(View::Remote));
+    assert_eq!(view_key(KeyCode::Char('2'), KeyModifiers::ALT), Some(View::Apps));
+    // digits alone: jumping through the video, or a list's filter
+    assert_eq!(view_key(KeyCode::Char('2'), none), None);
+    assert_eq!(view_key(KeyCode::F(4), none), None);
+}

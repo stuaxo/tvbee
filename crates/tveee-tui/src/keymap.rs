@@ -42,6 +42,26 @@ pub enum Input {
 
 
 
+/// The views: the guide, the launcher, remote mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Guide,
+    Apps,
+    Remote,
+}
+
+/// A key that switches view from anywhere it isn't typing: F1-F3, or
+/// Alt+1-3 for terminals that keep the F keys. (Digits alone keep jumping
+/// through the video, and filter lists.)
+pub fn view_key(code: KeyCode, mods: KeyModifiers) -> Option<View> {
+    match (code, mods.contains(KeyModifiers::ALT)) {
+        (KeyCode::F(1), _) | (KeyCode::Char('1'), true) => Some(View::Guide),
+        (KeyCode::F(2), _) | (KeyCode::Char('2'), true) => Some(View::Apps),
+        (KeyCode::F(3), _) | (KeyCode::Char('3'), true) => Some(View::Remote),
+        _ => None,
+    }
+}
+
 /// Map a key to what it means in `mode`.
 pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
     use Action::*;
