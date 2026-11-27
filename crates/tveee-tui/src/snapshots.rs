@@ -274,3 +274,51 @@ fn standby_is_kept_for_next_time() {
     assert!(l.what.to_lowercase().contains("standby"), "{l:?}");
     assert_eq!(l.title, None);
 }
+
+/// Kodi paused, with everything the system panel shows (disks, a minute
+/// of memory readings stuck near full).
+fn kodi_busy() -> TvState {
+    use tveee_core::builtin::info::Disk;
+    let mut st = kodi_paused();
+    if let Some(s) = st.snap.as_mut() {
+        s.system.uptime_secs = Some(3.0 * 3600.0 + 40.0 * 60.0);
+        s.system.disks = vec![
+            Disk { mount: "/data".into(), total_kb: 3_774_873, used_kb: 3_670_016, avail_kb: 103_424 },
+            Disk { mount: "/mnt/expand/1234".into(), total_kb: 732_200_000, used_kb: 39_400_000, avail_kb: 692_800_000 },
+        ];
+    }
+    st.mem_history = (0..60).map(|i| 1290 + (i * 7) % 20).collect();
+    st
+}
+
+#[test]
+fn side_column_desktop() {
+    let mut a = app(kodi_busy());
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    // the system panel shows by itself on a wide screen, beside what's playing
+    let row = s.lines().find(|l| l.contains("Paused in Kodi")).expect("what's playing");
+    assert!(row.contains("system - i hides"), "{s}");
+    // and i hides it
+    let h = Handle::new(std::sync::mpsc::channel().0, Arc::new(Mutex::new(Arc::new(TvState::seeded(None)))));
+    a.apply(Input::ToggleInfo, &h);
+    assert!(!screen(&mut a, DESKTOP).contains("system - i hides"));
+}
+
+#[test]
+fn side_column_remote_desktop() {
+    let mut a = app(kodi_busy());
+    a.mode = Mode::Remote;
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    // the D-pad's keys answer clicks
+    assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::Do(Action::Key(19)))));
+    assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::Do(Action::Volume(1)))));
+}
+
+#[test]
+fn no_side_column_in_the_corner() {
+    // a small pane: the system panel only when asked for, below
+    let s = screen(&mut app(kodi_busy()), CORNER);
+    assert!(!s.contains("system - i hides"), "{s}");
+}
