@@ -97,16 +97,41 @@ fn inputs(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// What `channel` brings to the front: its keys only change channel in the
+/// TV's own live TV app.
+const LIVE_TV: crate::builtin::apps::Front = crate::builtin::apps::Front::Kind(crate::builtin::apps::Kind::LiveTv);
+
 fn channel(c: &Cx, args: &[String]) -> Result<Output> {
-    match args.first().map(String::as_str) {
-        Some("up") => c.tv.key(166).map(|()| "channel up".into()),
-        Some("down") => c.tv.key(167).map(|()| "channel down".into()),
-        Some(n) if !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()) => {
-            channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))?;
-            Ok(format!("channel {n}").into())
-        }
-        _ => usage("usage: tveee channel up|down|<number>"),
+    let arg = args.first().map(String::as_str);
+    let number = arg.filter(|n| !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()));
+    if !matches!(arg, Some("up" | "down")) && number.is_none() {
+        return usage("usage: tveee channel up|down|<number>");
     }
+    let first = if c.front { LIVE_TV.bring(c.tv)? } else { String::new() };
+    let said = match (arg, number) {
+        (Some("up"), _) => c.tv.key(166).map(|()| "channel up".to_string())?,
+        (Some("down"), _) => c.tv.key(167).map(|()| "channel down".to_string())?,
+        // a number: tuned exactly where a provider can (as 'watch'), else typed
+        (_, Some(n)) => {
+            let p = crate::provider::all().iter().copied().find(|p| p.channels().is_some());
+            let cx = crate::provider::Cx { tv: c.tv };
+            let tuned = p.and_then(|p| {
+                let chans = p.channels()?;
+                let list = chans.list(&cx).ok()?;
+                let ch = list.iter().find(|ch| ch.number.as_deref() == Some(n))?;
+                Some(chans.tune(&cx, ch))
+            });
+            match tuned {
+                Some(r) => r?,
+                None => {
+                    channel_keys(n).into_iter().try_for_each(|k| c.tv.keyevent(k))?;
+                    format!("channel {n}")
+                }
+            }
+        }
+        _ => unreachable!("checked above"),
+    };
+    Ok(format!("{first}{said}").into())
 }
 
 macro_rules! input_item {
@@ -141,7 +166,7 @@ pub fn actions() -> Vec<A> {
         A::terminal("input.list", CAT, "list inputs", inputs)
             .cli("inputs", "[--all]", "list the TV's input sources")
             .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
-        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]),
+        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).args("up|down|<number>").brings_to_front(LIVE_TV),
         input_item!("input.tuner", 't', "TV tuner", 170),
         input_item!("input.hdmi1", '1', "HDMI 1", 243),
         input_item!("input.hdmi2", '2', "HDMI 2", 244),
@@ -152,6 +177,7 @@ pub fn actions() -> Vec<A> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]

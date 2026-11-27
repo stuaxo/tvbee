@@ -21,6 +21,10 @@ pub struct Activity {
     /// More lines a provider surfaces ("channel", "next"), each maybe with
     /// something the UI opens when it's clicked.
     pub fields: Vec<Field>,
+    /// "video", "audio" or "picture", when the app says (see
+    /// [`crate::provider::Playing::media`]): actions for one kind are only
+    /// offered while it plays.
+    pub media: Option<&'static str>,
 }
 
 /// Something a field opens when clicked in the UI. Plain output (status,
@@ -49,7 +53,7 @@ pub struct Field {
 impl Activity {
     /// Just a what line.
     pub fn just(what: impl Into<String>) -> Activity {
-        Activity { what: what.into(), title: None, url: None, progress: None, fields: Vec::new() }
+        Activity { what: what.into(), title: None, url: None, progress: None, fields: Vec::new(), media: None }
     }
 
     pub fn field(&self, label: &str) -> Option<&Field> {
@@ -107,6 +111,7 @@ pub fn live_activity(ch: &crate::provider::Channel, events: &[crate::provider::E
         url: None,
         progress: on.map(|e| Progress { position: (at - e.start) as f64, duration: Some((e.end - e.start) as f64), paused: false }),
         fields,
+        media: Some(if ch.radio { "audio" } else { "video" }),
     }
 }
 
@@ -255,6 +260,11 @@ pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing
         (Some(_), Some(name)) => format!("Watching {name}"),
         _ => what,
     };
+    // music isn't watched
+    let what = match (p.media, what.strip_prefix("Watching ")) {
+        (Some("audio"), Some(name)) => format!("Listening in {name}"),
+        _ => what,
+    };
     let a = match a {
         Some(mut a) if between && a.title.is_none() => {
             a.title = sessions.iter().find(|s| s.package == pkg).and_then(title_of);
@@ -264,6 +274,7 @@ pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing
     };
     let mut out = a.unwrap_or_else(|| Activity::just(what.clone()));
     out.what = what;
+    out.media = p.media;
     if p.title.is_some() {
         out.title = p.title;
     }
@@ -296,16 +307,27 @@ pub fn keep_title(before: Option<&Activity>, mut now: Activity) -> Activity {
 pub fn activity_with(pkg: &str, who: Option<(String, Kind)>, sessions: &[MediaInfo]) -> Option<Activity> {
     let session = session_for(pkg, sessions);
     let (what, title) = describe(pkg, who.as_ref().map(|(n, k)| (n.as_str(), *k)), session)?;
-    Some(Activity { what, title, url: None, progress: None, fields: Vec::new() })
+    Some(Activity { what, title, url: None, progress: None, fields: Vec::new(), media: None })
 }
 
 #[cfg(test)]
 mod tests {
 
     #[test]
+    fn music_is_listened_to() {
+        use crate::provider::Playing;
+        let p = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false }), media: Some("audio"), ..Playing::default() };
+        let a = merge_playing("org.xbmc.kodi", Some(Activity::just("Browsing Kodi")), p, &[]);
+        assert_eq!((a.what.as_str(), a.media), ("Listening in Kodi", Some("audio")));
+        let v = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false }), media: Some("video"), ..Playing::default() };
+        assert_eq!(merge_playing("org.xbmc.kodi", Some(Activity::just("Browsing Kodi")), v, &[]).what, "Watching Kodi");
+    }
+
+
+    #[test]
     fn player_fills_in() {
         use crate::provider::Playing;
-        let session = Some(Activity { what: "Watching Kodi".into(), title: Some("S03E04".into()), url: None, progress: None, fields: vec![] });
+        let session = Some(Activity { what: "Watching Kodi".into(), title: Some("S03E04".into()), url: None, progress: None, fields: vec![], media: None });
         let p = Playing {
             title: Some("A Very Nuanced Character".into()),
             subtitle: Some("Taskmaster S03E04".into()),
@@ -315,6 +337,7 @@ mod tests {
             art_moves: false,
             extra: vec![("video", "1080p H264".into())],
             idle: false,
+            media: Some("video"),
         };
         let a = merge_playing("org.xbmc.kodi", session, p.clone(), &[]);
         assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching Kodi", Some("A Very Nuanced Character")));

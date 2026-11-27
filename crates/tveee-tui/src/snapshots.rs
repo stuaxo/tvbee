@@ -62,6 +62,7 @@ fn kodi_paused() -> TvState {
     a.title = Some("Episode 3 (Off-Road)".into());
     a.progress = Some(Progress { position: 27.0 * 60.0 + 56.0, duration: Some(48.0 * 60.0 + 47.0), paused: true });
     a.fields.push(Field { label: "audio", value: "AAC-LC  AAC".into(), place: Place::Bottom, open: None });
+    a.media = Some("video");
     st.snap = Some(Snapshot {
         activity: Some(a),
         volume: Some((24, 60)),
@@ -361,4 +362,27 @@ fn live_tv_buttons_corner() {
 fn no_buttons_in_standby() {
     let s = screen(&mut app(standby()), DESKTOP);
     assert!(!s.contains("│do "), "{s}");
+}
+
+#[test]
+fn kodi_music_has_no_subtitles() {
+    // Kodi's music view: the same app, audio playing
+    let mut st = kodi_paused();
+    if let Some(a) = st.snap.as_mut().and_then(|s| s.activity.as_mut()) {
+        a.what = "Listening in Kodi".into();
+        a.media = Some("audio");
+        a.fields.clear();
+    }
+    // Kodi's own actions, as the plugin describes them
+    let mut a = app_with(st.clone(), tveee_plugin_kodi::actions());
+    let s = screen(&mut a, DESKTOP);
+    let row = s.lines().find(|l| l.starts_with("│do ")).expect("a row of buttons");
+    assert!(!row.contains("subtitles") && !row.contains("audio track"), "{row}");
+    // a video: they're back
+    if let Some(x) = st.snap.as_mut().and_then(|s| s.activity.as_mut()) {
+        x.media = Some("video");
+    }
+    let s = screen(&mut app_with(st, tveee_plugin_kodi::actions()), DESKTOP);
+    assert!(s.lines().any(|l| l.starts_with("│do ") && l.contains("next subtitles")), "{s}");
+    assert!(row.contains("search"), "{row}");
 }

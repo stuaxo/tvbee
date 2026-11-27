@@ -99,7 +99,7 @@ fn main() {
         }
         std::process::exit(2);
     };
-    if let Err(e) = cmd.run.call(&ctx, rest) {
+    if let Err(e) = cmd.run.call(cmd.fronts, &ctx, rest) {
         eprintln!("tveee: {e}");
         if let Error::Usage(_) = e {
             eprintln!("(see 'tveee {} --help')", cmd.name);

@@ -134,6 +134,58 @@ pub fn all() -> &'static [App] {
 }
 
 /// "the home screen" -> "Home screen": app names are written for sentences.
+/// The app an action brings to the front (see
+/// [`crate::actions::ActionDescriptor::brings_to_front`]): one by its
+/// package, or whichever app here does a job (the TV's own live TV app,
+/// whatever its package on this TV).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Front {
+    Package(&'static str),
+    Kind(Kind),
+}
+
+impl Front {
+    /// The app it is here, if there's one.
+    pub fn app(self) -> Option<&'static App> {
+        match self {
+            Front::Package(p) => by_package(p),
+            Front::Kind(k) => all().iter().find(|a| a.kind == k && a.target != "@home"),
+        }
+    }
+
+    /// Its name, as help says it ("live TV", "Kodi").
+    pub fn name(self) -> String {
+        match (self.app(), self) {
+            (Some(a), _) => a.name.to_string(),
+            (None, Front::Package(p)) => p.to_string(),
+            (None, Front::Kind(k)) => format!("the {} app", k.as_str()),
+        }
+    }
+
+    /// Bring it to the front if something else is, and wait until it is
+    /// (up to 8s, then a moment more for it to take keys). Returns what to
+    /// say: "" when it was there already, or there's no such app here.
+    pub fn bring(self, tv: &Tv) -> Result<String> {
+        let Some(app) = self.app() else { return Ok(String::new()) };
+        let pkg = app.package();
+        let ours = |w: Option<String>| w.is_some_and(|w| w.split('/').next() == Some(pkg));
+        let front = || crate::builtin::info::focus_window(&tv.window_dump().unwrap_or_default());
+        if ours(front()) {
+            return Ok(String::new());
+        }
+        bring_to_front(tv, app.target)?;
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while !ours(front()) {
+            if std::time::Instant::now() >= until {
+                return failed(format!("couldn't bring {} to the front (it's showing {})", app.name, front().unwrap_or_else(|| "nothing".into())));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        Ok(format!("brought {} to the front; ", app.name))
+    }
+}
+
 pub fn list_name(name: &str) -> String {
     match name.strip_prefix("the ") {
         Some(n) => {
@@ -674,10 +726,10 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let own = own_actions(c, &pkg);
     if let Some(first) = args.get(1).filter(|a| !a.starts_with("--")) {
         if let Some((_, a)) = own.iter().find(|(word, _)| word == first) {
-            return a.run.call(c, &args[2..]);
+            return a.run.call(a.fronts, c, &args[2..]);
         }
         if !own.is_empty() {
-            let words: Vec<_> = own.iter().map(|(w, a)| format!("{w} {}", a.args).trim_end().to_string()).collect();
+            let words: Vec<_> = own.iter().map(|(w, a)| a.call_line(w)).collect();
             return usage(format!("app: {app}'s actions are: {}", words.join(" | ")));
         }
     }
@@ -701,7 +753,7 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
             if !own.is_empty() {
                 println!("  its own actions:");
                 for (word, a) in &own {
-                    println!("    {:<34} {}", format!("{word} {}", a.args).trim_end(), a.title);
+                    println!("    {:<34} {}", a.call_line(word), a.title);
                 }
             }
             Ok(())
@@ -853,6 +905,15 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn front_named_even_without_its_app() {
+        // no such app here: still said sensibly
+        assert_eq!(Front::Package("org.example.none").name(), "org.example.none");
+        assert!(Front::Package("org.example.none").app().is_none());
+        assert_eq!(Front::Kind(Kind::LiveTv), Front::Kind(Kind::LiveTv));
+    }
+
     use super::*;
 
     #[test]
