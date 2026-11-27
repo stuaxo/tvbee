@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
       # ca-certificates: cargo fetches crates over HTTPS; gcc and libc6-dev
       # build the bundled SQLite
-      - run: apt-get update && apt-get install -y --no-install-recommends cargo ca-certificates gcc libc6-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends cargo ca-certificates gcc libc6-dev curl
       - run: cargo --version && cargo build --locked && cargo test --workspace --exclude tveee-tui --locked
 
   # the oldest Rust we claim to support (Cargo.toml rust-version)

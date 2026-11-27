@@ -165,8 +165,16 @@ mod tests {
         assert_eq!(curl_config(&get), "");
     }
 
+    // Windows doesn't refuse a closed local port straight away (it retries
+    // the connection, so curl times out instead)
+    #[cfg(not(windows))]
     #[test]
     fn refused_is_retried_only_when_worth_it() {
+        // needs curl (it isn't everywhere tveee is built)
+        if Command::new("curl").arg("--version").output().is_err() {
+            eprintln!("no curl: skipped");
+            return;
+        }
         // a closed local port: curl says "refused" straight away
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let url = format!("https://127.0.0.1:{port}/x");
