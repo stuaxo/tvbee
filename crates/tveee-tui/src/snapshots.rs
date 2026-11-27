@@ -19,6 +19,9 @@ fn app(st: TvState) -> App {
 }
 
 fn app_with(st: TvState, actions: Vec<ActionDescriptor>) -> App {
+    // the plugins' providers, as the binary has them (always: tests run in
+    // any order)
+    super::tests::install_all();
     let (tx, _) = std::sync::mpsc::channel();
     let handle = Handle::new(tx, Arc::new(Mutex::new(Arc::new(st))));
     App::new("192.168.1.19".into(), handle, actions, true)
@@ -321,4 +324,41 @@ fn no_side_column_in_the_corner() {
     // a small pane: the system panel only when asked for, below
     let s = screen(&mut app(kodi_busy()), CORNER);
     assert!(!s.contains("system - i hides"), "{s}");
+}
+
+#[test]
+fn kodi_buttons_desktop() {
+    let mut a = app_with(kodi_paused(), actions());
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    // Kodi's own actions (menu keys), then search; the power ones aren't Kodi's
+    let row = s.lines().find(|l| l.contains(" do ") || l.starts_with("│do ")).expect("a row of buttons");
+    assert!(row.contains(".k") && row.contains("next subtitles") && row.contains("search"), "{row}");
+    assert!(!row.contains("sleep"), "{row}");
+    // clicking one runs it, as the menu would
+    let i = a.menu.iter().position(|d| d.id == "kodi.subtitles").expect("in the menu");
+    assert!(a.hits.iter().any(|(_, h)| *h == Hit::Chip(i)));
+}
+
+#[test]
+fn live_tv_buttons_corner() {
+    let mut st = TvState::seeded(None);
+    let mut act = Activity::just("Watching live TV");
+    act.title = Some("This is BBC Three".into());
+    st.snap = Some(Snapshot {
+        activity: Some(act),
+        volume: Some((24, 60)),
+        focus: Some("org.droidtv.zapster/org.droidtv.zapster.playtv.activity.PlayTvActivity".into()),
+        kind: Some("live-tv".into()),
+        ..Snapshot::default()
+    });
+    let s = screen(&mut app(st), CORNER);
+    insta::assert_snapshot!(s);
+    assert!(s.contains(" g ") && s.contains("guide"), "{s}");
+}
+
+#[test]
+fn no_buttons_in_standby() {
+    let s = screen(&mut app(standby()), DESKTOP);
+    assert!(!s.contains("│do "), "{s}");
 }

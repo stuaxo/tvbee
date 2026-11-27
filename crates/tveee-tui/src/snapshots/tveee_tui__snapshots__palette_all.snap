@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 111
+assertion_line: 114
 expression: "screen(&mut a, DESKTOP)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -9,9 +9,9 @@ expression: "screen(&mut a, DESKTOP)"
 │title    Episode 3 (Off-Road)                                          │power    Awake                               ││
 │progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │app      [player] org.xbmc.kodi              ││
 │audio    AAC-LC  AAC                                                   │memory   1032/1342 MB used, 310 MB free      ││
-│                                                                       │1342 MB                                      ││
-│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │                                             ││
-│                         ┌ commands ──────────────────────────────────────────────────── 19 ┐                        ││
+│do        .k  next subtitles   .a  next audio track   /  search        │1342 MB                                      ││
+│                                                                       │                                             ││
+│volume   ━━━━━━━━━━━━━━━━┌ commands ──────────────────────────────────────────────────── 19 ┐                        ││
 │                         │> █                                                               │12 MB                   ││
 │                         │────────────────────────────────────────────────────────────────  │40                      ││
 │                         │ kodi: next subtitles                                      kodi   │────────────────────────┘│
