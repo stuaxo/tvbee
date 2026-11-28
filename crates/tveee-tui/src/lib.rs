@@ -94,6 +94,12 @@ struct App {
     log_top: Option<usize>,
     /// A drag over the log's lines started (it selects).
     log_drag: bool,
+    /// A scrollbar being dragged (until the button's let go, the mouse is
+    /// its): it, and where in its thumb it was grabbed.
+    bar_drag: Option<(drawing::BarAt, u16)>,
+    /// Which item each row of the list pane or options is (None: a
+    /// heading, a gap), as last drawn: a dragged scrollbar picks by row.
+    bar_rows: Vec<Option<usize>>,
     /// tveee's options as this app reads them: None, the saved ones; tests
     /// give each app its own (never the real file, nor each other's).
     opts: Option<Vec<(String, bool)>>,
@@ -282,7 +288,6 @@ impl Drop for MouseCapture {
 }
 
 fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreEvent>) -> std::io::Result<()> {
-    use ratatui::crossterm::event::{MouseButton, MouseEventKind};
     // redraw when something changed (a key, news from the TV), and at least
     // every TICK so the progress bar moves
     const TICK: Duration = Duration::from_millis(200);
@@ -409,34 +414,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     _ => {}
                 }
             }
-            Event::Mouse(m) => match m.kind {
-                // the log's lines: shift+click selects to there; a drag selects
-                MouseEventKind::Down(MouseButton::Left) if matches!((app.overlay, app.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) => {
-                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
-                        app.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
-                        app.log_drag = true;
-                    }
-                }
-                MouseEventKind::Drag(MouseButton::Left) if app.log_drag => {
-                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
-                        app.log_click(n, true);
-                    }
-                }
-                MouseEventKind::Up(MouseButton::Left) => app.log_drag = false,
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if app.click(m.column, m.row, actions) {
-                        return Ok(());
-                    }
-                }
-                MouseEventKind::Down(MouseButton::Right) => {
-                    if let (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) = (app.overlay, app.hit_at(m.column, m.row)) {
-                        app.overlay = Overlay::AppActions { tab, sel: i, at: 0 };
-                    }
-                }
-                MouseEventKind::ScrollUp => app.scroll(true, actions),
-                MouseEventKind::ScrollDown => app.scroll(false, actions),
-                _ => {}
-            },
+            Event::Mouse(m) if app.mouse(m, actions) => return Ok(()),
             _ => {}
         }
     }
@@ -555,6 +533,8 @@ impl App {
             save_confirm: None,
             log_top: None,
             log_drag: false,
+            bar_drag: None,
+            bar_rows: Vec::new(),
             opts: None,
             system_watching: false,
             under: None,
@@ -892,6 +872,92 @@ impl App {
             }
             (Overlay::Confirm { .. }, Overlay::None, None) => self.note = "cancelled".into(),
             _ => {}
+        }
+    }
+
+    /// A mouse event. Returns true to quit.
+    fn mouse(&mut self, m: ratatui::crossterm::event::MouseEvent, actions: &Handle) -> bool {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        match m.kind {
+            // a scrollbar: grabbed (its thumb) or clicked (the track:
+            // the thumb jumps there), then dragged; the mouse is its
+            // until let go, wherever it goes
+            MouseEventKind::Down(MouseButton::Left) if matches!(self.hit_at(m.column, m.row), Some(Hit::Scrollbar(_))) => {
+                if let Some(Hit::Scrollbar(b)) = self.hit_at(m.column, m.row) {
+                    let cell = m.row.saturating_sub(b.area.y);
+                    let (start, len) = b.thumb();
+                    let grab = if (start..start + len).contains(&cell) { cell - start } else { len / 2 };
+                    self.bar_drag = Some((b, grab));
+                    self.drag_bar(m.row);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.bar_drag.is_some() => self.drag_bar(m.row),
+            MouseEventKind::Up(MouseButton::Left) if self.bar_drag.is_some() => self.bar_drag = None,
+            // the log's lines: shift+click selects to there; a drag selects
+            MouseEventKind::Down(MouseButton::Left) if matches!((self.overlay, self.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) => {
+                if let Some(Hit::LogLine(n)) = self.hit_at(m.column, m.row) {
+                    self.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
+                    self.log_drag = true;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.log_drag => {
+                if let Some(Hit::LogLine(n)) = self.hit_at(m.column, m.row) {
+                    self.log_click(n, true);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => self.log_drag = false,
+            MouseEventKind::Down(MouseButton::Left) => {
+                if self.click(m.column, m.row, actions) {
+                    return true;
+                }
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                if let (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) = (self.overlay, self.hit_at(m.column, m.row)) {
+                    self.overlay = Overlay::AppActions { tab, sel: i, at: 0 };
+                }
+            }
+            MouseEventKind::ScrollUp => self.scroll(true, actions),
+            MouseEventKind::ScrollDown => self.scroll(false, actions),
+            _ => {}
+        }
+        false
+    }
+
+    /// The scrollbar being dragged, with the mouse at row `y`: its pane
+    /// scrolled to match.
+    fn drag_bar(&mut self, y: u16) {
+        let Some((b, grab)) = self.bar_drag else { return };
+        let top = b.top_at(i32::from(y) - i32::from(b.area.y) - i32::from(grab));
+        let room = usize::from(b.area.height);
+        // the row in the middle of what's to be shown: the nearest item to
+        // it (panes that keep their highlight in view scroll by moving it)
+        let middle = |rows: &[Option<usize>]| {
+            let want = (top + room / 2).min(rows.len().saturating_sub(1));
+            (0..rows.len()).filter_map(|r| rows[r].map(|i| (r.abs_diff(want), i))).min().map(|(_, i)| i)
+        };
+        match (b.of, self.overlay) {
+            (drawing::Bar::Help, Overlay::Help(_)) => self.overlay = Overlay::Help(top),
+            (drawing::Bar::Log, Overlay::Logs { at, from }) => {
+                let (first, lines) = tveee_core::log::recent_numbered();
+                let last = (first + lines.len()).saturating_sub(1);
+                let top = first + top;
+                // the highlight kept in what's shown (stops following the newest)
+                let cur = at.unwrap_or(last).clamp(top, (top + room).saturating_sub(1).min(last));
+                self.log_top = Some(top);
+                self.overlay = Overlay::Logs { at: Some(cur), from };
+            }
+            (drawing::Bar::List, Overlay::List { .. }) => {
+                if let Some(i) = middle(&self.bar_rows) {
+                    self.overlay = Overlay::List { sel: i };
+                }
+            }
+            (drawing::Bar::Options, Overlay::Options(_)) => {
+                if let Some(i) = middle(&self.bar_rows) {
+                    self.overlay = Overlay::Options(i);
+                }
+            }
+            // the pane closed under it
+            _ => self.bar_drag = None,
         }
     }
 

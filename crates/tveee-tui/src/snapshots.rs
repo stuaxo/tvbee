@@ -1296,3 +1296,61 @@ fn options_scroll_when_short() {
     let y = u16::try_from(s.lines().position(|l| l.contains(label)).unwrap()).unwrap();
     assert!(a.hits.iter().any(|(r, h)| *h == Hit::OptionItem(last) && r.y == y), "{:?}", a.hits);
 }
+
+fn mouse_at(kind: ratatui::crossterm::event::MouseEventKind, x: u16, y: u16) -> ratatui::crossterm::event::MouseEvent {
+    ratatui::crossterm::event::MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE }
+}
+
+fn the_bar(a: &App) -> super::drawing::BarAt {
+    a.hits.iter().rev().find_map(|(_, h)| if let Hit::Scrollbar(b) = h { Some(*b) } else { None }).expect("a scrollbar")
+}
+
+#[test]
+fn scrollbars_drag_with_the_mouse() {
+    use ratatui::crossterm::event::{MouseButton, MouseEventKind::*};
+    let (mut a, rx, h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    a.overlay = Overlay::Help(0);
+    let _ = screen(&mut a, CORNER);
+    let b = the_bar(&a);
+    let (start, len) = b.thumb();
+    assert_eq!(start, 0);
+    // grab the thumb, drag it to the bottom (wandering off the bar on the way)
+    assert!(!a.mouse(mouse_at(Down(MouseButton::Left), b.area.x, b.area.y), &h));
+    a.mouse(mouse_at(Drag(MouseButton::Left), 2, b.area.y + 3), &h);
+    a.mouse(mouse_at(Drag(MouseButton::Left), 0, b.area.bottom() + 5), &h);
+    assert_eq!(a.overlay, Overlay::Help(b.max_top()), "at the end");
+    a.mouse(mouse_at(Up(MouseButton::Left), 0, b.area.bottom() + 5), &h);
+    // let go: dragging no longer scrolls
+    a.mouse(mouse_at(Drag(MouseButton::Left), b.area.x, b.area.y), &h);
+    assert_eq!(a.overlay, Overlay::Help(b.max_top()));
+    // a click on the track (above the thumb, now at the bottom): the thumb jumps there
+    let _ = screen(&mut a, CORNER);
+    let b = the_bar(&a);
+    a.mouse(mouse_at(Down(MouseButton::Left), b.area.x, b.area.y), &h);
+    a.mouse(mouse_at(Up(MouseButton::Left), b.area.x, b.area.y), &h);
+    assert_eq!(a.overlay, Overlay::Help(0), "{len}");
+
+    // the list pane: dragged, the highlight moves so the rows dragged to show
+    let mut st = kodi_albums_browsed();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        use tveee_core::more::Go;
+        use tveee_core::provider::ListItem;
+        l.items = (0..60).map(|n| ListItem { section: None, id: format!("musicdb://albums/{n}/"), label: format!("Album {n}"), meta: None, folder: true, go: Go::Link(format!("music||musicdb://albums/{n}/")) }).collect();
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, rx2, h) = app_seeing(st);
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    let _ = screen(&mut a, CORNER);
+    let b = the_bar(&a);
+    a.mouse(mouse_at(Down(MouseButton::Left), b.area.x, b.area.y), &h);
+    a.mouse(mouse_at(Drag(MouseButton::Left), b.area.x, b.area.bottom()), &h);
+    // let go over a row: nothing chosen
+    a.mouse(mouse_at(Up(MouseButton::Left), b.area.x - 10, b.area.y + 1), &h);
+    assert!(matches!(a.overlay, Overlay::List { sel } if sel > 50), "{:?}", a.overlay);
+    let s = screen(&mut a, CORNER);
+    assert!(s.contains("Album 59/"), "the end in view: {s}");
+    assert!(!rx2.try_iter().any(|x| matches!(x, Action::ListOpen { .. } | Action::ListGo(_))));
+    let _ = rx.try_iter().count();
+}

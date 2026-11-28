@@ -6,9 +6,59 @@ use super::*;
 /// Height of the memory graph.
 pub(super) const GRAPH_ROWS: u16 = 3;
 
+/// Which pane a scrollbar scrolls.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Bar {
+    Log,
+    Help,
+    List,
+    Options,
+}
+
+/// A scrollbar as drawn: where, what it scrolls, its rows and the first
+/// shown.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BarAt {
+    pub of: Bar,
+    pub area: ratatui::layout::Rect,
+    pub total: usize,
+    pub top: usize,
+}
+
+impl BarAt {
+    /// The rows the first shown can be, at most.
+    pub fn max_top(&self) -> usize {
+        self.total.saturating_sub(usize::from(self.area.height))
+    }
+    /// Its thumb: from which cell, how many (as ratatui draws it, near enough).
+    pub fn thumb(&self) -> (u16, u16) {
+        let h = usize::from(self.area.height);
+        if self.total == 0 || h == 0 {
+            return (0, 0);
+        }
+        let len = (h * h).div_ceil(self.total).clamp(1, h);
+        let max = self.max_top();
+        let start = (self.top.min(max) * (h - len) + max / 2).checked_div(max).unwrap_or(0);
+        (u16::try_from(start).unwrap_or(0), u16::try_from(len).unwrap_or(1))
+    }
+    /// The first row shown with the thumb's top at cell `cell` (from the bar's top).
+    pub fn top_at(&self, cell: i32) -> usize {
+        let (_, len) = self.thumb();
+        let span = i32::from(self.area.height) - i32::from(len);
+        if span <= 0 {
+            return 0;
+        }
+        let max = self.max_top();
+        let cell = cell.clamp(0, span);
+        usize::try_from((i64::from(cell) * max as i64 + i64::from(span) / 2) / i64::from(span)).unwrap_or(0).min(max)
+    }
+}
+
 /// Something on screen that responds to a click.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Hit {
+    /// A scrollbar: dragged (or clicked) to scroll its pane.
+    Scrollbar(BarAt),
     Input(Input),
     /// An option in the Ambilight dialog (row, option).
     AmbiOption(usize, usize),
@@ -345,17 +395,18 @@ pub(super) fn wrap_keep(line: &str, w: usize, hang: usize) -> Vec<String> {
 /// A scrollbar down column `x` from row `y`, `height` rows tall, beside
 /// `height` of `total` rows shown from row `top` (on a pane's right border,
 /// say); nothing when they all fit.
-pub(super) fn scrollbar(f: &mut Frame, x: u16, y: u16, height: u16, total: usize, top: usize) {
+pub(super) fn scrollbar(f: &mut Frame, of: Bar, x: u16, y: u16, height: u16, total: usize, top: usize) -> Option<BarAt> {
     use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
     let shown = usize::from(height);
     if total <= shown || height == 0 {
-        return;
+        return None;
     }
     let area = ratatui::layout::Rect { x, y, width: 1, height }.intersection(f.area());
     let max = total - shown;
     let mut state = ScrollbarState::new(max).position(top.min(max)).viewport_content_length(shown);
     let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight).begin_symbol(None).end_symbol(None).track_symbol(Some("│")).thumb_symbol("┃").track_style(Style::new().fg(Color::DarkGray)).thumb_style(Style::new().fg(Color::Gray));
     f.render_stateful_widget(bar, area, &mut state);
+    Some(BarAt { of, area, total, top: top.min(max) })
 }
 
 pub(super) fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {

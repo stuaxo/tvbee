@@ -448,6 +448,7 @@ impl App {
                 }
                 // where the rows are, for the scrollbar beside them
                 bar = Some((text.len(), rows.len().min(room), rows.len(), start));
+                self.bar_rows = rows.iter().map(|r| r.as_ref().ok().copied()).collect();
                 for row in rows.iter().skip(start).take(room) {
                     let i = match row {
                         Ok(i) => *i,
@@ -499,11 +500,12 @@ impl App {
             first.spans.push(Span::raw(" ".repeat(total.saturating_sub(w))));
         }
         let r = popup_titled(f, &title, &right, text, Color::Magenta);
-        if let Some((line, shown, total, start)) = bar {
+        let bar = bar.and_then(|(line, shown, total, start)| {
             let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
-            scrollbar(f, r.right().saturating_sub(1), y, u16::try_from(shown).unwrap_or(0), total, start);
-        }
+            scrollbar(f, Bar::List, r.right().saturating_sub(1), y, u16::try_from(shown).unwrap_or(0), total, start)
+        });
         self.hits.push((r, Hit::Popup));
+        self.hits.extend(bar.map(|b| (b.area, Hit::Scrollbar(b))));
         if let Some(line) = crumb_line {
             let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
             for (x, w, i) in crumb_spots {
