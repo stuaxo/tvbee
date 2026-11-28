@@ -69,6 +69,9 @@ impl App {
     /// Keys in the log: the list keys move the highlight (shift: select),
     /// v starts or ends a selection, y/⏎ copy, s saves, End follows the
     /// newest, Esc lets go of a selection then closes.
+    ///
+    /// Its keys are listed in keys.rs, "the log": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn logs_key(&mut self, at: Option<usize>, from: Option<usize>, code: KeyCode, mods: KeyModifiers) {
         let (first, lines) = tveee_core::log::recent_numbered();
         let last = (first + lines.len()).saturating_sub(1);
@@ -126,6 +129,9 @@ impl App {
 
     /// Typing the file to save the log to: ⏎ saves (asking again before
     /// writing over a file), Esc goes back to the log.
+    ///
+    /// Its keys are listed in keys.rs, "saving the log": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn save_log_key(&mut self, code: KeyCode, mods: KeyModifiers) {
         match code {
             KeyCode::Esc => self.overlay = self.log.back.take().unwrap_or(Overlay::None),

@@ -62,6 +62,9 @@ pub enum View {
 /// A key that switches view from anywhere it isn't typing: F1-F3, or
 /// Alt+1-3 for terminals that keep the F keys. (Digits alone keep jumping
 /// through the video, and filter lists.)
+///
+/// Its keys are listed in keys.rs, EVERYWHERE (F1-F3): they're handled here, not
+/// from that table, so change the rows with this.
 pub fn view_key(code: KeyCode, mods: KeyModifiers) -> Option<View> {
     match (code, mods.contains(KeyModifiers::ALT)) {
         (KeyCode::F(1), _) | (KeyCode::Char('1'), true) => Some(View::Guide),

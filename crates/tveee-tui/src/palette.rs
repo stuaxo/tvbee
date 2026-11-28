@@ -168,6 +168,9 @@ impl App {
 
     /// Whether this key opens the commands over the pop-up that's open: ^P
     /// anywhere, : where it isn't typed (a search, a filter, a prompt).
+    ///
+    /// Its keys are listed in keys.rs, EVERYWHERE (^P, :): they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn palette_wanted(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         let typing = matches!(
             self.overlay,
@@ -214,6 +217,9 @@ impl App {
 
     /// Keys in the palette: typing narrows it, ↑/↓ choose, ⏎ runs (or asks
     /// for what it needs, or asks first), Esc closes.
+    ///
+    /// Its keys are listed in keys.rs, "commands": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn palette_key(&mut self, sel: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         let n = self.palette_list().len();
         match code {

@@ -296,6 +296,9 @@ impl App {
 
     /// Keys in the guide: typing filters, ↑/↓/page keys/home/end move, ←/→
     /// go earlier/later in time, Tab switches tabs, Enter watches, Esc closes.
+    ///
+    /// Its keys are listed in keys.rs, "the guide" and "a programme's details": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         // keys for the details panel while it has the keyboard
         if self.guide.details == Details::Focused {

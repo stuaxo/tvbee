@@ -58,6 +58,9 @@ pub fn choice_action(c: AppChoice, e: &Entry) -> (Option<Action>, bool) {
 /// Keys in the launcher (`list` is the current tab's rows): arrows + Enter,
 /// a letter to jump to the next app whose alias (or name) starts with it, so
 /// every letter jumps; Tab, ← or → switch tabs; Esc or Backspace close.
+///
+/// Its keys are listed in keys.rs, "the apps" (# and / are in lib.rs's key loop): they're handled here, not
+/// from that table, so change the rows with this.
 pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Overlay, Option<Action>) {
     let n = list.len();
     let at = |sel| (Overlay::Apps { tab, sel }, None);
@@ -108,6 +111,9 @@ impl App {
     }
 
     /// Keys in the actions pop-up.
+    ///
+    /// Its keys are listed in keys.rs, "an app's actions": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn choice_key(&mut self, tab: AppTab, sel: usize, at: usize, code: KeyCode, actions: &Handle) {
         let rows = tab_list(self.st.apps_list(), tab);
         let n = rows.get(sel).map_or(1, |e| app_choices(e, self.st.running.contains(&e.package), self.st.fixed.contains(&e.package)).len());
