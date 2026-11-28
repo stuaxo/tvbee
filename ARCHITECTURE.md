@@ -86,6 +86,7 @@ Screens are tested as text snapshots (`snapshots.rs`, insta) at 120x35 and
 * Before merging: `cargo fmt`, `cargo clippy -D warnings`, the tests, and
   the build on Rust 1.89 (`pre-commit` runs fmt and clippy).
 * Few dependencies, on purpose: no async runtime, no TLS library (curl),
-  our own HTTP and WebSocket clients.
+  our own HTTP and WebSocket clients. JSON answers can be structs
+  (`serde` derive: see `plugins/kodi/src/answers.rs`).
 * Screenshots: `tools/contact-sheet/` records `tveee ui` at a terminal size
   and draws contact sheets (wide, narrow, tall) and the README's GIF.

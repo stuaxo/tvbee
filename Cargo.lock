@@ -2080,6 +2080,7 @@ dependencies = [
 name = "tveee-plugin-kodi"
 version = "0.3.0"
 dependencies = [
+ "serde",
  "serde_json",
  "tveee-core",
  "zip",

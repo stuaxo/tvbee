@@ -109,35 +109,35 @@ pub fn tracks_list(tv: &Tv) -> Result<ContextList> {
 
 /// The list from `Player.GetProperties`' answer (see [`tracks_list`]).
 pub fn tracks_of(p: &Value) -> ContextList {
-    let index = |t: &Value| t.get("index").and_then(Value::as_u64);
-    let name = |t: &Value| {
-        let text = |k: &str| t.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
-        let what = text("name").or_else(|| text("language")).unwrap_or_else(|| format!("track {}", index(t).map_or(0, |n| n + 1)));
-        match (text("language"), text("name")) {
-            (Some(l), Some(_)) => format!("{what} ({l})"),
-            _ => what,
+    use super::answers::{Stream, Tracks, read};
+    let t: Tracks = read(p);
+    let name = |s: &Stream| {
+        let (n, l) = (s.name.trim(), s.language.trim());
+        match (n.is_empty(), l.is_empty()) {
+            (false, false) => format!("{n} ({l})"),
+            (false, true) => n.to_string(),
+            (true, false) => l.to_string(),
+            (true, true) => format!("track {}", s.index.map_or(0, |i| i + 1)),
         }
     };
-    let list = |k: &str| p.get(k).and_then(Value::as_array).cloned().unwrap_or_default();
-    let current_audio = p.get("currentaudiostream").and_then(index);
-    let subs_on = p.get("subtitleenabled").and_then(Value::as_bool).unwrap_or(false);
-    let current_sub = p.get("currentsubtitle").and_then(index).filter(|_| subs_on);
+    let current_audio = t.currentaudiostream.as_ref().and_then(|s| s.index);
+    let current_sub = t.currentsubtitle.as_ref().and_then(|s| s.index).filter(|_| t.subtitleenabled);
     let mut items = Vec::new();
     let mut playing = None;
-    for a in list("audiostreams") {
-        let codec = a.get("codec").and_then(Value::as_str).map(str::to_uppercase);
-        let channels = a.get("channels").and_then(Value::as_u64).map(|c| format!("{c} ch"));
+    for a in &t.audiostreams {
+        let codec = Some(a.codec.to_uppercase()).filter(|c| !c.is_empty());
+        let channels = a.channels.map(|c| format!("{c} ch"));
         let meta = [codec, channels].into_iter().flatten().collect::<Vec<_>>().join(" ");
-        if index(&a).is_some() && index(&a) == current_audio {
+        if a.index.is_some() && a.index == current_audio {
             playing = Some(items.len());
         }
         items.push(ListItem {
             section: Some("Audio".into()),
-            id: format!("audio:{}", index(&a).unwrap_or(0)),
-            label: name(&a),
+            id: format!("audio:{}", a.index.unwrap_or(0)),
+            label: name(a),
             meta: Some(meta).filter(|m| !m.is_empty()),
             folder: false,
-            go: Link::Track { audio: true, index: index(&a) }.go(),
+            go: Link::Track { audio: true, index: a.index }.go(),
         });
     }
     let shown = |on: bool| if on { Some("shown".to_string()) } else { None };
@@ -149,14 +149,14 @@ pub fn tracks_of(p: &Value) -> ContextList {
         folder: false,
         go: Link::Track { audio: false, index: None }.go(),
     });
-    for s in list("subtitles") {
+    for s in &t.subtitles {
         items.push(ListItem {
             section: Some("Subtitles".into()),
-            id: format!("subtitle:{}", index(&s).unwrap_or(0)),
-            label: name(&s),
-            meta: shown(index(&s).is_some() && index(&s) == current_sub),
+            id: format!("subtitle:{}", s.index.unwrap_or(0)),
+            label: name(s),
+            meta: shown(s.index.is_some() && s.index == current_sub),
             folder: false,
-            go: Link::Track { audio: false, index: index(&s) }.go(),
+            go: Link::Track { audio: false, index: s.index }.go(),
         });
     }
     ContextList {
@@ -199,31 +199,24 @@ pub fn queue_list(tv: &Tv, playlist: u32) -> Result<ContextList> {
 
 /// The list for queue `playlist` from `Playlist.GetItems`' answer `r`.
 pub fn queue_of(playlist: u32, r: &Value) -> ContextList {
-    let text = |f: &Value, k: &str| f.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
-    let items = r
-        .get("items")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .enumerate()
-                .map(|(n, f)| {
-                    let title = Some(text(f, "title")).filter(|t| !t.is_empty()).unwrap_or_else(|| text(f, "label"));
-                    let artists: Vec<&str> =
-                        f.get("artist").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-                    let label = if artists.is_empty() { title } else { format!("{} - {title}", artists.join(", ")) };
-                    let meta = f.get("duration").and_then(Value::as_u64).filter(|d| *d > 0).map(duration);
-                    ListItem {
-                        section: None,
-                        id: text(f, "file"),
-                        label: format!("{}. {label}", n + 1),
-                        meta,
-                        folder: false,
-                        go: Link::GoTo { position: n }.go(),
-                    }
-                })
-                .collect()
+    let items = super::answers::read::<super::answers::Items>(r)
+        .items
+        .into_iter()
+        .enumerate()
+        .map(|(n, e)| {
+            let title = Some(e.title.trim().to_string()).filter(|t| !t.is_empty()).unwrap_or_else(|| e.label.trim().to_string());
+            let label = if e.artist.is_empty() { title } else { format!("{} - {title}", e.artist.join(", ")) };
+            let meta = Some(e.duration).filter(|d| *d > 0).map(duration);
+            ListItem {
+                section: None,
+                id: e.file.trim().to_string(),
+                label: format!("{}. {label}", n + 1),
+                meta,
+                folder: false,
+                go: Link::GoTo { position: n }.go(),
+            }
         })
-        .unwrap_or_default();
+        .collect();
     ContextList {
         title: "Playing queue".into(),
         kind: "queue",
@@ -328,29 +321,24 @@ fn duration(secs: u64) -> String {
 /// `v` for folder `dir`, in part `section`: folders open here, files play
 /// from their folder.
 pub fn items_of(m: Media, dir: &str, v: &Value, key: &str, section: Option<&str>) -> Vec<ListItem> {
-    let text = |f: &Value, k: &str| f.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
-    let Some(files) = v.get(key).and_then(Value::as_array) else { return Vec::new() };
-    files
-        .iter()
-        .filter_map(|f| {
-            let file = text(f, "file");
-            if file.is_empty() {
-                return None;
-            }
-            let label = text(f, "label");
+    use super::answers::{Directory, Entry, Sources, read};
+    let entries: Vec<Entry> = if key == "sources" { read::<Sources>(v).sources } else { read::<Directory>(v).files };
+    entries
+        .into_iter()
+        .filter(|e| !e.file.trim().is_empty())
+        .map(|e| {
+            let (file, label) = (e.file.trim().to_string(), e.label.trim().to_string());
             // sources are folders, and say nothing of it
-            let folder = key == "sources" || text(f, "filetype") == "directory";
-            let track = f.get("track").and_then(Value::as_u64).unwrap_or(0);
-            let shown = if !folder && track > 0 { format!("{track:02}. {label}") } else { label.clone() };
-            let artists: Vec<&str> = f.get("artist").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-            let meta = match f.get("duration").and_then(Value::as_u64) {
-                Some(d) if !folder && d > 0 => Some(duration(d)),
-                _ if folder && !artists.is_empty() => Some(artists.join(", ")),
+            let folder = key == "sources" || e.filetype == "directory";
+            let shown = if !folder && e.track > 0 { format!("{:02}. {label}", e.track) } else { label.clone() };
+            let meta = match e.duration {
+                d if !folder && d > 0 => Some(duration(d)),
+                _ if folder && !e.artist.is_empty() => Some(e.artist.join(", ")),
                 _ => None,
             };
             let go =
                 if folder { Link::browse(m, &label, &file).go() } else { Link::Play { playlist: m.playlist(), dir: dir.to_string(), file: file.clone() }.go() };
-            Some(ListItem { section: section.map(str::to_string), id: file, label: shown, meta, folder, go })
+            ListItem { section: section.map(str::to_string), id: file, label: shown, meta, folder, go }
         })
         .collect()
 }
