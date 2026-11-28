@@ -597,7 +597,7 @@ impl App {
                 })
             })
             .collect();
-        self.actions = tveee_core::plugin::install_enabled(&all, &states);
+        self.actions = super::palette::with_ui(tveee_core::plugin::install_enabled(&all, &states));
         self.menu = self.actions.iter().filter(|a| a.key.is_some()).copied().collect();
         let _ = self.engine.send(Action::Replugged);
     }
