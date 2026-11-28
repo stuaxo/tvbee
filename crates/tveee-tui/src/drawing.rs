@@ -581,6 +581,61 @@ pub(super) fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) 
     popup_titled(f, title, "", text, border)
 }
 
+/// A pop-up's lines, and what's clickable in them, recorded as each line is
+/// added: no row numbers worked out afterwards, so a line added above
+/// moves what's below it, clicks and all.
+#[derive(Default)]
+pub struct LineBuf {
+    lines: Vec<Line<'static>>,
+    /// (line, from x, width (None: the whole line), what it is)
+    spots: Vec<(usize, u16, Option<u16>, Hit)>,
+}
+
+impl LineBuf {
+    /// Add a line; returns its number (for [`LineBuf::spot`]).
+    pub fn push(&mut self, line: Line<'static>) -> usize {
+        self.lines.push(line);
+        self.lines.len() - 1
+    }
+
+    /// Add a line, all of it a click on `hit`.
+    pub fn push_hit(&mut self, line: Line<'static>, hit: Hit) {
+        let row = self.push(line);
+        self.spots.push((row, 0, None, hit));
+    }
+
+    /// Part of line `row` (from `x`, `width` wide) is a click on `hit`.
+    pub fn spot(&mut self, row: usize, x: u16, width: u16, hit: Hit) {
+        self.spots.push((row, x, Some(width), hit));
+    }
+
+    /// How many lines so far.
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    /// Whether there are none yet.
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    /// Draw it as a pop-up (`popup_titled`); returns where it went and
+    /// what's clickable (the pop-up itself first, then each spot).
+    pub fn popup(self, f: &mut Frame, title: &str, right: &str, border: Color) -> (ratatui::layout::Rect, Vec<(ratatui::layout::Rect, Hit)>) {
+        let r = popup_titled(f, title, right, self.lines, border);
+        let mut hits = vec![(r, Hit::Popup)];
+        let inner_w = r.width.saturating_sub(2);
+        for (row, x, w, hit) in self.spots {
+            let y = r.y + 1 + u16::try_from(row).unwrap_or(u16::MAX);
+            if y + 1 < r.bottom() {
+                let width = w.unwrap_or(inner_w).min(inner_w.saturating_sub(x));
+                hits.push((ratatui::layout::Rect { x: r.x + 1 + x, y, width, height: 1 }, hit));
+            }
+        }
+        (r, hits)
+    }
+}
+
 /// [`popup`] with a second title at the top right (a position, a count).
 pub(super) fn popup_titled(f: &mut Frame, title: &str, right: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {
     let h = u16::try_from(text.len()).unwrap_or(u16::MAX).saturating_add(2);

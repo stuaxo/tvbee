@@ -649,3 +649,34 @@ fn the_main_layout_without_drawing() {
     assert_eq!(l.body.width, 58);
     assert!(l.preview.is_none() && l.system.is_none());
 }
+
+#[test]
+fn line_buf_clicks_follow_their_lines() {
+    use super::drawing::LineBuf;
+    use ratatui::text::Line;
+    let draw = |banner: bool| {
+        let mut buf = LineBuf::default();
+        if banner {
+            buf.push(Line::from("a warning above everything"));
+        }
+        buf.push(Line::from("pick one:"));
+        buf.push_hit(Line::from("first"), Hit::MenuItem(0));
+        let row = buf.push(Line::from(" No     Yes "));
+        buf.spot(row, 7, 5, Hit::ConfirmYes);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 12)).unwrap();
+        let mut hits = Vec::new();
+        term.draw(|f| hits = buf.popup(f, " t ", "", ratatui::style::Color::Cyan).1).unwrap();
+        hits
+    };
+    let (plain, banner) = (draw(false), draw(true));
+    assert_eq!(plain[0].1, Hit::Popup);
+    let at = |hits: &[(ratatui::layout::Rect, Hit)], h: Hit| hits.iter().find(|(_, x)| *x == h).map(|(r, _)| *r).unwrap();
+    // the banner moved every click down a row in the box (the box itself
+    // is centred, so it moves too)
+    assert_eq!(at(&banner, Hit::ConfirmYes).y - at(&banner, Hit::MenuItem(0)).y, 1);
+    let top = |hits: &[(ratatui::layout::Rect, Hit)]| hits[0].0.y;
+    assert_eq!(at(&banner, Hit::MenuItem(0)).y - top(&banner), at(&plain, Hit::MenuItem(0)).y - top(&plain) + 1);
+    // the Yes spot: 5 wide, 7 in from the left inside the border
+    let yes = at(&plain, Hit::ConfirmYes);
+    assert_eq!((yes.x - plain[0].0.x, yes.width), (8, 5));
+}

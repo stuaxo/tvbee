@@ -196,39 +196,39 @@ impl App {
         let start = at.saturating_sub(room.saturating_sub(1)).min(rows.len().saturating_sub(room));
         let scrolls = rows.len() > room;
         let shown: Vec<(Line, Option<usize>)> = rows.into_iter().skip(start).take(room).collect();
-        let ids: Vec<Option<usize>> = shown.iter().map(|(_, i)| *i).collect();
-        let mut shown: Vec<Line> = shown.into_iter().map(|(l, _)| l).collect();
+        let count = shown.len();
+        let mut buf = LineBuf::default();
+        // the tabs, each label a click
+        let tabs = buf.push(tab_line);
+        let mut x = 0;
+        for (t, l) in &labels {
+            let w = u16::try_from(l.chars().count()).unwrap_or(0);
+            buf.spot(tabs, x, w, Hit::AppTab(*t));
+            x += w + 1;
+        }
+        buf.push(Line::default());
+        for (line, id) in shown {
+            match id {
+                Some(i) => buf.push_hit(line, Hit::AppItem(i)),
+                None => _ = buf.push(line),
+            }
+        }
         // pad to the taller tab, so switching doesn't move the box (or its tabs)
         let tallest = [AppTab::Known, AppTab::Other].iter().map(|t| tab_rows(all, *t)).max().unwrap_or(0);
-        while shown.len() < tallest.min(room) {
-            shown.push(Line::default());
+        for _ in count..tallest.min(room) {
+            buf.push(Line::default());
         }
-        let mut text = vec![tab_line, Line::default()];
-        text.extend(shown);
-        text.push(Line::default());
-        text.extend(hints_for(if scrolls { "  (scrolls)" } else { "" }).into_iter().map(|h| Line::from(h).fg(Color::DarkGray)));
-        let r = popup(f, " launch an app ", text, Color::Green);
+        buf.push(Line::default());
+        for h in hints_for(if scrolls { "  (scrolls)" } else { "" }) {
+            buf.push(Line::from(h).fg(Color::DarkGray));
+        }
+        let (r, hits) = buf.popup(f, " launch an app ", "", Color::Green);
         if behind {
             // under another pop-up: dim, and not clickable
             f.buffer_mut().set_style(r, Style::new().fg(Color::DarkGray).bg(Color::Reset).remove_modifier(Modifier::BOLD));
             return;
         }
-        self.hits.push((r, Hit::Popup));
-        // tab labels on the first row
-        let mut x = r.x + 1;
-        for (t, l) in &labels {
-            let w = u16::try_from(l.chars().count()).unwrap_or(0);
-            self.hits.push((ratatui::layout::Rect { x, y: r.y + 1, width: w, height: 1 }, Hit::AppTab(*t)));
-            x += w + 1;
-        }
-        // app rows start after the tabs and a blank line
-        for (row, id) in ids.into_iter().enumerate() {
-            if let Some(i) = id {
-                let y = r.y + 3 + u16::try_from(row).unwrap_or(0);
-                let width = r.width.saturating_sub(2);
-                self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width, height: 1 }, Hit::AppItem(i)));
-            }
-        }
+        self.hits.extend(hits);
     }
 
     pub(super) fn draw_app_actions(&mut self, f: &mut Frame, tab: AppTab, sel: usize, at: usize) {
@@ -239,7 +239,8 @@ impl App {
         let running = self.st.running.contains(&e.package);
         let fixed = self.st.fixed.contains(&e.package);
         let choices = app_choices(e, running, fixed);
-        let mut text: Vec<Line> = vec![
+        let mut buf = LineBuf::default();
+        buf.push(
             Line::from(format!(
                 "{}  {}",
                 e.package,
@@ -250,18 +251,14 @@ impl App {
                 }
             ))
             .fg(Color::DarkGray),
-            Line::default(),
-        ];
+        );
+        buf.push(Line::default());
         for (i, c) in choices.iter().enumerate() {
             let line = Line::from(format!("  {}", c.label(&e.name)));
-            text.push(if i == at { line.reversed() } else { line });
+            buf.push_hit(if i == at { line.reversed() } else { line }, Hit::AppChoice(i));
         }
-        text.push(Line::default());
-        let r = popup(f, &format!(" {} ", e.name), text, Color::Yellow);
-        self.hits.push((r, Hit::Popup));
-        for i in 0..choices.len() {
-            let y = r.y + 3 + u16::try_from(i).unwrap_or(0);
-            self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::AppChoice(i)));
-        }
+        buf.push(Line::default());
+        let (_, hits) = buf.popup(f, &format!(" {} ", e.name), "", Color::Yellow);
+        self.hits.extend(hits);
     }
 }
