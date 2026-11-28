@@ -1203,8 +1203,11 @@ fn browsing_kodi_here() {
     // ^S: sync folder on, folders open on the TV too
     a.list_key(1, KeyCode::Char('s'), KeyModifiers::CONTROL, &h);
     assert!(a.opt(tveee_core::options::LIST_SYNC));
+    // said in the title too
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("Albums (Kodi) ⇄ TV"), "{s}");
     a.list_up(&h);
-    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListOpen { at: "music||".into(), show: true }]);
+    assert_eq!(rx.try_iter().filter(|x| matches!(x, Action::ListOpen { .. })).collect::<Vec<_>>(), vec![Action::ListOpen { at: "music||".into(), show: true }]);
     // the album, read: then back up, landing on it
     let mut inside = st.clone();
     if let Some(Ok(Some(l))) = inside.list.as_deref().cloned() {
