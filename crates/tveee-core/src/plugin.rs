@@ -9,9 +9,9 @@
 //! `plugins --refresh`) a live probe whose result is cached. Plain `help`
 //! never touches the TV.
 
-use crate::error::Result;
 use crate::actions::ActionDescriptor;
 use crate::builtin::apps::App;
+use crate::error::Result;
 use crate::registry::Command;
 use crate::tv::Tv;
 use std::collections::HashMap;
@@ -113,16 +113,33 @@ fn no_apps() -> Vec<App> {
 
 impl Plugin {
     pub fn builtin(name: &'static str, desc: &'static str, actions: fn() -> Vec<ActionDescriptor>) -> Self {
-        Plugin { name, desc, enable: Enable::Always, actions, apps: no_apps, providers: no_providers, pairings: no_pairings, panels: Vec::new, namers: Vec::new, diagnose: no_findings }
+        Plugin {
+            name,
+            desc,
+            enable: Enable::Always,
+            actions,
+            apps: no_apps,
+            providers: no_providers,
+            pairings: no_pairings,
+            panels: Vec::new,
+            namers: Vec::new,
+            diagnose: no_findings,
+        }
     }
 
-    pub fn detect(
-        name: &'static str,
-        desc: &'static str,
-        detect: fn(&Tv) -> Result<bool>,
-        actions: fn() -> Vec<ActionDescriptor>,
-    ) -> Self {
-        Plugin { name, desc, enable: Enable::Detect(detect), actions, apps: no_apps, providers: no_providers, pairings: no_pairings, panels: Vec::new, namers: Vec::new, diagnose: no_findings }
+    pub fn detect(name: &'static str, desc: &'static str, detect: fn(&Tv) -> Result<bool>, actions: fn() -> Vec<ActionDescriptor>) -> Self {
+        Plugin {
+            name,
+            desc,
+            enable: Enable::Detect(detect),
+            actions,
+            apps: no_apps,
+            providers: no_providers,
+            pairings: no_pairings,
+            panels: Vec::new,
+            namers: Vec::new,
+            diagnose: no_findings,
+        }
     }
 
     /// Register these providers while the plugin is enabled.
@@ -168,10 +185,7 @@ impl Plugin {
 
     /// Command names and aliases this plugin provides.
     pub fn command_names(&self) -> Vec<&'static str> {
-        self.commands()
-            .iter()
-            .flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied()))
-            .collect()
+        self.commands().iter().flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied())).collect()
     }
 }
 
@@ -236,10 +250,7 @@ pub fn parse_overrides(s: &str) -> HashMap<String, bool> {
 }
 
 pub fn parse_cache(s: &str) -> HashMap<String, bool> {
-    s.lines()
-        .filter_map(|l| l.split_once('='))
-        .filter_map(|(k, v)| Some((k.trim().to_string(), v.trim().parse().ok()?)))
-        .collect()
+    s.lines().filter_map(|l| l.split_once('=')).filter_map(|(k, v)| Some((k.trim().to_string(), v.trim().parse().ok()?))).collect()
 }
 
 pub fn format_cache(cache: &HashMap<String, bool>) -> String {
@@ -268,13 +279,7 @@ fn write_cache(path: &Path, cache: &HashMap<String, bool>) {
     let _ = std::fs::write(path, format_cache(cache));
 }
 
-pub fn resolve(
-    plugins: &[Plugin],
-    tv: &Tv,
-    mode: Mode,
-    overrides: &HashMap<String, bool>,
-    cache_file: Option<&Path>,
-) -> Vec<PluginState> {
+pub fn resolve(plugins: &[Plugin], tv: &Tv, mode: Mode, overrides: &HashMap<String, bool>, cache_file: Option<&Path>) -> Vec<PluginState> {
     let mut cache = cache_file.map(read_cache).unwrap_or_default();
     let mut dirty = false;
     let mut states = Vec::new();

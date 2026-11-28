@@ -5,9 +5,9 @@
 //! What an app is called and how to read a link out of its page lives with the
 //! app itself (`plugins::apps::all`); this module only combines the clues.
 
-use crate::devtools::Progress;
 use crate::builtin::apps::{self, Kind};
 use crate::builtin::media::MediaInfo;
+use crate::devtools::Progress;
 use crate::tv::Tv;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -227,7 +227,13 @@ pub fn named(tv: &Tv, pkg: &str, who: Option<(String, Kind)>) -> Option<(String,
 /// `a`, filled in from an app's own player API when it says what's playing
 /// (title, show, exact position, stream details); and the picture of it,
 /// if there is one. Anything amiss there: `a` as it was.
-pub fn with_player(tv: &Tv, pkg: &str, player: &dyn crate::provider::Player, a: Option<Activity>, sessions: &[MediaInfo]) -> (Option<Activity>, Option<crate::provider::Playing>) {
+pub fn with_player(
+    tv: &Tv,
+    pkg: &str,
+    player: &dyn crate::provider::Player,
+    a: Option<Activity>,
+    sessions: &[MediaInfo],
+) -> (Option<Activity>, Option<crate::provider::Playing>) {
     // can't say, or broke: what the media session said
     let p = match player.playing(tv) {
         crate::provider::Outcome::Handled(p) => p,
@@ -250,10 +256,7 @@ pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing
         // the app says nothing plays (its media session may linger)
         return Activity::just(format!("Browsing {}", apps::by_package(pkg).map_or(pkg, |x| x.name)));
     }
-    let what = a.as_ref().map_or_else(
-        || format!("Watching {}", apps::by_package(pkg).map_or(pkg, |x| x.name)),
-        |a| a.what.clone(),
-    );
+    let what = a.as_ref().map_or_else(|| format!("Watching {}", apps::by_package(pkg).map_or(pkg, |x| x.name)), |a| a.what.clone());
     let between = p.progress.is_some() && what.starts_with("Browsing ");
     let what = match (&p.progress, what.strip_prefix("Browsing ")) {
         (Some(pr), Some(name)) if pr.paused => format!("Paused in {name}"),
@@ -291,7 +294,6 @@ pub fn merge_playing(pkg: &str, a: Option<Activity>, p: crate::provider::Playing
     out
 }
 
-
 /// `now`, with the title `before` had when `now` lost it but plays the same
 /// link (the media session drops its title for a moment around a video
 /// loading, an ad, or for no reason seen).
@@ -316,13 +318,20 @@ mod tests {
     #[test]
     fn music_is_listened_to() {
         use crate::provider::Playing;
-        let p = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false, rate: 1.0 }), media: Some("audio"), ..Playing::default() };
+        let p = Playing {
+            progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false, rate: 1.0 }),
+            media: Some("audio"),
+            ..Playing::default()
+        };
         let a = merge_playing("org.xbmc.kodi", Some(Activity::just("Browsing Kodi")), p, &[]);
         assert_eq!((a.what.as_str(), a.media), ("Listening in Kodi", Some("audio")));
-        let v = Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false, rate: 1.0 }), media: Some("video"), ..Playing::default() };
+        let v = Playing {
+            progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused: false, rate: 1.0 }),
+            media: Some("video"),
+            ..Playing::default()
+        };
         assert_eq!(merge_playing("org.xbmc.kodi", Some(Activity::just("Browsing Kodi")), v, &[]).what, "Watching Kodi");
     }
-
 
     #[test]
     fn player_fills_in() {
@@ -357,7 +366,8 @@ mod tests {
         let s = MediaInfo { package: YT.into(), state: Some(8), title: Some("Never Gonna Give You Up".into()), subtitle: Some("Rick Astley".into()) };
         let browsing = activity_with(YT, Some(("YouTube".into(), Kind::Video)), std::slice::from_ref(&s));
         assert_eq!(browsing.as_ref().map(|a| a.what.as_str()), Some("Browsing YouTube"));
-        let at = |paused| Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused, rate: 1.0 }), ..Playing::default() };
+        let at =
+            |paused| Playing { progress: Some(crate::devtools::Progress { position: 2.0, duration: Some(213.0), paused, rate: 1.0 }), ..Playing::default() };
         let a = merge_playing(YT, browsing.clone(), at(false), std::slice::from_ref(&s));
         assert_eq!((a.what.as_str(), a.title.as_deref()), ("Watching YouTube", Some("Never Gonna Give You Up (Rick Astley)")));
         assert_eq!(merge_playing(YT, browsing.clone(), at(true), std::slice::from_ref(&s)).what, "Paused in YouTube");
@@ -407,12 +417,7 @@ mod tests {
     }
 
     fn session(state: u32, title: Option<&str>, sub: Option<&str>) -> MediaInfo {
-        MediaInfo {
-            package: "com.google.android.youtube.tv".into(),
-            state: Some(state),
-            title: title.map(Into::into),
-            subtitle: sub.map(Into::into),
-        }
+        MediaInfo { package: "com.google.android.youtube.tv".into(), state: Some(state), title: title.map(Into::into), subtitle: sub.map(Into::into) }
     }
 
     const PKG: &str = "com.google.android.youtube.tv";
@@ -447,10 +452,7 @@ mod tests {
         assert_eq!(describe("com.example.x", None, None), None);
         let mut s = session(3, Some("Song"), Some("Band"));
         s.package = "com.example.x".into();
-        assert_eq!(
-            describe("com.example.x", None, Some(&s)).unwrap(),
-            ("Playing in com.example.x".into(), Some("Song (Band)".into()))
-        );
+        assert_eq!(describe("com.example.x", None, Some(&s)).unwrap(), ("Playing in com.example.x".into(), Some("Song (Band)".into())));
     }
 
     #[test]

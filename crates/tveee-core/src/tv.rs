@@ -1,6 +1,6 @@
 //! Thin wrapper over the `adb` binary for one TV.
 
-use crate::error::{failed, Error, Result};
+use crate::error::{Error, Result, failed};
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command as Proc, Output};
@@ -18,9 +18,7 @@ pub struct Found {
 /// `name` (plus `.exe` on Windows) in the directories of `path_var`.
 pub fn search_path(name: &str, path_var: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     let names: Vec<String> = if cfg!(windows) { vec![format!("{name}.exe"), name.to_string()] } else { vec![name.to_string()] };
-    std::env::split_paths(path_var?)
-        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
-        .find(|p| p.is_file())
+    std::env::split_paths(path_var?).flat_map(|dir| names.iter().map(move |n| dir.join(n))).find(|p| p.is_file())
 }
 
 /// Find adb: `$ADB`, then PATH, then the Android SDK variables
@@ -79,10 +77,7 @@ fn check(args: &[&str], out: Output) -> Result<Output> {
     if out.status.success() {
         return Ok(out);
     }
-    let said = [clean(&out.stderr), clean(&out.stdout)]
-        .into_iter()
-        .map(|s| s.trim().to_string())
-        .find(|s| !s.is_empty());
+    let said = [clean(&out.stderr), clean(&out.stdout)].into_iter().map(|s| s.trim().to_string()).find(|s| !s.is_empty());
     let what = args.iter().take(3).copied().collect::<Vec<_>>().join(" ");
     match said {
         Some(msg) => failed(format!("adb {what}: {msg}")),
@@ -93,9 +88,7 @@ fn check(args: &[&str], out: Output) -> Result<Output> {
 /// adb's complaint (stderr) when it isn't connected to the device: then
 /// `adb connect` and try again.
 pub fn not_connected(stderr: &str) -> bool {
-    (stderr.contains("device '") && stderr.contains("' not found"))
-        || stderr.contains("device offline")
-        || stderr.contains("no devices/emulators found")
+    (stderr.contains("device '") && stderr.contains("' not found")) || stderr.contains("device offline") || stderr.contains("no devices/emulators found")
 }
 
 /// How long `adb connect` gets.
@@ -125,9 +118,7 @@ pub fn connect_ok(stdout: &str) -> bool {
 
 impl Tv {
     pub fn from_env() -> Self {
-        Tv {
-            ip: std::env::var("TV_IP").unwrap_or_else(|_| DEFAULT_IP.into()),
-        }
+        Tv { ip: std::env::var("TV_IP").unwrap_or_else(|_| DEFAULT_IP.into()) }
     }
 
     pub fn serial(&self) -> String {
@@ -255,18 +246,8 @@ impl Tv {
     /// Like `shell`, but the device's output goes straight to the terminal.
     pub fn shell_inherit(&self, args: &[&str]) -> Result<()> {
         self.ready()?;
-        let status = Proc::new(adb_program())
-            .arg("-s")
-            .arg(self.serial())
-            .arg("shell")
-            .args(args)
-            .status()
-            .map_err(adb_err)?;
-        if status.success() {
-            Ok(())
-        } else {
-            failed(format!("adb shell {} failed ({status})", args.first().unwrap_or(&"")))
-        }
+        let status = Proc::new(adb_program()).arg("-s").arg(self.serial()).arg("shell").args(args).status().map_err(adb_err)?;
+        if status.success() { Ok(()) } else { failed(format!("adb shell {} failed ({status})", args.first().unwrap_or(&""))) }
     }
 
     /// Press a key: written straight to an input device when tveee can,

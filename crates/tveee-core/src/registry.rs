@@ -1,8 +1,8 @@
 //! Command registry. Each module under `src/` contributes the commands of
 //! one category, and the help output groups them by that category.
 
-use crate::error::Result;
 use crate::Ctx;
+use crate::error::Result;
 use std::collections::BTreeMap;
 
 pub use crate::actions::Run;
@@ -20,13 +20,7 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn new(
-        category: &'static str,
-        name: &'static str,
-        usage: &'static str,
-        desc: &'static str,
-        run: fn(&Ctx, &[String]) -> Result<()>,
-    ) -> Self {
+    pub fn new(category: &'static str, name: &'static str, usage: &'static str, desc: &'static str, run: fn(&Ctx, &[String]) -> Result<()>) -> Self {
         Command { category, name, usage, desc, long: "", aliases: &[], fronts: None, run: Run::Terminal(run) }
     }
 
@@ -103,18 +97,12 @@ pub fn usage_text(cmds: &[Command]) -> String {
     for c in cmds {
         by_cat.entry(c.category).or_default().push(c);
     }
-    let mut out = String::from(
-        "Usage: tveee <command> [args]\n\nType 'tveee <command> --help' (or 'tveee help <command>') for help on a command.\n",
-    );
+    let mut out = String::from("Usage: tveee <command> [args]\n\nType 'tveee <command> --help' (or 'tveee help <command>') for help on a command.\n");
     for (cat, mut group) in by_cat {
         group.sort_by_key(|c| c.name);
         out.push_str(&format!("\n[{cat}]\n"));
         for c in group {
-            let alias = if c.aliases.is_empty() {
-                String::new()
-            } else {
-                format!(" (alias: {})", c.aliases.join(" "))
-            };
+            let alias = if c.aliases.is_empty() { String::new() } else { format!(" (alias: {})", c.aliases.join(" ")) };
             out.push_str(&format!("    {:<12} {}{}\n", c.name, c.desc, alias));
         }
     }
@@ -124,9 +112,7 @@ pub fn usage_text(cmds: &[Command]) -> String {
 
 pub fn help_for(c: &Command) -> String {
     let flag = if c.fronts.is_some() { format!(" [{}]", crate::actions::NO_FRONT) } else { String::new() };
-    let mut out = format!("usage: tveee {} {}{flag}\n\n{}\n", c.name, c.usage, c.desc)
-        .replace("  [", " [")
-        .replace(" \n\n", "\n\n");
+    let mut out = format!("usage: tveee {} {}{flag}\n\n{}\n", c.name, c.usage, c.desc).replace("  [", " [").replace(" \n\n", "\n\n");
     if !c.long.is_empty() {
         out.push_str(&format!("\n{}\n", c.long));
     }

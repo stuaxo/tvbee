@@ -6,47 +6,47 @@
 //! the screen never waits on adb; the worker keeps one devtools connection
 //! open, which makes refreshing every second and exact seeking cheap.
 
-use tveee_core::error::Result;
-use tveee_core::actions::{ActionDescriptor, Params};
-use tveee_core::nowplaying::{self, Activity, bar, progress_bar};
-use tveee_core::builtin::apps::list_name;
-use tveee_core::builtin::{apps, info, search};
-use tveee_core::Ctx;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
+use tveee_core::Ctx;
+use tveee_core::actions::{ActionDescriptor, Params};
+use tveee_core::builtin::apps::list_name;
+use tveee_core::builtin::{apps, info, search};
+use tveee_core::error::Result;
+use tveee_core::nowplaying::{self, Activity, bar, progress_bar};
 
-mod keymap;
-mod guide;
-mod preview;
-mod launcher;
 mod ambi;
+mod ctxlist;
+mod drawing;
+mod guide;
+mod keymap;
+mod launcher;
+mod links;
+mod listnav;
+mod logview;
 mod overlays;
 mod palette;
-mod drawing;
-mod links;
-mod logview;
-mod listnav;
-mod ctxlist;
-#[cfg(test)]
-mod tests;
+mod preview;
 #[cfg(test)]
 mod snapshots;
+#[cfg(test)]
+mod tests;
 
-use tveee_core::engine::*;
-pub use self::keymap::*;
+pub use self::drawing::*;
 pub use self::guide::*;
-pub use self::preview::*;
+pub use self::keymap::*;
 pub use self::launcher::*;
 pub use self::overlays::*;
 pub use self::palette::*;
-pub use self::drawing::*;
+pub use self::preview::*;
+use tveee_core::engine::*;
 
 const CAT: &str = "ui";
 struct App {
@@ -466,8 +466,11 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui).cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking").long(
-        "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
+    vec![
+        ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui)
+            .cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking")
+            .long(
+                "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
          the arrows seek and change volume; in remote mode the keyboard is the TV's:\n\
          arrows move around its menus, Enter is OK, Esc is back, and what you type\n\
@@ -511,7 +514,8 @@ pub fn actions() -> Vec<ActionDescriptor> {
          what line says so (\"launching Netflix...\") instead of showing each step\n\
          the TV passes through, until the action has arrived and settled.\n\
          --no-settle shows every step as it comes (for debugging).",
-    )]
+            ),
+    ]
 }
 
 impl App {
@@ -637,13 +641,8 @@ impl App {
         }
         let snap = self.st.snap.as_ref();
         // home screens on the way: the ones tveee knows, and those on the TV
-        let mut passing: Vec<String> = self
-            .st
-            .apps_list()
-            .iter()
-            .filter(|e| e.section == SECTIONS[0] || apps::passes_through(&e.package))
-            .map(|e| e.package.clone())
-            .collect();
+        let mut passing: Vec<String> =
+            self.st.apps_list().iter().filter(|e| e.section == SECTIONS[0] || apps::passes_through(&e.package)).map(|e| e.package.clone()).collect();
         passing.extend(["android", "com.android.systemui"].map(String::from));
         self.settling = Some(Settling::new(
             label,
@@ -906,7 +905,9 @@ impl App {
             MouseEventKind::Drag(MouseButton::Left) if self.bar_drag.is_some() => self.drag_bar(m.row),
             MouseEventKind::Up(MouseButton::Left) if self.bar_drag.is_some() => self.bar_drag = None,
             // the log's lines: shift+click selects to there; a drag selects
-            MouseEventKind::Down(MouseButton::Left) if matches!((self.overlay, self.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) => {
+            MouseEventKind::Down(MouseButton::Left)
+                if matches!((self.overlay, self.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) =>
+            {
                 if let Some(Hit::LogLine(n)) = self.hit_at(m.column, m.row) {
                     self.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
                     self.log_drag = true;
@@ -993,9 +994,7 @@ impl App {
                 self.apply_overlay(next, action, actions);
             }
             (Overlay::Menu(_), Some(Hit::Popup)) => {}
-            (Overlay::Confirm { id, .. }, Some(Hit::ConfirmYes)) => {
-                self.apply_overlay(Overlay::None, Some(run(id)), actions)
-            }
+            (Overlay::Confirm { id, .. }, Some(Hit::ConfirmYes)) => self.apply_overlay(Overlay::None, Some(run(id)), actions),
             (Overlay::Confirm { .. }, Some(Hit::Popup)) => {}
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
@@ -1050,7 +1049,16 @@ impl App {
             (Overlay::SaveLog, Some(Hit::Popup)) => {}
             (Overlay::SaveLog, _) => self.overlay = self.log_back.take().unwrap_or(Overlay::None),
             // a click elsewhere closes the pop-up (cancelling a confirmation)
-            (Overlay::Help(_) | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
+            (
+                Overlay::Help(_)
+                | Overlay::Menu(_)
+                | Overlay::Confirm { .. }
+                | Overlay::Apps { .. }
+                | Overlay::Prompt(_)
+                | Overlay::Search(_)
+                | Overlay::Palette(_),
+                _,
+            ) => {
                 let palette = matches!(self.overlay, Overlay::Palette(_));
                 self.apply_overlay(Overlay::None, None, actions);
                 if palette {

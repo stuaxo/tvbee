@@ -2,15 +2,15 @@
 //! Everything else is in `tveee-core` (and the vendor plugins' and the
 //! terminal remote's crates).
 
-mod plugins;
 #[cfg(test)]
 mod plugin_tests;
+mod plugins;
 
-use tveee_core::{dotenv, error, plugin, registry, tv, Ctx};
 use error::Error;
 use plugin::Mode;
 use registry::Command;
 use tv::Tv;
+use tveee_core::{Ctx, dotenv, error, plugin, registry, tv};
 
 fn main() {
     // before anything reads TV_IP etc. (and before any threads)
@@ -34,12 +34,7 @@ fn main() {
     let cache_file = plugin::cache_path(&tv.ip);
     let states = plugin::resolve(&all, &tv, mode, &overrides, cache_file.as_deref());
 
-    let commands: Vec<Command> = all
-        .iter()
-        .zip(&states)
-        .filter(|(_, s)| s.enabled)
-        .flat_map(|(p, _)| p.commands())
-        .collect();
+    let commands: Vec<Command> = all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| p.commands()).collect();
     // what the enabled plugins bring (their apps join the core list), before
     // anything looks one up
     let actions = plugin::install_enabled(&all, &states);
@@ -62,11 +57,7 @@ fn main() {
 
     let Some(cmd) = registry::find(&ctx.commands, sub) else {
         // a command from a plugin that isn't enabled?
-        if let Some((p, s)) = all
-            .iter()
-            .zip(&ctx.plugins)
-            .find(|(p, s)| !s.enabled && p.command_names().contains(&sub))
-        {
+        if let Some((p, s)) = all.iter().zip(&ctx.plugins).find(|(p, s)| !s.enabled && p.command_names().contains(&sub)) {
             eprintln!(
                 "tveee: '{sub}' is provided by the '{}' plugin, which is not enabled for this TV ({}).\nTry 'tveee plugins --refresh', or set TVEEE_PLUGINS={}.",
                 p.name,
@@ -76,9 +67,7 @@ fn main() {
             std::process::exit(1);
         }
         if let Some((_, feature)) = plugins::NOT_BUILT.iter().find(|(c, _)| *c == sub) {
-            eprintln!(
-                "tveee: '{sub}' isn't in this build; it needs the '{feature}' feature:\n  cargo install --path . --features {feature}"
-            );
+            eprintln!("tveee: '{sub}' isn't in this build; it needs the '{feature}' feature:\n  cargo install --path . --features {feature}");
             std::process::exit(1);
         }
         match registry::suggest(&ctx.commands, sub) {
@@ -117,16 +106,10 @@ mod tests {
         let end = "```\n<!-- commands:end -->";
         let from = readme.find(start).expect("README: commands:start marker") + start.len();
         let to = from + readme[from..].find(end).expect("README: commands:end marker");
-        let cmds: Vec<Command> = plugins::all()
-            .iter()
-            .filter(|p| matches!(p.enable, plugin::Enable::Always) && p.name != "ui")
-            .flat_map(|p| p.commands())
-            .collect();
+        let cmds: Vec<Command> =
+            plugins::all().iter().filter(|p| matches!(p.enable, plugin::Enable::Always) && p.name != "ui").flat_map(|p| p.commands()).collect();
         let want = registry::usage_text(&cmds);
-        assert!(
-            readme[from..to] == want,
-            "README's command list is out of date; replace the block between the commands markers with:\n\n{want}"
-        );
+        assert!(readme[from..to] == want, "README's command list is out of date; replace the block between the commands markers with:\n\n{want}");
     }
 
     #[test]

@@ -8,17 +8,16 @@
 //!
 //! No terminal in here: `tveee ui` is one front end, a GUI could be another.
 
-
 use crate::actions::{ActionDescriptor, Params};
-use crate::devtools::{self, SeekTo};
-use crate::error::Result;
-use crate::nowplaying::{self, clock, Activity};
 use crate::builtin::apps::list_name;
 use crate::builtin::{apps, info, media, search};
+use crate::devtools::{self, SeekTo};
+use crate::error::Result;
+use crate::nowplaying::{self, Activity, clock};
 use crate::tv::Tv;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod apps_rows;
@@ -99,7 +98,10 @@ pub enum Action {
     Text(String),
     /// Run an action (`crate::actions`) by id, with these arguments (for one
     /// that asks for text: the line typed).
-    Run { id: &'static str, args: Vec<String> },
+    Run {
+        id: &'static str,
+        args: Vec<String>,
+    },
     /// Start an app: an alias, package or package/activity.
     Launch(String),
     /// Bring a running app's task to the front.
@@ -107,11 +109,18 @@ pub enum Action {
     /// Force-stop an app (by package).
     Close(String),
     /// Force-stop, then start fresh.
-    Restart { pkg: String, target: String },
+    Restart {
+        pkg: String,
+        target: String,
+    },
     /// Find out which apps are running (for the launcher).
     CheckRunning,
     /// Search in an app; `keys` means by typing into it (no search intent).
-    Search { pkg: String, query: String, keys: bool },
+    Search {
+        pkg: String,
+        query: String,
+        keys: bool,
+    },
     /// Fetch the programme guide (for the guide pop-up).
     LoadGuide,
     /// Fetch a programme's description (channel, start).
@@ -140,7 +149,10 @@ pub enum Action {
     /// Open a browsed list's folder (a link, see
     /// [`crate::provider::ContextList::browsed`]): read here, and shown on
     /// the app's screen too when `show`.
-    ListOpen { at: String, show: bool },
+    ListOpen {
+        at: String,
+        show: bool,
+    },
     Refresh,
     /// Read the TV now, saying nothing: something the refresh feeds (the
     /// list pane, a panel) was just opened, and shouldn't wait for the next
@@ -203,7 +215,6 @@ pub enum Msg {
     /// What the preview is doing, or why there's no picture.
     PreviewNote(String),
 }
-
 
 /// The engine's threads, running for one TV.
 pub struct Engine {

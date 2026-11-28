@@ -10,39 +10,63 @@ pub enum Overlay {
     /// Typing the PIN the TV shows, to pair (the text is `App::prompt`).
     Pin,
     /// Changing the Ambilight: the highlighted row and option.
-    Ambilight { row: usize, col: usize },
+    Ambilight {
+        row: usize,
+        col: usize,
+    },
     /// Typing a colour for option `col` of the dialog's lights row (0: all).
-    AmbiColour { row: usize, col: usize },
+    AmbiColour {
+        row: usize,
+        col: usize,
+    },
     Help(usize),
     /// The "more" menu, with the highlighted item.
     Menu(usize),
     /// "Are you sure?" for menu item N; `yes` is the highlighted answer.
-    Confirm { id: &'static str, yes: bool },
+    Confirm {
+        id: &'static str,
+        yes: bool,
+    },
     /// The command palette, with the highlighted match (what's typed is
     /// `App::prompt`).
     Palette(usize),
     /// The log, scrolled up this many lines from the end.
     /// The log: line `at` (by its number) highlighted, or None following
     /// the newest; `from`: where a selection starts.
-    Logs { at: Option<usize>, from: Option<usize> },
+    Logs {
+        at: Option<usize>,
+        from: Option<usize>,
+    },
     /// Typing the file to save the log to (the name is `App::prompt`).
     SaveLog,
     /// The app launcher: which tab, and the highlighted app in it.
-    Apps { tab: AppTab, sel: usize },
+    Apps {
+        tab: AppTab,
+        sel: usize,
+    },
     /// Typing what action `id` needs (the text is `App::prompt`).
     Prompt(&'static str),
     /// Typing a search; N picks the app from `App::search_targets`.
     Search(usize),
     /// What to do with launcher row `sel` of `tab`; `at` is the highlighted choice.
-    AppActions { tab: AppTab, sel: usize, at: usize },
+    AppActions {
+        tab: AppTab,
+        sel: usize,
+        at: usize,
+    },
     /// tveee's options, with N highlighted.
     Options(usize),
     /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
     /// the filter typed is `App::prompt`.
-    Guide { tab: GuideTab, at: u32 },
+    Guide {
+        tab: GuideTab,
+        at: u32,
+    },
     /// The list the app in front shows (`t`), item `sel` (an index into it)
     /// highlighted; the filter typed is `App::prompt`.
-    List { sel: usize },
+    List {
+        sel: usize,
+    },
 }
 
 /// An app the search box can search in, and how.
@@ -78,10 +102,9 @@ pub fn search_key(at: usize, code: KeyCode, mods: KeyModifiers, text: &mut Strin
         KeyCode::Tab | KeyCode::Down => (Overlay::Search((at + 1) % n), None),
         KeyCode::BackTab | KeyCode::Up => (Overlay::Search((at + n - 1) % n), None),
         KeyCode::Enter => match targets.get(at) {
-            Some(t) if !text.trim().is_empty() => (
-                Overlay::None,
-                Some(Action::Search { pkg: t.package.clone(), query: text.trim().to_string(), keys: t.method == "keys" }),
-            ),
+            Some(t) if !text.trim().is_empty() => {
+                (Overlay::None, Some(Action::Search { pkg: t.package.clone(), query: text.trim().to_string(), keys: t.method == "keys" }))
+            }
             _ => (Overlay::Search(at), None),
         },
         _ => match prompt_key("", code, mods, text) {
@@ -119,11 +142,7 @@ pub fn prompt_key(id: &'static str, code: KeyCode, mods: KeyModifiers, text: &mu
 
 /// Pasted text, as one line (newlines and other control characters dropped).
 pub fn paste_text(s: &str) -> String {
-    s.trim_end_matches(['\n', '\r'])
-        .chars()
-        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
-        .filter(|c| !c.is_control())
-        .collect()
+    s.trim_end_matches(['\n', '\r']).chars().map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c }).filter(|c| !c.is_control()).collect()
 }
 
 /// What a key does while an overlay is open: the new overlay, and maybe an
@@ -265,7 +284,9 @@ fn help_line_in(line: &str, open: &mut usize) -> Line<'static> {
     while i < c.len() {
         let after_gap = i >= 3 && c[i - 3..i].iter().all(|x| *x == ' ') && c[i] != ' ';
         // the first column (from the 4th) or a later one
-        if after_gap && depth == 0 && (i == 3 || i > 12)
+        if after_gap
+            && depth == 0
+            && (i == 3 || i > 12)
             && let Some(end) = key_at(i)
         {
             kind[i..end].fill(Kind::Key);
@@ -463,7 +484,12 @@ impl App {
     pub(super) fn opt(&self, name: &str) -> bool {
         match &self.opts {
             None => tveee_core::options::get(name),
-            Some(v) => v.iter().rev().find(|(k, _)| k == name).map(|(_, on)| *on).unwrap_or_else(|| tveee_core::options::OPTIONS.iter().any(|o| o.name == name && o.default)),
+            Some(v) => v
+                .iter()
+                .rev()
+                .find(|(k, _)| k == name)
+                .map(|(_, on)| *on)
+                .unwrap_or_else(|| tveee_core::options::OPTIONS.iter().any(|o| o.name == name && o.default)),
         }
     }
 
@@ -517,7 +543,12 @@ impl App {
         let states: Vec<tveee_core::plugin::PluginState> = all
             .iter()
             .map(|p| {
-                self.plugins.iter().find(|s| s.name == p.name).cloned().unwrap_or(tveee_core::plugin::PluginState { name: p.name, desc: p.desc, enabled: false, source: tveee_core::plugin::Source::Unknown })
+                self.plugins.iter().find(|s| s.name == p.name).cloned().unwrap_or(tveee_core::plugin::PluginState {
+                    name: p.name,
+                    desc: p.desc,
+                    enabled: false,
+                    source: tveee_core::plugin::Source::Unknown,
+                })
             })
             .collect();
         self.actions = tveee_core::plugin::install_enabled(&all, &states);
@@ -638,7 +669,11 @@ impl App {
     pub(super) fn draw_options(&mut self, f: &mut Frame, sel: usize) {
         let dim = Style::new().fg(Color::DarkGray);
         let tab = |name: &'static str, on: bool| {
-            if on { Span::styled(format!(" {name} "), Style::new().fg(Color::Black).bg(Color::Blue).bold()) } else { Span::styled(format!(" {name} "), Style::new().fg(Color::Gray)) }
+            if on {
+                Span::styled(format!(" {name} "), Style::new().fg(Color::Black).bg(Color::Blue).bold())
+            } else {
+                Span::styled(format!(" {name} "), Style::new().fg(Color::Gray))
+            }
         };
         // on the tab bar: the tab chosen marked, no row highlighted
         let on_tabs = self.options_on_tabs;
@@ -688,8 +723,16 @@ impl App {
                 let line = match o.choices {
                     // a choice of two: both named, the one chosen standing out
                     Some([off, yes]) => {
-                        let word = |w: &str, chosen: bool| if chosen { Span::styled(format!("‹{w}›"), Style::new().bold()) } else { Span::styled(format!(" {w} "), dim) };
-                        Line::from(vec![Span::raw(format!("     {:<20}", o.label)), word(off, !on), Span::raw(" "), word(yes, on), Span::styled(format!("  {}", o.help), dim)])
+                        let word = |w: &str, chosen: bool| {
+                            if chosen { Span::styled(format!("‹{w}›"), Style::new().bold()) } else { Span::styled(format!(" {w} "), dim) }
+                        };
+                        Line::from(vec![
+                            Span::raw(format!("     {:<20}", o.label)),
+                            word(off, !on),
+                            Span::raw(" "),
+                            word(yes, on),
+                            Span::styled(format!("  {}", o.help), dim),
+                        ])
                     }
                     None => {
                         let tick = if on { "[x]" } else { "[ ]" };
@@ -717,7 +760,8 @@ impl App {
         // which choosable row each body line is (a dragged scrollbar picks by line)
         self.bar_rows = (0..total).map(|l| at.iter().position(|a| *a == l)).collect();
         // the rows in view, clickable where they are
-        let rows: Vec<(usize, usize)> = at.iter().enumerate().filter(|(_, l)| (start..start + room).contains(*l)).map(|(i, l)| (i, head.len() + l - start)).collect();
+        let rows: Vec<(usize, usize)> =
+            at.iter().enumerate().filter(|(_, l)| (start..start + room).contains(*l)).map(|(i, l)| (i, head.len() + l - start)).collect();
         self.option_hits(r, &rows);
         self.hits.extend(bar.map(|b| (b.area, Hit::Scrollbar(b))));
     }

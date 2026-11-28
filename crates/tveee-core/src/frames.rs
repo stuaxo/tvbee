@@ -31,4 +31,3 @@ pub fn ffmpeg_jpeg(seek: Option<f64>, input: &Path, vf: &str) -> Option<Vec<u8>>
 pub fn frame_of(file: &Path, secs: f64) -> Option<Vec<u8>> {
     ffmpeg_jpeg(Some(secs), file, "scale=320:-2")
 }
-

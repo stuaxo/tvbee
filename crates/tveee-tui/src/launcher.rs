@@ -67,9 +67,9 @@ pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Over
         KeyCode::Tab | KeyCode::BackTab => (Overlay::Apps { tab: tab.other(), sel: 0 }, None),
         KeyCode::Char(' ') if n > 0 => (Overlay::AppActions { tab, sel, at: 0 }, None),
         c if super::listnav::is_move(c) => {
-                let to = super::listnav::step(sel, n, c).unwrap_or(sel);
-                at(to)
-            }
+            let to = super::listnav::step(sel, n, c).unwrap_or(sel);
+            at(to)
+        }
         KeyCode::Enter => match list.get(sel) {
             Some(e) => (Overlay::None, Some(Action::Launch(e.target.clone()))),
             None => at(sel),
@@ -142,11 +142,7 @@ impl App {
             labels
                 .iter()
                 .flat_map(|(t, l)| {
-                    let st = if *t == tab {
-                        Style::new().fg(Color::Black).bg(Color::Green).bold()
-                    } else {
-                        Style::new().fg(Color::Gray)
-                    };
+                    let st = if *t == tab { Style::new().fg(Color::Black).bg(Color::Green).bold() } else { Style::new().fg(Color::Gray) };
                     [Span::styled(l.clone(), st), Span::raw(" ")]
                 })
                 .collect::<Vec<_>>(),
@@ -252,7 +248,8 @@ impl App {
                     (true, false) => "(running)",
                     _ => "(not running)",
                 }
-            )).fg(Color::DarkGray),
+            ))
+            .fg(Color::DarkGray),
             Line::default(),
         ];
         for (i, c) in choices.iter().enumerate() {

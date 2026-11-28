@@ -65,9 +65,15 @@ pub enum Hit {
     /// A colour in the picker (column, row).
     AmbiPick(usize, usize),
     /// The progress bar: clicking jumps there.
-    Progress { x0: u16, width: u16 },
+    Progress {
+        x0: u16,
+        width: u16,
+    },
     /// The volume bar: clicking sets that level.
-    Volume { x0: u16, width: u16 },
+    Volume {
+        x0: u16,
+        width: u16,
+    },
     MenuItem(usize),
     /// Row N of the launcher's current tab.
     AppItem(usize),
@@ -200,9 +206,27 @@ pub(super) fn buttons(mode: Mode, exact: bool, ambilight: bool) -> Vec<Button> {
 /// used first (they're all still keys, in the help and the palette).
 const DROP_FIRST: &[&str] = &[
     // remote mode's click-only buttons
-    "help", "more", "options", "guide", "search", "apps", "preview", "ambilight", "info", "vol-", "vol+", "play/pause",
+    "help",
+    "more",
+    "options",
+    "guide",
+    "search",
+    "apps",
+    "preview",
+    "ambilight",
+    "info",
+    "vol-",
+    "vol+",
+    "play/pause",
     // then remote mode's keys, the obvious ones last
-    "back", "home", "delete", "ok", "right", "left", "down", "up",
+    "back",
+    "home",
+    "delete",
+    "ok",
+    "right",
+    "left",
+    "down",
+    "up",
 ];
 
 /// `bs` cut down to one row of `width`: the least used go first (see
@@ -283,11 +307,7 @@ pub(super) fn compact_buttons(mode: Mode) -> Vec<Button> {
             button("q", "quit", Input::Quit),
         ],
         // typing goes to the TV: keys that aren't typing
-        Mode::Remote => vec![
-            button("tab", "player", Input::ToggleMode),
-            button("^p", "cmds", Input::OpenPalette),
-            button("^c", "quit", Input::Quit),
-        ],
+        Mode::Remote => vec![button("tab", "player", Input::ToggleMode), button("^p", "cmds", Input::OpenPalette), button("^c", "quit", Input::Quit)],
     }
 }
 
@@ -304,7 +324,13 @@ pub(super) fn spine(system: Option<&tveee_core::builtin::info::System>, panel: O
     let dim = Style::new().fg(Color::DarkGray);
     let mut parts = Vec::new();
     if let Some((one, five, _)) = system.and_then(|s| s.load) {
-        let trend = if one > five * 1.1 { "▲" } else if one < five * 0.9 { "▼" } else { " " };
+        let trend = if one > five * 1.1 {
+            "▲"
+        } else if one < five * 0.9 {
+            "▼"
+        } else {
+            " "
+        };
         parts.push((vec![Span::styled("load ", dim), Span::raw(format!("{one:.2}{trend}"))], None));
     }
     let free = Input::Do(Action::Run { id: "apps.free", args: Vec::new() });
@@ -406,7 +432,13 @@ pub(super) fn scrollbar(f: &mut Frame, of: Bar, x: u16, y: u16, height: u16, tot
     let area = ratatui::layout::Rect { x, y, width: 1, height }.intersection(f.area());
     let max = total - shown;
     let mut state = ScrollbarState::new(max).position(top.min(max)).viewport_content_length(shown);
-    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight).begin_symbol(None).end_symbol(None).track_symbol(Some("│")).thumb_symbol("┃").track_style(Style::new().fg(Color::DarkGray)).thumb_style(Style::new().fg(Color::Gray));
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(Some("│"))
+        .thumb_symbol("┃")
+        .track_style(Style::new().fg(Color::DarkGray))
+        .thumb_style(Style::new().fg(Color::Gray));
     f.render_stateful_widget(bar, area, &mut state);
     Some(BarAt { of, area, total, top: top.min(max) })
 }
@@ -429,12 +461,8 @@ pub(super) fn popup_titled(f: &mut Frame, title: &str, right: &str, text: Vec<Li
     };
     f.render_widget(ratatui::widgets::Clear, rect);
     f.render_widget(
-        Paragraph::new(text).block(
-            Block::bordered()
-                .title(title.to_string())
-                .title(Line::from(right.to_string()).right_aligned())
-                .border_style(Style::new().fg(border)),
-        ),
+        Paragraph::new(text)
+            .block(Block::bordered().title(title.to_string()).title(Line::from(right.to_string()).right_aligned()).border_style(Style::new().fg(border))),
         rect,
     );
     rect
@@ -649,7 +677,10 @@ impl App {
         let sep = Span::styled(" │ ", Style::new().fg(Color::DarkGray));
         for (i, (spans, hit)) in spine(system, panel).into_iter().enumerate() {
             if i > 0 {
-                f.render_widget(Paragraph::new(Line::from(sep.clone())), ratatui::layout::Rect { x, y: area.y, width: 3.min(area.right().saturating_sub(x)), height: 1 });
+                f.render_widget(
+                    Paragraph::new(Line::from(sep.clone())),
+                    ratatui::layout::Rect { x, y: area.y, width: 3.min(area.right().saturating_sub(x)), height: 1 },
+                );
                 x += 3;
             }
             let line = Line::from(spans);
@@ -715,14 +746,8 @@ impl App {
                             // leave room for the label and " 1:02:03 / 1:02:03 (100%)"
                             let w = width.saturating_sub(9 + 26).max(10);
                             // jumping needs a video tveee can seek in (not live TV)
-                            let hit = p.duration.filter(|_| s.exact).map(|_| Hit::Progress {
-                                x0: body.x + LABEL,
-                                width: u16::try_from(w).unwrap_or(u16::MAX),
-                            });
-                            let bar_line = Line::from(vec![
-                                label("progress"),
-                                Span::styled(progress_bar(&p, w), Style::new().fg(Color::Cyan)),
-                            ]);
+                            let hit = p.duration.filter(|_| s.exact).map(|_| Hit::Progress { x0: body.x + LABEL, width: u16::try_from(w).unwrap_or(u16::MAX) });
+                            let bar_line = Line::from(vec![label("progress"), Span::styled(progress_bar(&p, w), Style::new().fg(Color::Cyan))]);
                             lines.push((bar_line, hit));
                         }
                         if let Some(u) = &a.url {
@@ -779,18 +804,13 @@ impl App {
                 let (known, stale) = volume_shown(s.volume, self.st.last_volume.map(|(v, at)| (v, at.elapsed())));
                 let vol_hit = Some(Hit::Volume { x0: body.x + LABEL, width: u16::try_from(vol_w).unwrap_or(u16::MAX) });
                 let (vol, hit) = match (known, stale, s.muted) {
-                    (_, _, Some(true)) => (
-                        Span::styled("muted (click to unmute)", Style::new().fg(Color::Yellow)),
-                        Some(Hit::Input(Input::Do(Action::Mute))),
-                    ),
-                    (Some((v, max)), _, _) if max > 0 => (
-                        Span::styled(format!("{} {v}/{max}", bar(f64::from(v) / f64::from(max), vol_w)), Style::new().fg(Color::Green)),
-                        vol_hit,
-                    ),
-                    (None, Some((v, max)), _) if max > 0 => (
-                        Span::styled(format!("{} {v}/{max}", bar(f64::from(v) / f64::from(max), vol_w)), Style::new().fg(Color::DarkGray)),
-                        vol_hit,
-                    ),
+                    (_, _, Some(true)) => (Span::styled("muted (click to unmute)", Style::new().fg(Color::Yellow)), Some(Hit::Input(Input::Do(Action::Mute)))),
+                    (Some((v, max)), _, _) if max > 0 => {
+                        (Span::styled(format!("{} {v}/{max}", bar(f64::from(v) / f64::from(max), vol_w)), Style::new().fg(Color::Green)), vol_hit)
+                    }
+                    (None, Some((v, max)), _) if max > 0 => {
+                        (Span::styled(format!("{} {v}/{max}", bar(f64::from(v) / f64::from(max), vol_w)), Style::new().fg(Color::DarkGray)), vol_hit)
+                    }
                     _ => (Span::styled(bar(0.0, vol_w), Style::new().fg(Color::DarkGray)), None),
                 };
                 lines.push((Line::from(vec![label("volume"), vol]), hit));
@@ -831,9 +851,7 @@ impl App {
             }
             if let Some(hit) = hit {
                 let r = match hit {
-                    Hit::Progress { x0, width } | Hit::Volume { x0, width } => {
-                        ratatui::layout::Rect { x: x0, y, width, height: 1 }
-                    }
+                    Hit::Progress { x0, width } | Hit::Volume { x0, width } => ratatui::layout::Rect { x: x0, y, width, height: 1 },
                     _ => rect,
                 };
                 self.hits.push((r, hit));
@@ -900,9 +918,7 @@ impl App {
     }
 
     pub(super) fn panel_disks(&self) -> Vec<(&'static str, info::Disk)> {
-        self.st.snap.as_ref().map_or_else(Vec::new, |s| {
-            info::interesting_disks(&s.system.disks).into_iter().map(|(l, d)| (l, d.clone())).collect()
-        })
+        self.st.snap.as_ref().map_or_else(Vec::new, |s| info::interesting_disks(&s.system.disks).into_iter().map(|(l, d)| (l, d.clone())).collect())
     }
 
     pub(super) fn panel_height(&self) -> u16 {
@@ -913,9 +929,7 @@ impl App {
 
     /// The system panel: power, app, memory graph, swap, storage, load.
     pub(super) fn draw_panel(&self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let block = Block::bordered()
-            .title(" system - i hides ")
-            .border_style(Style::new().fg(Color::DarkGray));
+        let block = Block::bordered().title(" system - i hides ").border_style(Style::new().fg(Color::DarkGray));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let Some(s) = &self.st.snap else { return };
@@ -1006,10 +1020,11 @@ impl App {
         let hot = recent.last().is_some_and(|u| total_mb > 0 && *u * 10 >= total_mb * 9);
         let floor = graph_floor(recent, total_mb);
         let shifted: Vec<u64> = recent.iter().map(|u| u.saturating_sub(floor)).collect();
-        let graph = ratatui::widgets::Sparkline::default()
-            .data(&shifted)
-            .max(total_mb.saturating_sub(floor).max(1))
-            .style(Style::new().fg(if hot { Color::Yellow } else { Color::Cyan }));
+        let graph = ratatui::widgets::Sparkline::default().data(&shifted).max(total_mb.saturating_sub(floor).max(1)).style(Style::new().fg(if hot {
+            Color::Yellow
+        } else {
+            Color::Cyan
+        }));
         f.render_widget(graph, ratatui::layout::Rect { x, y: rect.y, width: w, height: rect.height });
         // the scale on the left: top, bottom (when it isn't 0), how long
         let bottom = rect.height.saturating_sub(1);

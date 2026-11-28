@@ -187,7 +187,13 @@ impl App {
             Some(View::NeedsPairing { why, .. }) => {
                 return vec![
                     whole(Line::from(why.clone()), None),
-                    whole(Line::from(vec![Span::styled(" P ", Style::new().fg(Color::Black).bg(Color::Yellow)), Span::raw(" pair now: the TV shows a PIN to type in")]), Some(Hit::Input(Input::Pair))),
+                    whole(
+                        Line::from(vec![
+                            Span::styled(" P ", Style::new().fg(Color::Black).bg(Color::Yellow)),
+                            Span::raw(" pair now: the TV shows a PIN to type in"),
+                        ]),
+                        Some(Hit::Input(Input::Pair)),
+                    ),
                 ];
             }
             Some(View::Failed(e)) => return vec![whole(Line::from(format!("! {e}")).fg(Color::Red), None)],

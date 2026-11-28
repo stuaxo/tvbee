@@ -1,14 +1,13 @@
-use crate::error::{failed, usage, Result};
-use crate::plugin::{self, Mode};
-use crate::actions::ActionDescriptor;
-use crate::registry;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::plugin::{self, Mode};
+use crate::registry;
 use std::io::Write;
 use std::process::{Command as Proc, Stdio};
 use std::time::Duration;
 
 const CAT: &str = "tools";
-
 
 const COMPLETION: &str = r#"# source this from ~/.bashrc, or ~/.zshrc after: autoload -U +X bashcompinit && bashcompinit
 _tveee() {
@@ -45,11 +44,7 @@ pub fn run_replacing(cmd: &mut Proc) -> Result<()> {
 /// Case-insensitive extended-regex filter via `grep -iE`. Where there is no
 /// grep (Windows), falls back to a case-insensitive substring match.
 pub fn grep_i(text: &str, pattern: &str) -> Result<String> {
-    let spawned = Proc::new("grep")
-        .args(["-iE", "--", pattern])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn();
+    let spawned = Proc::new("grep").args(["-iE", "--", pattern]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn();
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -79,8 +74,7 @@ fn wait(c: &Ctx, args: &[String]) -> Result<()> {
     };
     let mut waited = 0;
     while waited < limit {
-        if c.tv.shell(&["getprop", "sys.boot_completed"]).is_ok_and(|s| s.trim() == "1")
-        {
+        if c.tv.shell(&["getprop", "sys.boot_completed"]).is_ok_and(|s| s.trim() == "1") {
             println!("TV is up");
             return Ok(());
         }
@@ -91,11 +85,7 @@ fn wait(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 fn commands_list(c: &Ctx, _: &[String]) -> Result<()> {
-    let mut names: Vec<&str> = c
-        .commands
-        .iter()
-        .flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied()))
-        .collect();
+    let mut names: Vec<&str> = c.commands.iter().flat_map(|c| std::iter::once(c.name).chain(c.aliases.iter().copied())).collect();
     names.sort();
     println!("{}", names.join("\n"));
     Ok(())
@@ -163,13 +153,7 @@ fn plugins_cmd(c: &Ctx, args: &[String]) -> Result<()> {
         None => &c.plugins,
         Some("--refresh") => {
             let overrides = plugin::overrides();
-            refreshed = plugin::resolve(
-                &(c.all)(),
-                &c.tv,
-                Mode::Refresh,
-                &overrides,
-                plugin::cache_path(&c.tv.ip).as_deref(),
-            );
+            refreshed = plugin::resolve(&(c.all)(), &c.tv, Mode::Refresh, &overrides, plugin::cache_path(&c.tv.ip).as_deref());
             &refreshed
         }
         Some(_) => return usage("usage: tveee plugins [--refresh]"),

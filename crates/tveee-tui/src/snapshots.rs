@@ -3,8 +3,8 @@
 //! `insta` (`cargo insta review` to look at a change).
 
 use super::*;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::sync::Mutex;
 use tveee_core::devtools::Progress;
 use tveee_core::nowplaying::{Field, Place};
@@ -51,10 +51,7 @@ fn screen(app: &mut App, (w, h): (u16, u16)) -> String {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("a test terminal");
     term.draw(|f| app.draw(f)).expect("drawn");
     let buf = term.backend().buffer();
-    (0..h)
-        .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
+    (0..h).map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect::<Vec<_>>().join("\n")
 }
 
 /// Kodi, paused part way through an episode (paused: the bar doesn't move
@@ -537,7 +534,10 @@ fn log_select_and_save() {
     assert!(s.contains("3 lines selected"), "{s}");
     let (first, lines) = tveee_core::log::recent_numbered();
     let picked = super::logview::lines_between(first, &lines, n0, n0 + 2);
-    assert!(picked.contains(&format!("{mark} line 0")) && picked.contains(&format!("{mark} line 2")) && !picked.contains(&format!("{mark} line 3")), "{picked}");
+    assert!(
+        picked.contains(&format!("{mark} line 0")) && picked.contains(&format!("{mark} line 2")) && !picked.contains(&format!("{mark} line 3")),
+        "{picked}"
+    );
     // esc lets go of the selection, then closes
     a.logs_key(Some(n0 + 2), Some(n0), KeyCode::Esc, KeyModifiers::NONE);
     assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: None });
@@ -633,13 +633,24 @@ fn kodi_artists() -> TvState {
             item("musicdb://artists/9/", "Radiohead", true, Some("9 albums")),
             item("smb://nas/music/exit.flac", "Exit Music.flac", false, Some("4:24")),
         ],
-        playing: None, at: Some(2),
+        playing: None,
+        at: Some(2),
         up: None,
-        reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None, browsed: false,
+        reopen: None,
+        crumbs: Vec::new(),
+        crumbs_whole: false,
+        location: None,
+        open_location: None,
+        browsed: false,
     };
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
-        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into(), playing_id: String::new() });
+        s.list_place = Some(ListPlace {
+            key: "10502|musicdb://artists/".into(),
+            focus_label: "Radiohead".into(),
+            focus_id: "musicdb://artists/9/".into(),
+            playing_id: String::new(),
+        });
     }
     st
 }
@@ -723,7 +734,12 @@ fn list_pane_follows_kodi() {
     a.list_sync(Change::Snapshot);
     // Kodi's highlight moves to Portishead: the pane follows
     let mut moved = st.clone();
-    moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Portishead".into(), focus_id: "musicdb://artists/7/".into(), playing_id: String::new() });
+    moved.snap.as_mut().unwrap().list_place = Some(ListPlace {
+        key: "10502|musicdb://artists/".into(),
+        focus_label: "Portishead".into(),
+        focus_id: "musicdb://artists/7/".into(),
+        playing_id: String::new(),
+    });
     *held.lock().unwrap() = Arc::new(moved);
     a.st = h.state();
     a.list_sync(Change::Snapshot);
@@ -732,7 +748,8 @@ fn list_pane_follows_kodi() {
     assert!(rx.try_iter().next().is_none());
     // Kodi opens another folder: its items are read (once)
     let mut other = st;
-    other.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new(), playing_id: String::new() });
+    other.snap.as_mut().unwrap().list_place =
+        Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new(), playing_id: String::new() });
     *held.lock().unwrap() = Arc::new(other);
     a.st = h.state();
     a.list_sync(Change::Snapshot);
@@ -776,7 +793,11 @@ fn with_ambilight() -> TvState {
         colour: Some(rgb),
         run: Run::Ask { prompt: format!("Colour for {side} {n}:"), hint: "red, warm, #ff8800", id: ID, args: vec!["one".into(), side.into(), n.to_string()] },
     };
-    let mut lights = vec![Choice { label: "all".into(), colour: None, run: Run::Ask { prompt: "Colour for every light:".into(), hint: "red", id: ID, args: vec!["all".into()] } }];
+    let mut lights = vec![Choice {
+        label: "all".into(),
+        colour: None,
+        run: Run::Ask { prompt: "Colour for every light:".into(), hint: "red", id: ID, args: vec!["all".into()] },
+    }];
     for n in 0..3 {
         lights.push(light("left", n, (255, 120 - n as u8 * 40, 0)));
     }
@@ -784,18 +805,45 @@ fn with_ambilight() -> TvState {
         lights.push(light("right", n, (0, 80 + n as u8 * 60, 255)));
     }
     let shown = Shown {
-        info: vec![("power".into(), "on".into()), ("control".into(), "the TV".into()), ("style".into(), "follow video, standard".into()), ("hue".into(), "on (Ambilight+Hue)".into())],
+        info: vec![
+            ("power".into(), "on".into()),
+            ("control".into(), "the TV".into()),
+            ("style".into(), "follow video, standard".into()),
+            ("hue".into(), "on (Ambilight+Hue)".into()),
+        ],
         swatches: Vec::new(),
         rows: vec![
-            Row { name: "power", options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])], current: Some(0), help: None },
-            Row { name: "style", options: vec![Choice::act("video", ID, &["style", "FOLLOW_VIDEO"]), Choice::act("sound", ID, &["style", "FOLLOW_AUDIO"]), Choice::act("colour", ID, &["style", "FOLLOW_COLOR"])], current: Some(0), help: None },
             Row {
-                name: "setting",
-                options: ["standard", "natural", "vivid", "game", "comfort", "relax"].iter().map(|s| Choice::act(*s, ID, &["style", "FOLLOW_VIDEO", s])).collect(),
+                name: "power",
+                options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])],
                 current: Some(0),
                 help: None,
             },
-            Row { name: "ambi+hue", options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])], current: Some(0), help: Some("sync Hue bulbs with the TV") },
+            Row {
+                name: "style",
+                options: vec![
+                    Choice::act("video", ID, &["style", "FOLLOW_VIDEO"]),
+                    Choice::act("sound", ID, &["style", "FOLLOW_AUDIO"]),
+                    Choice::act("colour", ID, &["style", "FOLLOW_COLOR"]),
+                ],
+                current: Some(0),
+                help: None,
+            },
+            Row {
+                name: "setting",
+                options: ["standard", "natural", "vivid", "game", "comfort", "relax"]
+                    .iter()
+                    .map(|s| Choice::act(*s, ID, &["style", "FOLLOW_VIDEO", s]))
+                    .collect(),
+                current: Some(0),
+                help: None,
+            },
+            Row {
+                name: "ambi+hue",
+                options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])],
+                current: Some(0),
+                help: Some("sync Hue bulbs with the TV"),
+            },
             Row { name: "lights", options: lights, current: None, help: None },
         ],
     };
@@ -853,7 +901,9 @@ fn ambilight_panel_edits_in_place() {
     a.overlay = Overlay::AmbiColour { row: 4, col: 2 };
     let _ = screen(&mut a, DESKTOP);
     let panel = a.hits.iter().find(|(_, hit)| *hit == Hit::Input(Input::AmbilightDialog)).map(|(r, _)| *r).expect("the panel");
-    let spot = (panel.x..panel.right()).flat_map(|x| (panel.y..panel.bottom()).map(move |y| (x, y))).find(|&(x, y)| a.hit_at(x, y) == Some(Hit::Input(Input::AmbilightDialog)));
+    let spot = (panel.x..panel.right())
+        .flat_map(|x| (panel.y..panel.bottom()).map(move |y| (x, y)))
+        .find(|&(x, y)| a.hit_at(x, y) == Some(Hit::Input(Input::AmbilightDialog)));
     if let Some((x, y)) = spot {
         a.click(x, y, &h);
         assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 2 });
@@ -950,7 +1000,7 @@ fn links_under_a_pop_up_stay_under_it() {
 
 #[test]
 fn list_trail_and_going_up() {
-    use super::ctxlist::{next_trail, Crumb};
+    use super::ctxlist::{Crumb, next_trail};
     use tveee_core::more::Go;
     use tveee_core::provider::ContextList;
     let list = |title: &str, key: &str, up: Option<(&str, &str)>| ContextList {
@@ -958,13 +1008,15 @@ fn list_trail_and_going_up() {
         kind: "folder",
         key: key.into(),
         items: Vec::new(),
-        playing: None, at: None,
+        playing: None,
+        at: None,
         up: up.map(|(k, g)| (k.to_string(), Go::Link(g.into()))),
         reopen: Some(Go::Link(format!("open:{key}"))),
         crumbs: Vec::new(),
         crumbs_whole: false,
         location: None,
-        open_location: None, browsed: false,
+        open_location: None,
+        browsed: false,
     };
     let music = list("Music", "10502|", None);
     let albums = list("Albums", "10502|musicdb://albums/", Some(("10502|", "kodi-window:music")));
@@ -982,7 +1034,10 @@ fn list_trail_and_going_up() {
     assert_eq!(back.len(), 2);
     // a list not on it (opened in Kodi straight away): "‹ up", then it
     let fresh = next_trail(&[], &album);
-    assert_eq!(fresh[0], Crumb { title: "‹ up".into(), key: "10502|musicdb://albums/".into(), go: Some(Go::Link("kodi-window:music|musicdb://albums/".into())) });
+    assert_eq!(
+        fresh[0],
+        Crumb { title: "‹ up".into(), key: "10502|musicdb://albums/".into(), go: Some(Go::Link("kodi-window:music|musicdb://albums/".into())) }
+    );
 
     // in the pane: the crumbs drawn, ⌫ goes up, a crumb click goes back to it
     let mut st = kodi_artists();
@@ -991,7 +1046,10 @@ fn list_trail_and_going_up() {
         st.list = Some(Arc::new(Ok(Some(l))));
     }
     let (mut a, rx, h) = app_seeing(st);
-    a.crumbs = vec![Crumb { title: "Music".into(), key: "10502|".into(), go: Some(Go::Link("kodi-window:music".into())) }, Crumb { title: "Artists".into(), key: "10502|musicdb://artists/".into(), go: None }];
+    a.crumbs = vec![
+        Crumb { title: "Music".into(), key: "10502|".into(), go: Some(Go::Link("kodi-window:music".into())) },
+        Crumb { title: "Artists".into(), key: "10502|musicdb://artists/".into(), go: None },
+    ];
     a.overlay = Overlay::List { sel: 0 };
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
@@ -1014,7 +1072,12 @@ fn playing_marked_apart_from_the_highlight() {
     // Kodi's highlight on Radiohead (›), the file playing is another item (▶)
     let mut st = kodi_artists();
     if let Some(s) = st.snap.as_mut() {
-        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into(), playing_id: "smb://nas/music/exit.flac".into() });
+        s.list_place = Some(ListPlace {
+            key: "10502|musicdb://artists/".into(),
+            focus_label: "Radiohead".into(),
+            focus_id: "musicdb://artists/9/".into(),
+            playing_id: "smb://nas/music/exit.flac".into(),
+        });
     }
     let (mut a, _rx, _h) = app_seeing(st.clone());
     a.overlay = Overlay::List { sel: 0 };
@@ -1026,7 +1089,8 @@ fn playing_marked_apart_from_the_highlight() {
     let (mut b, _rx, hb, held) = app_holding(st.clone());
     let playing = |id: &str| {
         let mut moved = st.clone();
-        moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: String::new(), focus_id: String::new(), playing_id: id.into() });
+        moved.snap.as_mut().unwrap().list_place =
+            Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: String::new(), focus_id: String::new(), playing_id: id.into() });
         *held.lock().unwrap() = Arc::new(moved);
     };
     b.overlay = Overlay::List { sel: 0 };
@@ -1042,7 +1106,7 @@ fn playing_marked_apart_from_the_highlight() {
 
 #[test]
 fn breadcrumbs_from_the_path_and_a_typed_location() {
-    use super::ctxlist::{breadcrumbs, Crumb};
+    use super::ctxlist::{Crumb, breadcrumbs};
     use tveee_core::more::Go;
     use tveee_core::provider::ContextList;
     let crumb = |t: &str, k: &str| Crumb { title: t.into(), key: k.into(), go: Some(Go::Link(format!("open:{k}"))) };
@@ -1063,7 +1127,17 @@ fn breadcrumbs_from_the_path_and_a_typed_location() {
     };
     let titles = |c: &[Crumb]| c.iter().map(|x| x.title.clone()).collect::<Vec<_>>();
     // a share: every step from the path, straight away
-    let album = list("Selected Ambient Works", "10502|smb://nas/music/Aphex Twin/Selected Ambient Works/", vec![crumb("Music", "10502|"), crumb("nas", "10502|smb://nas/"), crumb("music", "10502|smb://nas/music/"), crumb("Aphex Twin", "10502|smb://nas/music/Aphex Twin/")], true);
+    let album = list(
+        "Selected Ambient Works",
+        "10502|smb://nas/music/Aphex Twin/Selected Ambient Works/",
+        vec![
+            crumb("Music", "10502|"),
+            crumb("nas", "10502|smb://nas/"),
+            crumb("music", "10502|smb://nas/music/"),
+            crumb("Aphex Twin", "10502|smb://nas/music/Aphex Twin/"),
+        ],
+        true,
+    );
     assert_eq!(titles(&breadcrumbs(&[], &album)), ["Music", "nas", "music", "Aphex Twin", "Selected Ambient Works"]);
     // the library, opened straight into an album: its section, then …
     let named = vec![crumb("Music", "10502|"), crumb("Albums", "10502|musicdb://albums/")];
@@ -1192,7 +1266,12 @@ fn kodi_albums_browsed() -> TvState {
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
         // Kodi's screen is somewhere else entirely
-        s.list_place = Some(ListPlace { key: "10025|videodb://movies/".into(), focus_label: "Alien".into(), focus_id: "videodb://movies/1/".into(), playing_id: String::new() });
+        s.list_place = Some(ListPlace {
+            key: "10025|videodb://movies/".into(),
+            focus_label: "Alien".into(),
+            focus_id: "videodb://movies/1/".into(),
+            playing_id: String::new(),
+        });
     }
     st
 }
@@ -1277,7 +1356,16 @@ fn long_lists_have_a_scrollbar() {
     use tveee_core::provider::ListItem;
     let mut st = kodi_albums_browsed();
     if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
-        l.items = (0..60).map(|n| ListItem { section: None, id: format!("musicdb://albums/{n}/"), label: format!("Album {n}"), meta: None, folder: true, go: Go::Link(format!("music||musicdb://albums/{n}/")) }).collect();
+        l.items = (0..60)
+            .map(|n| ListItem {
+                section: None,
+                id: format!("musicdb://albums/{n}/"),
+                label: format!("Album {n}"),
+                meta: None,
+                folder: true,
+                go: Go::Link(format!("music||musicdb://albums/{n}/")),
+            })
+            .collect();
         st.list = Some(Arc::new(Ok(Some(l))));
     }
     let (mut a, _rx, h) = app_seeing(st);
@@ -1352,7 +1440,16 @@ fn scrollbars_drag_with_the_mouse() {
     if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
         use tveee_core::more::Go;
         use tveee_core::provider::ListItem;
-        l.items = (0..60).map(|n| ListItem { section: None, id: format!("musicdb://albums/{n}/"), label: format!("Album {n}"), meta: None, folder: true, go: Go::Link(format!("music||musicdb://albums/{n}/")) }).collect();
+        l.items = (0..60)
+            .map(|n| ListItem {
+                section: None,
+                id: format!("musicdb://albums/{n}/"),
+                label: format!("Album {n}"),
+                meta: None,
+                folder: true,
+                go: Go::Link(format!("music||musicdb://albums/{n}/")),
+            })
+            .collect();
         st.list = Some(Arc::new(Ok(Some(l))));
     }
     let (mut a, rx2, h) = app_seeing(st);
@@ -1409,7 +1506,8 @@ fn help_has_colour() {
     assert_eq!(help_line(line).spans.iter().map(|s| s.content.as_ref()).collect::<String>(), line);
     assert!(parts(line).contains(&("pgup pgdn".to_string(), Some(Color::Yellow))));
     // an aside that wraps: dim on the next line too, up to its bracket
-    let both = super::overlays::help_styled(&["   u        the link (click it: the same;".to_string(), "            its buttons copy it) and more".to_string()]);
+    let both =
+        super::overlays::help_styled(&["   u        the link (click it: the same;".to_string(), "            its buttons copy it) and more".to_string()]);
     let second: Vec<_> = both[1].spans.iter().map(|s| (s.content.to_string(), s.style.fg)).collect();
     assert!(second.iter().any(|(t, c)| t.contains("its buttons copy it)") && *c == Some(Color::DarkGray)), "{second:?}");
     assert!(second.iter().any(|(t, c)| t.contains("and more") && c.is_none()), "{second:?}");

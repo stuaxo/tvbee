@@ -3,10 +3,10 @@
 
 use super::apps;
 use super::open::{normalise, parse_candidates, sh_quote};
-use crate::error::{failed, usage, Result};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::tv::Tv;
 
 pub const SEARCH: &str = "android.intent.action.SEARCH";
 /// Google's assistant flavour of SEARCH (Kodi has it).
@@ -14,12 +14,7 @@ pub const GMS_SEARCH: &str = "com.google.android.gms.actions.SEARCH_ACTION";
 const PLAY: &str = "android.media.action.MEDIA_PLAY_FROM_SEARCH";
 
 /// System packages that answer search intents but aren't apps you'd search in.
-const NOISE: &[&str] = &[
-    "com.android.cts.ctsshim",
-    "com.android.cts.priv.ctsshim",
-    "com.google.android.gms",
-    "com.google.android.tv.frameworkpackagestubs",
-];
+const NOISE: &[&str] = &["com.android.cts.ctsshim", "com.android.cts.priv.ctsshim", "com.google.android.gms", "com.google.android.tv.frameworkpackagestubs"];
 
 /// How an app can be searched.
 #[derive(Debug, Clone, PartialEq)]
@@ -155,19 +150,14 @@ fn label(pkg: &str) -> String {
 /// Returns status-line feedback.
 pub fn search_package(tv: &Tv, all: &[Searchable], pkg: &str, query: &str, play: bool, dry: bool) -> Result<String> {
     let Some(s) = all.iter().find(|s| s.package == pkg) else {
-        return failed(format!(
-            "search: {} doesn't support search (see 'tveee search --list', or try --keys)",
-            label(pkg)
-        ));
+        return failed(format!("search: {} doesn't support search (see 'tveee search --list', or try --keys)", label(pkg)));
     };
     let cmd = search_command(s, query, play)?;
     if dry {
         return Ok(format!("would run: {cmd}"));
     }
     let here = match (&s.way, play) {
-        (Way::Link(template), false) => {
-            super::apps::link_here_or_prepare(tv, pkg, &normalise(&template.replace("{q}", &url_encode(query))))?
-        }
+        (Way::Link(template), false) => super::apps::link_here_or_prepare(tv, pkg, &normalise(&template.replace("{q}", &url_encode(query))))?,
         _ => {
             super::apps::before_link(tv, pkg)?;
             false
@@ -205,9 +195,7 @@ pub fn keys_search(tv: &Tv, app: &str, query: &str, dry: bool) -> Result<String>
     let pkg = apps::pkg_of(app);
     let typed = super::input::escape_text(query);
     if dry {
-        return Ok(format!(
-            "would bring {pkg} to the front, then: input keyevent {KEY_SEARCH}; input text {typed}; input keyevent {KEY_ENTER}"
-        ));
+        return Ok(format!("would bring {pkg} to the front, then: input keyevent {KEY_SEARCH}; input text {typed}; input keyevent {KEY_ENTER}"));
     }
     let in_front = super::info::focus_package(&tv.window_dump()?).as_deref() == Some(pkg);
     if !in_front {
@@ -286,8 +274,11 @@ fn search(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("search.search", "apps", "search inside an app (YouTube, Kodi, live TV, ...)", search).cli("search", USAGE, "search inside an app (YouTube, Kodi, live TV, ...)").long(
-        "Hands the query to the app's own search screen, using Android's search\n\
+    vec![
+        ActionDescriptor::terminal("search.search", "apps", "search inside an app (YouTube, Kodi, live TV, ...)", search)
+            .cli("search", USAGE, "search inside an app (YouTube, Kodi, live TV, ...)")
+            .long(
+                "Hands the query to the app's own search screen, using Android's search\n\
          intent (or a search-results link for YouTube, which only takes links).\n\
          With no arguments, or --list, shows which installed apps support it.\n\
          \n\
@@ -300,5 +291,6 @@ pub fn actions() -> Vec<ActionDescriptor> {
          \n\
          Netflix, Prime and most streaming apps don't accept search from outside, so\n\
          only --keys can reach them, and only if the app answers the search key.",
-    )]
+            ),
+    ]
 }

@@ -52,8 +52,6 @@ pub enum Input {
     Nothing,
 }
 
-
-
 /// The views: the guide, the launcher, remote mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {

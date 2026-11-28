@@ -302,7 +302,13 @@ impl App {
             }
             let from = self.list_from.take().map(|f| f.trim_end_matches('/').to_string());
             if let Some(l) = self.list_ok() {
-                let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id))).or(l.at).or(l.playing).unwrap_or(0);
+                let at = place
+                    .as_ref()
+                    .filter(|p| p.key == l.key)
+                    .and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id)))
+                    .or(l.at)
+                    .or(l.playing)
+                    .unwrap_or(0);
                 // back up from a folder: on it
                 let at = from.and_then(|f| l.items.iter().position(|i| i.id.split('?').next().unwrap_or("").trim_end_matches('/') == f)).unwrap_or(at);
                 self.overlay = Overlay::List { sel: at };
@@ -348,7 +354,13 @@ impl App {
         let area = f.area();
         let total = usize::from(area.width.saturating_sub(6)).clamp(40, 100);
         let dim = Style::new().fg(Color::DarkGray);
-        let app_name = self.st.snap.as_ref().and_then(front_pkg).map(|p| tveee_core::builtin::apps::by_package(&p).map_or(p.clone(), |a| a.name.to_string())).unwrap_or_else(|| "the app".into());
+        let app_name = self
+            .st
+            .snap
+            .as_ref()
+            .and_then(front_pkg)
+            .map(|p| tveee_core::builtin::apps::by_package(&p).map_or(p.clone(), |a| a.name.to_string()))
+            .unwrap_or_else(|| "the app".into());
         let mut text: Vec<Line> = Vec::new();
         let mut rows_at: Vec<Option<usize>> = Vec::new();
         // the breadcrumbs: which text line, and each clickable crumb (x, width, crumb)
@@ -458,9 +470,16 @@ impl App {
                         }
                     };
                     let item = &l.items[i];
-                    let mark = if playing == Some(i) { "▶" } else if theirs == Some(i) { "›" } else { " " };
+                    let mark = if playing == Some(i) {
+                        "▶"
+                    } else if theirs == Some(i) {
+                        "›"
+                    } else {
+                        " "
+                    };
                     let name = format!("{}{}", item.label, if item.folder { "/" } else { "" });
-                    let name: String = if name.chars().count() > label_w { format!("{}…", name.chars().take(label_w.saturating_sub(1)).collect::<String>()) } else { name };
+                    let name: String =
+                        if name.chars().count() > label_w { format!("{}…", name.chars().take(label_w.saturating_sub(1)).collect::<String>()) } else { name };
                     let meta = item.meta.clone().unwrap_or_default();
                     let line = Line::from(vec![Span::raw(format!(" {mark} {name:<label_w$}  ")), Span::styled(format!("{meta:>meta_w$}"), dim)]);
                     text.push(if i == sel { line.reversed() } else { line });

@@ -7,7 +7,7 @@
 //! typed location); something to play is `kodi-play:playlist|folder|file`.
 
 use super::browse::{bare, path_crumbs, section_name, unescape};
-use super::{call, quote, Result, Tv};
+use super::{Result, Tv, call, quote};
 use serde_json::Value;
 use tveee_core::more::Go;
 use tveee_core::provider::{ContextList, ListCrumb, ListItem, ListPlace};
@@ -97,7 +97,14 @@ pub fn is_link(at: &str) -> bool {
 
 /// Kodi's top: its categories, each its library's top.
 pub fn root() -> ContextList {
-    let category = |m: Media, what: &str| ListItem { section: None, id: m.db().to_string(), label: m.top().to_string(), meta: Some(what.to_string()), folder: true, go: Go::Link(link(m, m.top(), "")) };
+    let category = |m: Media, what: &str| ListItem {
+        section: None,
+        id: m.db().to_string(),
+        label: m.top().to_string(),
+        meta: Some(what.to_string()),
+        folder: true,
+        go: Go::Link(link(m, m.top(), "")),
+    };
     ContextList {
         title: "Kodi".into(),
         kind: "folder",

@@ -6,14 +6,14 @@
 //! the route (`tv#/watch?v=...`), the focused element, the video. Enabled when
 //! the app is installed.
 
-use tveee_core::devtools;
-use tveee_core::more::{Chapter, Details, Go, Link, Place};
-use tveee_core::error::{failed, Result};
-use tveee_core::provider::{Outcome, Playing};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tveee_core::actions::ActionDescriptor;
+use tveee_core::devtools;
+use tveee_core::error::{Result, failed};
+use tveee_core::more::{Chapter, Details, Go, Link, Place};
+use tveee_core::provider::{Outcome, Playing};
 use tveee_core::tv::Tv;
 
 pub const PACKAGE: &str = "com.google.android.youtube.tv";
@@ -41,7 +41,7 @@ pub const PLACES: &[Place] = &[
 ];
 
 pub fn apps() -> Vec<tveee_core::builtin::apps::App> {
-    use tveee_core::builtin::apps::{app, Kind};
+    use tveee_core::builtin::apps::{Kind, app};
     vec![app("youtube", "YouTube", PACKAGE, Kind::Video)]
 }
 
@@ -446,10 +446,7 @@ pub fn video_id(link: &str) -> Option<String> {
 }
 
 /// yt-dlp output templates: one JSON value per line, in this order.
-const FIELDS: &[&str] = &[
-    "title", "channel", "uploader_id", "channel_url", "upload_date", "view_count", "like_count", "duration", "chapters",
-    "description",
-];
+const FIELDS: &[&str] = &["title", "channel", "uploader_id", "channel_url", "upload_date", "view_count", "like_count", "duration", "chapters", "description"];
 
 /// Turn yt-dlp's lines (see [`FIELDS`]) into details.
 pub fn parse_details(out: &str) -> Details {
@@ -525,7 +522,14 @@ pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_
     let mut items: Vec<ListItem> = d
         .chapters
         .iter()
-        .map(|c| ListItem { section: Some("Chapters".into()), id: chapter_id(c), label: c.title.clone(), meta: Some(tveee_core::nowplaying::clock(c.start)), folder: false, go: Go::Seek(c.start) })
+        .map(|c| ListItem {
+            section: Some("Chapters".into()),
+            id: chapter_id(c),
+            label: c.title.clone(),
+            meta: Some(tveee_core::nowplaying::clock(c.start)),
+            folder: false,
+            go: Go::Seek(c.start),
+        })
         .collect();
     // the links (the chapters are in them too, as seeks: those are above)
     items.extend(d.links.iter().filter(|l| !matches!(l.go, Go::Seek(_))).map(|l| {
@@ -533,13 +537,34 @@ pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_
             Go::Link(u) => format!("link:{u}"),
             Go::Seek(t) => format!("seek:{t}"),
         };
-        ListItem { section: Some("Links".into()), id, label: l.label.strip_prefix("channel: ").map_or_else(|| l.label.clone(), |c| format!("{c} (channel)")), meta: None, folder: false, go: l.go.clone() }
+        ListItem {
+            section: Some("Links".into()),
+            id,
+            label: l.label.strip_prefix("channel: ").map_or_else(|| l.label.clone(), |c| format!("{c} (channel)")),
+            meta: None,
+            folder: false,
+            go: l.go.clone(),
+        }
     }));
     if items.is_empty() {
         return None;
     }
     let title = if d.chapters.is_empty() { "Links" } else { "Chapters and links" };
-    Some(ContextList { title: title.into(), kind: "chapters", key: link.to_string(), items, playing: pos.and_then(|p| chapter_at(&d.chapters, p)), at: None, up: None, reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None, browsed: false })
+    Some(ContextList {
+        title: title.into(),
+        kind: "chapters",
+        key: link.to_string(),
+        items,
+        playing: pos.and_then(|p| chapter_at(&d.chapters, p)),
+        at: None,
+        up: None,
+        reopen: None,
+        crumbs: Vec::new(),
+        crumbs_whole: false,
+        location: None,
+        open_location: None,
+        browsed: false,
+    })
 }
 
 /// The video playing: its link and position (devtools).
@@ -681,7 +706,6 @@ mod tests {
         assert!(json_strings("[]").is_empty());
     }
 
-
     #[test]
     fn deep_links_are_quoted() {
         let e = deep_link_expr("https://www.youtube.com/results?search_query=red%20panda");
@@ -728,10 +752,7 @@ mod tests {
 
     #[test]
     fn watch_links() {
-        assert_eq!(
-            watch_link("https://www.youtube.com/tv#/watch?v=nh5iCP5Ta_4&resume").as_deref(),
-            Some("https://www.youtube.com/watch?v=nh5iCP5Ta_4")
-        );
+        assert_eq!(watch_link("https://www.youtube.com/tv#/watch?v=nh5iCP5Ta_4&resume").as_deref(), Some("https://www.youtube.com/watch?v=nh5iCP5Ta_4"));
         assert_eq!(watch_link("https://www.youtube.com/tv#/"), None);
         assert_eq!(watch_link("https://www.youtube.com/tv#/watch?v=short"), None);
     }

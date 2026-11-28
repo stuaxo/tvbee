@@ -86,7 +86,17 @@ mod tests {
         let net = Network { country: Some("United Kingdom".into()), onid: Some(9018), deliveries: Vec::new() };
         let f = find(&net).expect("freeview");
         assert_eq!(f.title(), "Freeview, United Kingdom");
-        for (n, g) in [(1, "Entertainment"), (100, "Entertainment"), (101, "HD"), (203, "Children's"), (231, "News"), (250, "Text"), (601, "Interactive"), (722, "Radio"), (348, "Other")] {
+        for (n, g) in [
+            (1, "Entertainment"),
+            (100, "Entertainment"),
+            (101, "HD"),
+            (203, "Children's"),
+            (231, "News"),
+            (250, "Text"),
+            (601, "Interactive"),
+            (722, "Radio"),
+            (348, "Other"),
+        ] {
             assert_eq!(f.group(n), g, "channel {n}");
         }
         // another network: no lineup

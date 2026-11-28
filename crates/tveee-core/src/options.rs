@@ -3,9 +3,9 @@
 //! vendor plugin (`plugin.kodi=on|off`; none: decided by checking the TV).
 //! Set from the UI's options dialog (`,`) or `tveee options`.
 
-use crate::error::{failed, usage, Result};
-use crate::actions::ActionDescriptor;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
 use std::sync::Mutex;
 
 pub struct Opt {
@@ -231,13 +231,17 @@ fn options(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("options.options", "options", "tveee's own settings: list them, or set one", options).cli("options", "[<name> on|off | plugin <name> on|off|auto]", "tveee's own settings: list them, or set one").long(
-        "Saved in ~/.config/tveee/options.txt. In the ui, ',' opens the same options.\n\
+    vec![
+        ActionDescriptor::terminal("options.options", "options", "tveee's own settings: list them, or set one", options)
+            .cli("options", "[<name> on|off | plugin <name> on|off|auto]", "tveee's own settings: list them, or set one")
+            .long(
+                "Saved in ~/.config/tveee/options.txt. In the ui, ',' opens the same options.\n\
          \n\
          Vendor plugins (philips, kodi, youtube) are on when checking the TV finds\n\
          what they're for ('auto'); 'on' or 'off' fixes that, from tveee's next start.\n\
          TVEEE_PLUGINS outweighs it. Built-in plugins are always on.",
-    )]
+            ),
+    ]
 }
 
 #[cfg(test)]

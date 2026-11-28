@@ -1,6 +1,6 @@
 //! Minimal plain-HTTP GET and a flat-JSON field reader (no crates).
 
-use crate::error::{failed, Error, Result};
+use crate::error::{Error, Result, failed};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -13,10 +13,7 @@ pub fn parse_response(raw: &str) -> Option<(u16, &str)> {
 }
 
 fn content_length(head: &str) -> Option<usize> {
-    head.lines()
-        .filter_map(|l| l.split_once(':'))
-        .find(|(k, _)| k.trim().eq_ignore_ascii_case("content-length"))
-        .and_then(|(_, v)| v.trim().parse().ok())
+    head.lines().filter_map(|l| l.split_once(':')).find(|(k, _)| k.trim().eq_ignore_ascii_case("content-length")).and_then(|(_, v)| v.trim().parse().ok())
 }
 
 /// True once `raw` holds the headers and, if given, Content-Length bytes of body.
@@ -41,10 +38,7 @@ pub fn get(host: &str, port: u16, path: &str) -> Result<(u16, String)> {
 }
 
 fn get_live(host: &str, port: u16, path: &str) -> Result<(u16, String)> {
-    let addr = (host, port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| Error::Failed(format!("can't resolve {host}")))?;
+    let addr = (host, port).to_socket_addrs()?.next().ok_or_else(|| Error::Failed(format!("can't resolve {host}")))?;
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     write!(s, "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n")?;
@@ -60,9 +54,7 @@ fn get_live(host: &str, port: u16, path: &str) -> Result<(u16, String)> {
         }
     }
     let raw = String::from_utf8_lossy(&raw);
-    let chunked = raw
-        .split_once("\r\n\r\n")
-        .is_some_and(|(head, _)| head.to_lowercase().contains("transfer-encoding: chunked"));
+    let chunked = raw.split_once("\r\n\r\n").is_some_and(|(head, _)| head.to_lowercase().contains("transfer-encoding: chunked"));
     match parse_response(&raw) {
         Some((status, body)) if chunked => Ok((status, dechunk(body))),
         Some((status, body)) => Ok((status, body.to_string())),
