@@ -841,7 +841,23 @@ fn ambilight_panel_edits_in_place() {
     a.ambi_ask_key(4, 2, KeyCode::Enter, KeyModifiers::NONE, &h);
     let want = super::ambi::hex(super::ambi::pick_colour(2, 1));
     assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["one", "left", "1", want.as_str()])), "{want}");
+    // the picker stays, to try another; Esc back to the panel
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 2 });
+    a.ambi_ask_key(4, 2, KeyCode::Right, KeyModifiers::NONE, &h);
+    a.ambi_ask_key(4, 2, KeyCode::Enter, KeyModifiers::NONE, &h);
+    let next = super::ambi::hex(super::ambi::pick_colour(3, 1));
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["one", "left", "1", next.as_str()])), "{next}");
+    a.ambi_ask_key(4, 2, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::Ambilight { row: 4, col: 2 });
+    // a click on the panel beside the picker doesn't close it
+    a.overlay = Overlay::AmbiColour { row: 4, col: 2 };
+    let _ = screen(&mut a, DESKTOP);
+    let panel = a.hits.iter().find(|(_, hit)| *hit == Hit::Input(Input::AmbilightDialog)).map(|(r, _)| *r).expect("the panel");
+    let spot = (panel.x..panel.right()).flat_map(|x| (panel.y..panel.bottom()).map(move |y| (x, y))).find(|&(x, y)| a.hit_at(x, y) == Some(Hit::Input(Input::AmbilightDialog)));
+    if let Some((x, y)) = spot {
+        a.click(x, y, &h);
+        assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 2 });
+    }
     // typed instead: what's typed is set
     a.overlay = Overlay::AmbiColour { row: 4, col: 0 };
     for c in "warm".chars() {
