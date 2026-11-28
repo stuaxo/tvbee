@@ -864,7 +864,7 @@ fn with_ambilight() -> TvState {
 #[test]
 fn ambilight_panel_edits_in_place() {
     let (mut a, rx, h) = app_seeing(with_ambilight());
-    a.ambi_open = true;
+    a.ambi.open = true;
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!("ambilight_panel", s);
     // the rows are the choices; "control" (not a row) still said; no colour blocks twice
@@ -890,7 +890,7 @@ fn ambilight_panel_edits_in_place() {
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!("ambilight_picker", s);
     // → twice along the full row (red, orange, yellow), ⏎ sets it as #hex
-    a.pick = (0, 1);
+    a.ambi.pick = (0, 1);
     a.ambi_ask_key(4, 2, KeyCode::Right, KeyModifiers::NONE, &h);
     a.ambi_ask_key(4, 2, KeyCode::Right, KeyModifiers::NONE, &h);
     a.ambi_ask_key(4, 2, KeyCode::Enter, KeyModifiers::NONE, &h);
@@ -933,7 +933,7 @@ fn ambilight_panel_edits_in_place() {
 #[test]
 fn ambilight_picker_switches_lights() {
     let (mut a, rx, h) = app_seeing(with_ambilight());
-    a.ambi_open = true;
+    a.ambi.open = true;
     // picking a colour for every light
     a.overlay = Overlay::Ambilight { row: 4, col: 0 };
     a.ambi_key(4, 0, KeyCode::Enter, &h);
@@ -969,7 +969,7 @@ fn ambilight_picker_switches_lights() {
 #[test]
 fn picker_shows_what_is_typed() {
     let (mut a, _rx, h) = app_seeing(with_ambilight());
-    a.ambi_open = true;
+    a.ambi.open = true;
     a.overlay = Overlay::AmbiColour { row: 4, col: 1 };
     let typed = |a: &mut App, text: &str| {
         for c in text.chars() {

@@ -503,7 +503,7 @@ impl App {
                 }
                 // where the rows are, for the scrollbar beside them
                 bar = Some((text.len(), rows.len().min(room), rows.len(), start));
-                self.bar_rows = rows.iter().map(|r| r.as_ref().ok().copied()).collect();
+                self.bars.rows = rows.iter().map(|r| r.as_ref().ok().copied()).collect();
                 for row in rows.iter().skip(start).take(room) {
                     let i = match row {
                         Ok(i) => *i,

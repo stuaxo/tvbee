@@ -766,7 +766,7 @@ impl App {
         let top = r.y + 1 + u16::try_from(head.len()).unwrap_or(0);
         let bar = scrollbar(f, Bar::Options, r.right().saturating_sub(1), top, u16::try_from(shown).unwrap_or(0), total, start);
         // which choosable row each body line is (a dragged scrollbar picks by line)
-        self.bar_rows = (0..total).map(|l| at.iter().position(|a| *a == l)).collect();
+        self.bars.rows = (0..total).map(|l| at.iter().position(|a| *a == l)).collect();
         // the rows in view, clickable where they are
         let rows: Vec<(usize, usize)> =
             at.iter().enumerate().filter(|(_, l)| (start..start + room).contains(*l)).map(|(i, l)| (i, head.len() + l - start)).collect();

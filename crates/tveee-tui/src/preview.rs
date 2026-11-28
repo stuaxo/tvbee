@@ -19,22 +19,32 @@ pub fn picture_terminal(env: impl Fn(&str) -> Option<String>) -> bool {
         || ["iTerm.app", "WezTerm", "ghostty", "rio"].contains(&program.as_str())
 }
 
+/// The preview panel: open or not, its picture (ready to draw), where it
+/// came from, and what it's doing.
+#[derive(Default)]
+pub struct PreviewPane {
+    pub open: bool,
+    pub image: Option<ratatui_image::protocol::StatefulProtocol>,
+    pub source: &'static str,
+    pub note: String,
+}
+
 impl App {
     /// Rows the system panel wants, borders included.
     /// The preview panel: the picture, or what it's waiting for.
     pub(super) fn draw_preview(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let source = if self.preview_source.is_empty() { String::new() } else { format!(" ({})", self.preview_source) };
+        let source = if self.preview.source.is_empty() { String::new() } else { format!(" ({})", self.preview.source) };
         let block = Block::bordered().title(format!(" preview{source} - v hides ")).border_style(Style::new().fg(Color::DarkGray));
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let note_h = u16::from(!self.preview_note.is_empty());
+        let note_h = u16::from(!self.preview.note.is_empty());
         let [pic, note] = Layout::vertical([Constraint::Min(1), Constraint::Length(note_h)]).areas(inner);
-        match self.preview.as_mut() {
+        match self.preview.image.as_mut() {
             Some(proto) => f.render_stateful_widget(ratatui_image::StatefulImage::new(), pic, proto),
             None => f.render_widget(Paragraph::new("getting a picture...").italic(), pic),
         }
         if note_h > 0 {
-            f.render_widget(Paragraph::new(self.preview_note.clone()).fg(Color::DarkGray), note);
+            f.render_widget(Paragraph::new(self.preview.note.clone()).fg(Color::DarkGray), note);
         }
     }
 }

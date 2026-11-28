@@ -199,6 +199,41 @@ pub fn guide_move(ids: &[u32], at: u32, code: KeyCode) -> u32 {
     ids[super::listnav::step(i, n, code).unwrap_or(i)]
 }
 
+/// The guide's own state.
+pub struct GuideView {
+    /// How many GUIDE_STEPs ahead of now the guide shows.
+    pub later: i64,
+    /// Where the grid's left edge is drawn now (Unix seconds); it slides
+    /// toward where it should be when scroll animations are on.
+    pub view: i64,
+    /// When the slide last moved.
+    pub slid: Instant,
+    /// The details panel, and how far it's scrolled.
+    pub details: Details,
+    pub details_scroll: usize,
+    /// The programme the details are for (channel, start), to start each
+    /// one from the top.
+    pub details_of: Option<(u32, i64)>,
+    /// Descriptions asked for; `want_info` is the next to ask for.
+    pub infos_asked: std::collections::HashSet<(u32, i64)>,
+    pub want_info: Option<(u32, i64)>,
+}
+
+impl Default for GuideView {
+    fn default() -> Self {
+        GuideView {
+            later: 0,
+            view: 0,
+            slid: Instant::now(),
+            details: Details::Closed,
+            details_scroll: 0,
+            details_of: None,
+            infos_asked: Default::default(),
+            want_info: None,
+        }
+    }
+}
+
 impl App {
     /// The guide's rows, once fetched.
     pub(super) fn guide_rows(&self) -> &[GuideRow] {
@@ -218,8 +253,8 @@ impl App {
             None => None,
         });
         self.prompt.clear();
-        self.guide_later = 0;
-        self.guide_view = self.guide_start();
+        self.guide.later = 0;
+        self.guide.view = self.guide_start();
         self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
         let _ = actions.send(Action::LoadGuide);
         // the details panel's descriptions take the TV a while the first time
@@ -229,12 +264,12 @@ impl App {
     /// Where the grid's left edge should be: the half hour before now, plus
     /// the steps taken.
     pub(super) fn guide_start(&self) -> i64 {
-        tveee_core::builtin::guide::now().div_euclid(GUIDE_STEP) * GUIDE_STEP + self.guide_later * GUIDE_STEP
+        tveee_core::builtin::guide::now().div_euclid(GUIDE_STEP) * GUIDE_STEP + self.guide.later * GUIDE_STEP
     }
 
     /// Whether the guide is sliding (so frames should come quickly).
     pub(super) fn animating(&self) -> bool {
-        matches!(self.overlay, Overlay::Guide { .. }) && self.guide_view != self.guide_start()
+        matches!(self.overlay, Overlay::Guide { .. }) && self.guide.view != self.guide_start()
     }
 
     /// Move the drawn grid toward where it should be: one cell every 10ms
@@ -242,34 +277,34 @@ impl App {
     pub(super) fn slide(&mut self, spc: i64) {
         let target = self.guide_start();
         if !tveee_core::options::get(tveee_core::options::SCROLL_ANIMATION) {
-            self.guide_view = target;
+            self.guide.view = target;
             return;
         }
-        let cells = (self.guide_slid.elapsed().as_millis() / 10).max(1) as i64;
-        self.guide_slid = Instant::now();
-        let step = (cells * spc).min((target - self.guide_view).abs());
-        self.guide_view += step * (target - self.guide_view).signum();
+        let cells = (self.guide.slid.elapsed().as_millis() / 10).max(1) as i64;
+        self.guide.slid = Instant::now();
+        let step = (cells * spc).min((target - self.guide.view).abs());
+        self.guide.view += step * (target - self.guide.view).signum();
     }
 
     /// The time the guide shows.
     pub(super) fn guide_time(&self) -> i64 {
-        guide_time_at(tveee_core::builtin::guide::now(), self.guide_later)
+        guide_time_at(tveee_core::builtin::guide::now(), self.guide.later)
     }
 
     /// Keys in the guide: typing filters, ↑/↓/page keys/home/end move, ←/→
     /// go earlier/later in time, Tab switches tabs, Enter watches, Esc closes.
     pub(super) fn guide_key(&mut self, tab: GuideTab, at: u32, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         // keys for the details panel while it has the keyboard
-        if self.details == Details::Focused {
+        if self.guide.details == Details::Focused {
             match code {
-                KeyCode::Esc | KeyCode::BackTab | KeyCode::Tab => self.details = Details::Open,
-                KeyCode::Backspace | KeyCode::Char('h') => self.details = Details::Closed,
-                KeyCode::Up => self.details_scroll = self.details_scroll.saturating_sub(1),
-                KeyCode::Down => self.details_scroll += 1,
-                KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(DETAILS_ROWS),
-                KeyCode::PageDown => self.details_scroll += DETAILS_ROWS,
-                KeyCode::Home => self.details_scroll = 0,
-                KeyCode::End => self.details_scroll = usize::MAX / 2,
+                KeyCode::Esc | KeyCode::BackTab | KeyCode::Tab => self.guide.details = Details::Open,
+                KeyCode::Backspace | KeyCode::Char('h') => self.guide.details = Details::Closed,
+                KeyCode::Up => self.guide.details_scroll = self.guide.details_scroll.saturating_sub(1),
+                KeyCode::Down => self.guide.details_scroll += 1,
+                KeyCode::PageUp => self.guide.details_scroll = self.guide.details_scroll.saturating_sub(DETAILS_ROWS),
+                KeyCode::PageDown => self.guide.details_scroll += DETAILS_ROWS,
+                KeyCode::Home => self.guide.details_scroll = 0,
+                KeyCode::End => self.guide.details_scroll = usize::MAX / 2,
                 _ => {}
             }
             return;
@@ -277,7 +312,7 @@ impl App {
         match code {
             // shift+tab: into the details panel (opening it)
             KeyCode::BackTab => {
-                self.details = Details::Focused;
+                self.guide.details = Details::Focused;
                 return;
             }
             // Esc: the filter first, then the guide
@@ -310,8 +345,8 @@ impl App {
                 self.guide_tab(tab.next(), at);
                 return;
             }
-            KeyCode::Right => self.guide_later = (self.guide_later + 1).min(GUIDE_AHEAD / GUIDE_STEP),
-            KeyCode::Left => self.guide_later = self.guide_later.saturating_sub(1).max(0),
+            KeyCode::Right => self.guide.later = (self.guide.later + 1).min(GUIDE_AHEAD / GUIDE_STEP),
+            KeyCode::Left => self.guide.later = self.guide.later.saturating_sub(1).max(0),
             KeyCode::Backspace => {
                 self.prompt.pop();
             }
@@ -330,7 +365,7 @@ impl App {
     pub(super) fn guide_tab(&mut self, tab: GuideTab, at: u32) {
         let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
         let current = self.st.guide_ok().and_then(|g| g.current);
-        self.details_scroll = 0;
+        self.guide.details_scroll = 0;
         self.overlay = Overlay::Guide { tab, at: guide_tab_pick(&ids, at, current) };
     }
 
@@ -370,9 +405,9 @@ impl App {
         let ch_w = 24;
         let grid_w = total.saturating_sub(ch_w + 4).max(10);
         let spc = grid_scale(grid_w);
-        if self.guide_slid.elapsed() > Duration::from_millis(200) {
+        if self.guide.slid.elapsed() > Duration::from_millis(200) {
             // not sliding lately: a slide starts from now
-            self.guide_slid = Instant::now() - Duration::from_millis(10);
+            self.guide.slid = Instant::now() - Duration::from_millis(10);
         }
         self.slide(spc);
         let title = match self.st.guide.as_deref() {
@@ -413,7 +448,7 @@ impl App {
                 };
                 text.push(filter);
                 ids.push(None);
-                let view = self.guide_view;
+                let view = self.guide.view;
                 let t = self.guide_time();
                 let dim = Style::new().fg(Color::DarkGray);
                 let (ruler, marker) = grid_ruler(view, spc, grid_w, tveee_core::builtin::guide::now(), off);
@@ -440,9 +475,9 @@ impl App {
                     on.or(after).map(|e| (e.clone(), r.channel.clone()))
                 });
                 let key = picked.as_ref().map(|(e, ch)| (ch.id, e.start));
-                if key != self.details_of {
-                    self.details_of = key;
-                    self.details_scroll = 0;
+                if key != self.guide.details_of {
+                    self.guide.details_of = key;
+                    self.guide.details_scroll = 0;
                 }
                 // its lines, and whether the description is still being read
                 let details = picked.as_ref().map(|(e, ch)| {
@@ -451,8 +486,8 @@ impl App {
                         (Some(i), _) => Some(Some(i)),
                         (None, Some(i)) => Some(i.as_deref()),
                         (None, None) => {
-                            if self.infos_asked.insert(key) {
-                                self.want_info = Some(key);
+                            if self.guide.infos_asked.insert(key) {
+                                self.guide.want_info = Some(key);
                             }
                             None
                         }
@@ -461,7 +496,7 @@ impl App {
                 });
                 // as tall as what it says, within limits; it takes its rows from the list
                 let rows = details.as_ref().map_or(DETAILS_MIN, |(all, _)| all.len().clamp(DETAILS_MIN, DETAILS_ROWS));
-                let panel_h = if self.details == Details::Closed { 1 } else { rows + 1 };
+                let panel_h = if self.guide.details == Details::Closed { 1 } else { rows + 1 };
                 let room = usize::from(area.height.saturating_sub(8)).saturating_sub(panel_h + 1).max(3);
                 if shown.is_empty() {
                     let why = match (tab, self.prompt.is_empty()) {
@@ -514,9 +549,9 @@ impl App {
                     ids.push(None);
                 }
                 let panel_top = text.len();
-                let focused = self.details == Details::Focused;
+                let focused = self.guide.details == Details::Focused;
                 let bar_style = if focused { Style::new().fg(Color::Black).bg(Color::Magenta).bold() } else { Style::new().fg(Color::Magenta) };
-                match (self.details, &details) {
+                match (self.guide.details, &details) {
                     (Details::Closed, _) => {
                         let what = picked.as_ref().map_or(String::new(), |(e, _)| format!(": {}", e.title));
                         text.push(Line::from(vec![Span::styled("▸ details", bar_style), Span::styled(format!("{what}   (shift+tab or click to open)"), dim)]));
@@ -532,11 +567,11 @@ impl App {
                         }
                     }
                     (_, Some((all, reading))) => {
-                        self.details_scroll = self.details_scroll.min(all.len().saturating_sub(rows));
+                        self.guide.details_scroll = self.guide.details_scroll.min(all.len().saturating_sub(rows));
                         let more = if *reading {
                             "  reading descriptions from the TV...".to_string()
                         } else if all.len() > DETAILS_ROWS {
-                            format!("  {}-{} of {} lines", self.details_scroll + 1, (self.details_scroll + DETAILS_ROWS).min(all.len()), all.len())
+                            format!("  {}-{} of {} lines", self.guide.details_scroll + 1, (self.guide.details_scroll + DETAILS_ROWS).min(all.len()), all.len())
                         } else {
                             String::new()
                         };
@@ -553,7 +588,7 @@ impl App {
                         let fx = (head.chars().count() + 1) as u16;
                         details_hits.push((panel_top, fx, focus_b.chars().count() as u16, if focused { DetailsClick::Unfocus } else { DetailsClick::Focus }));
                         details_hits.push((panel_top, fx + focus_b.chars().count() as u16 + 1, hide_b.len() as u16, DetailsClick::Hide));
-                        for (k, (line, seg)) in all.iter().skip(self.details_scroll).take(rows).enumerate() {
+                        for (k, (line, seg)) in all.iter().skip(self.guide.details_scroll).take(rows).enumerate() {
                             text.push(match seg {
                                 Seg::Title => Line::from(format!(" {line}")).bold(),
                                 Seg::Time => Line::from(format!(" {line}")).fg(Color::DarkGray),
@@ -561,7 +596,7 @@ impl App {
                             });
                             details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
                         }
-                        for k in all.len().saturating_sub(self.details_scroll)..rows {
+                        for k in all.len().saturating_sub(self.guide.details_scroll)..rows {
                             text.push(Line::default());
                             details_hits.push((panel_top + 1 + k, 0, total as u16, DetailsClick::Focus));
                         }
