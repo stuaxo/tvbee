@@ -276,7 +276,9 @@ pub(super) fn compact_buttons(mode: Mode) -> Vec<Button> {
             button("space", "play", Input::Do(PlayPause)),
             button("←", "", Input::Do(Seek(-10.0))),
             button("→", "", Input::Do(Seek(10.0))),
-            button(":", "cmds", Input::OpenPalette),
+            // the other mode, findable at any width
+            button("tab", "remote", Input::ToggleMode),
+            // (the commands are on the top line already: [:] commands)
             button("?", "help", Input::ToggleHelp),
             button("q", "quit", Input::Quit),
         ],
@@ -464,6 +466,14 @@ impl App {
             .border_style(Style::new().fg(Color::DarkGray));
         let area = outer.inner(f.area());
         f.render_widget(outer, f.area());
+        // the mode's tag (top right): a click switches mode
+        let tag = match self.mode {
+            Mode::Player => " player ",
+            Mode::Remote => " remote ",
+        };
+        let w = u16::try_from(tag.chars().count()).unwrap_or(0);
+        let full = f.area();
+        self.hits.push((ratatui::layout::Rect { x: full.right().saturating_sub(w + 1), y: full.y, width: w, height: 1 }, Hit::Input(Input::ToggleMode)));
 
         let small = compact(area);
         let bs = buttons(self.mode, self.st.snap.as_ref().is_some_and(|s| s.exact), self.panel_id().is_some());

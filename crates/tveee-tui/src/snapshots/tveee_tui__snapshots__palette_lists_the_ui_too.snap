@@ -16,6 +16,6 @@ expression: "screen(&mut a, CORNER)"
 └──────────────────────────────────────────────────────────┘
 │                                                          │
 │                                                          │
-│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│ space  play   ←     →     tab  remote   ?  help   q  quit│
 │                                                          │
 └──────────────────────────────────────────────────────────┘
