@@ -1122,3 +1122,21 @@ fn tab_to_the_breadcrumbs() {
     a.list_key(0, KeyCode::Down, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::List { sel: 1 });
 }
+
+#[test]
+fn alt_up_goes_up() {
+    use tveee_core::more::Go;
+    let mut st = kodi_artists();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        l.up = Some(("10502|".into(), Go::Link("kodi-parentdir".into())));
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, rx, h) = app_seeing(st);
+    a.overlay = Overlay::List { sel: 2 };
+    // plain ↑ moves in the list; alt+↑ goes up a level (even with a filter typed)
+    a.prompt = "ra".into();
+    a.list_key(2, KeyCode::Up, KeyModifiers::ALT, &h);
+    assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-parentdir".into()))));
+    a.list_key(2, KeyCode::Up, KeyModifiers::NONE, &h);
+    assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
+}

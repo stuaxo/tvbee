@@ -107,6 +107,11 @@ impl App {
         if self.location.is_some() {
             return self.location_key(code, mods, actions);
         }
+        // alt+↑: up a level, as in a file manager (wherever the keys are)
+        if code == KeyCode::Up && mods.contains(KeyModifiers::ALT) {
+            self.crumb_at = None;
+            return self.list_up(actions);
+        }
         // on the breadcrumbs (Tab): keys go to them
         if let Some(at) = self.crumb_at
             && !(code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL))
@@ -410,7 +415,7 @@ impl App {
                 let hint = if self.crumb_at.is_some() {
                     format!("←→ choose a step  ⏎ go there  {loc}tab/↓/esc back to the list")
                 } else {
-                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  {tab}{loc}type to filter  esc closes{more}{reading}")
+                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  {tab}{loc}type to filter  esc closes{more}{reading}")
                 };
                 text.push(Line::from(hint).fg(Color::DarkGray));
                 rows_at.push(None);
