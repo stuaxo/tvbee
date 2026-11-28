@@ -209,7 +209,7 @@ impl Ahead {
         self.lists.get(at).filter(|(t, _)| t.elapsed() < AHEAD_KEEP).map(|(_, l)| l.clone())
     }
 
-    /// Keep `l` as list `at`, the oldest going past [`AHEAD_MAX`].
+    /// Keep `l` as list `at`, the oldest going when there are too many.
     pub fn put(&mut self, at: &str, l: crate::provider::ContextList) {
         self.lists.retain(|_, (t, _)| t.elapsed() < AHEAD_KEEP);
         if self.lists.len() >= AHEAD_MAX

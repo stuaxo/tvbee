@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Philips Android TV extras, built on the TV's "JointSpace" REST service
 //! (Restlet on ports 1925 http / 1926 https). Vendor-specific, so only
 //! enabled when the Philips system service package is installed.
@@ -12,6 +13,7 @@ use tveee_core::tv::Tv;
 const CAT: &str = "philips";
 const JOINTSPACE_PKG: &str = "org.droidtv.xtv";
 
+/// Whether the TV is a Philips (its JointSpace API's package is installed).
 pub fn detect(tv: &Tv) -> Result<bool> {
     let out = tv.shell(&["cmd", "package", "list", "packages", JOINTSPACE_PKG])?;
     Ok(out.lines().any(|l| l.trim() == format!("package:{JOINTSPACE_PKG}")))
@@ -66,8 +68,11 @@ pub fn paired(tv: &Tv) -> bool {
 /// to POST (None: a GET), and what it's for ("the channel list", named in
 /// the "pairing required" error). Answers the HTTP status and body.
 pub struct Endpoint<'a> {
+    /// The path, from `/6/`: "/6/ambilight/mode".
     pub path: &'a str,
+    /// JSON to POST; None for a GET.
     pub body: Option<String>,
+    /// What it's for, named in a "pairing required" error.
     pub what: &'a str,
     /// The pairing to use (None: the saved one, required).
     pub saved: Option<&'a tveee_core::pairing::Saved>,
@@ -186,6 +191,7 @@ pub fn pair_finish(tv: &Tv, s: &PairStart, pin: &str) -> Result<tveee_core::pair
 /// Pairing with Philips' JointSpace API: the TV shows a PIN, the user types
 /// it, and the TV grants a key used for digest auth from then on.
 pub struct JointSpace;
+/// Pairing with JointSpace (`tveee pair jointspace`): a PIN the TV shows.
 pub static JOINTSPACE: JointSpace = JointSpace;
 
 impl tveee_core::pairing::Pairing for JointSpace {
@@ -222,6 +228,7 @@ impl tveee_core::pairing::Pairing for JointSpace {
     }
 }
 
+/// This plugin's pairings: JointSpace.
 pub fn pairings() -> Vec<&'static dyn tveee_core::pairing::Pairing> {
     vec![&JOINTSPACE]
 }
@@ -305,6 +312,7 @@ pub fn apps() -> Vec<tveee_core::builtin::apps::App> {
 /// (zapster). The guide comes from the broadcast EPG the TV collects
 /// (`org.droidtv.epgdvb`, readable without special permissions).
 pub struct Freeview;
+/// Live TV (Freeview): channels, the guide, tuning, favourites.
 pub static FREEVIEW: Freeview = Freeview;
 
 const GUIDE_URI: &str = "content://org.droidtv.epgdvb/antenna/scheduletable";
@@ -744,10 +752,12 @@ pub fn tune_body(ch: &tveee_core::provider::Channel, list: &str) -> String {
     )
 }
 
+/// This plugin's providers: live TV.
 pub fn providers() -> Vec<&'static dyn tveee_core::provider::Provider> {
     vec![&FREEVIEW]
 }
 
+/// This plugin's actions: live TV's, JointSpace's and the Ambilight's.
 pub fn actions() -> Vec<ActionDescriptor> {
     let mut v = vec![
         ActionDescriptor::terminal("philips.jointspace", CAT, "read a path of Philips' TV API (JointSpace)", jointspace)

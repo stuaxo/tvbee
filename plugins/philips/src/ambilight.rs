@@ -95,9 +95,13 @@ pub use tveee_core::panel::parse_colour;
 /// One light: its layer (1 on most TVs), side, number along the side, colour.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Light {
+    /// The layer (1 on every TV seen).
     pub layer: u32,
+    /// Which side: "left", "top", "right" or "bottom".
     pub side: String,
+    /// Its number along that side, from 0.
     pub n: u32,
+    /// Its colour now.
     pub rgb: (u8, u8, u8),
 }
 
@@ -218,6 +222,7 @@ pub fn shown(state: &State, lights: &[Light]) -> tveee_core::panel::Shown {
 /// What the lights are doing.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct State {
+    /// Whether the lights are on.
     pub power: bool,
     /// The TV's mode: internal, manual (outside control), lounge, expert, ...
     pub mode: Option<String>,
@@ -409,11 +414,14 @@ pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
     out
 }
 
+/// Turn the lights on or off.
 pub fn set_power(tv: &Tv, on: bool) -> Result<String> {
     post(tv, "/6/ambilight/power", &serde_json::json!({ "power": if on { "On" } else { "Off" } }).to_string())?;
     Ok(format!("ambilight {}", if on { "on" } else { "off" }))
 }
 
+/// The lights' mode: "internal" (the TV's own styles) or "manual"
+/// (outside control: colours set from here).
 pub fn set_mode(tv: &Tv, mode: &str) -> Result<()> {
     post(tv, "/6/ambilight/mode", &serde_json::json!({ "current": mode }).to_string())
 }
@@ -507,6 +515,7 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// The `tveee ambilight` command.
 pub fn command_actions() -> Vec<ActionDescriptor> {
     vec![
         ActionDescriptor::terminal("ambilight.ambilight", CAT, "Ambilight: what it's doing, its styles, and handing it to outside control", ambilight)
@@ -544,6 +553,7 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
     ]
 }
 
+/// The Ambilight's actions (the panel's changes, the command).
 pub fn actions() -> Vec<ActionDescriptor> {
     use tveee_core::actions::ActionDescriptor as A;
     let mut v = command_actions();
