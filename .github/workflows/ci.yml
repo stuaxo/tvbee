@@ -26,6 +26,42 @@ jobs:
       - run: cargo clippy --workspace --all-targets --features "${{ matrix.features }}" -- -D warnings
       - run: cargo test --workspace --features "${{ matrix.features }}"
 
+  # formatting, the docs (no broken links), and the core free of terminal
+  # crates (so a GUI can use it: see the plan's gui.md)
+  checks:
+    name: Formatting, docs, core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo doc --workspace --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: tveee-core pulls in no terminal crates
+        run: |
+          if cargo tree -p tveee-core -e normal --all-features | grep -E 'ratatui|crossterm'; then
+            echo "tveee-core depends on a terminal crate (above): keep it in tveee-tui"; exit 1
+          fi
+
+  # licences, where crates come from (failing), and security advisories
+  # (reported, not failing: their fixes wait on the minimum Rust; see deny.toml)
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        continue-on-error: true
+        with:
+          command: check advisories
+
   # build with Debian's own packaged Rust (no rustup), as someone building
   # from source on Debian 13 would
   debian:
