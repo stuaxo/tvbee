@@ -20,8 +20,11 @@ pub const ADDONS: &str = "/sdcard/Android/data/org.xbmc.kodi/files/.kodi/addons"
 /// What an add-on's `addon.xml` says about it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Manifest {
+    /// Its id: the folder it installs into.
     pub id: String,
+    /// Its name.
     pub name: String,
+    /// Its version.
     pub version: String,
     /// Add-ons it needs (id, version), optional ones left out.
     pub requires: Vec<(String, String)>,
@@ -92,7 +95,9 @@ pub fn built_in(id: &str) -> bool {
 
 /// An add-on zip, read: what it is, and its files under the add-on's folder.
 pub struct Package {
+    /// What its addon.xml says.
     pub manifest: Manifest,
+    /// Its files, by path inside the add-on's folder.
     pub files: Vec<(PathBuf, Vec<u8>)>,
 }
 

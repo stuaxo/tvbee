@@ -19,7 +19,9 @@ const ROOT_KEY: &str = "kodi";
 /// Which of Kodi's libraries.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Media {
+    /// Music: musicdb://, the music sources.
     Music,
+    /// Videos: videodb://, the video sources.
     Video,
 }
 
@@ -65,6 +67,7 @@ impl Media {
             Media::Video => "Videos",
         }
     }
+    /// The library a Kodi window shows (None: not a library window).
     pub fn of_window(id: u64) -> Option<Media> {
         match id {
             10502 => Some(Media::Music),
@@ -72,6 +75,7 @@ impl Media {
             _ => None,
         }
     }
+    /// A link's media word ("music", "video").
     pub fn parse(s: &str) -> Option<Media> {
         match s {
             "music" => Some(Media::Music),

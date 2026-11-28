@@ -9,9 +9,11 @@ use tveee_core::ask::{Ask, Auth, Http, Reply, Request, Retry};
 
 /// A Kodi JSON-RPC method.
 pub trait Method {
+    /// What its result means, as a type.
     type Out;
     /// Its name: "Files.GetDirectory".
     fn name(&self) -> &str;
+    /// Its parameters, as JSON.
     fn params(&self) -> Value;
     /// What its `result` means.
     fn parse(&self, result: Value) -> Result<Self::Out>;
@@ -82,7 +84,9 @@ pub fn ask_within<M: Method>(tv: &Tv, m: &M, secs: u32) -> Result<M::Out> {
 /// Any method by name, its params as JSON, its result as it comes (the
 /// `kodi-rpc` command, and calls not typed yet).
 pub struct Raw<'a> {
+    /// Its name: "Player.GetItem".
     pub method: &'a str,
+    /// Its parameters, as JSON.
     pub params: Value,
 }
 
@@ -104,6 +108,7 @@ impl Method for Raw<'_> {
 /// What's in a folder Kodi knows (`Files.GetDirectory`), with the song and
 /// video details the list shows.
 pub struct GetDirectory<'a> {
+    /// The folder: a path or a library address (musicdb://albums/).
     pub directory: &'a str,
     /// "music", "video", "files".
     pub media: &'a str,
@@ -124,6 +129,7 @@ impl Method for GetDirectory<'_> {
 
 /// The shares and folders added to Kodi for `media` (`Files.GetSources`).
 pub struct GetSources<'a> {
+    /// "music" or "video".
     pub media: &'a str,
 }
 
@@ -158,8 +164,11 @@ impl Method for PlaylistClear {
 
 /// Add a whole folder to a playlist (`Playlist.Add`).
 pub struct PlaylistAddDirectory<'a> {
+    /// Kodi's playlist (0 music, 1 video).
     pub playlist: u32,
+    /// The folder whose items are added.
     pub directory: &'a str,
+    /// "music" or "video".
     pub media: &'a str,
 }
 
@@ -195,10 +204,13 @@ impl Method for PlaylistFiles {
 
 /// Play something (`Player.Open`).
 pub enum Open<'a> {
+    /// A file, by its path.
     File(&'a str),
-    /// Playlist `playlist`, from `position`.
+    /// A playlist, from one of its items.
     Playlist {
+        /// Kodi's playlist (0 music, 1 video).
         playlist: u32,
+        /// The item to start from, from 0.
         position: usize,
     },
 }

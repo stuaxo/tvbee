@@ -10,9 +10,13 @@ use tveee_core::provider::{ListCrumb, ListPlace};
 /// Where Kodi's screen is: its window, the folder shown and how many rows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Place {
+    /// Kodi's window id (10502 music, 10025 videos, ...).
     pub window: u64,
+    /// The folder shown (Container.FolderPath).
     pub path: String,
+    /// The folder's name, as Kodi shows it.
     pub name: String,
+    /// How many rows the list has.
     pub rows: usize,
     /// The highlighted row's label and path (to find it among the rows,
     /// whatever Kodi numbers from).
