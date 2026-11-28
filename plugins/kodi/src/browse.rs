@@ -59,10 +59,12 @@ fn text(v: &Value, k: &str) -> String {
 pub fn place_of(window: u64, l: &Value) -> Option<Place> {
     let path = text(l, "Container.FolderPath");
     let rows: usize = text(l, "Container.NumItems").parse().unwrap_or(0);
-    if path.is_empty() || rows == 0 || window_name(window).is_none() {
-        return None;
-    }
-    let name = text(l, "Container.FolderName");
+    // a section's top (Music: Genres, Artists, Albums...) has no folder path
+    let Some(window_title) = window_name(window).filter(|_| rows > 0) else { return None };
+    let name = Some(text(l, "Container.FolderName")).filter(|n| !n.is_empty()).unwrap_or_else(|| {
+        let mut c = window_title.chars();
+        c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+    });
     let focus = (text(l, "ListItem.Label"), text(l, "ListItem.FileNameAndPath"));
     Some(Place { window, path, name, rows, focus })
 }
@@ -184,6 +186,9 @@ mod tests {
         // the home screen, the player, settings: not lists
         assert!(place_of(10000, &place_labels()).is_none());
         assert!(place_of(10502, &json!({ "Container.FolderPath": "", "Container.NumItems": "0" })).is_none());
+        // the top of Music (Genres, Artists, Albums...): a list, no path, named after it
+        let top = place_of(10502, &json!({ "Container.FolderPath": "", "Container.FolderName": "", "Container.NumItems": "15", "ListItem.Label": "Genres" })).expect("a list");
+        assert_eq!((top.name.as_str(), top.path.as_str(), top.rows), ("Music", "", 15));
     }
 
     #[test]
