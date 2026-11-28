@@ -15,19 +15,19 @@ expression: s
 │                                                                       │          sync Hue bulbs with the TV         ││
 │                            ┌ panel colour ──────────────────────────────────────────────┐▐▌    │                    ││
 │                            │Colour for left 1                                           │───────────────────────────┘│
-│                            │                                                            │───────────────────────────┐│
-│                            │                                     lighter                │                           ││
-│                            │▐▌                                   full                   │org.xbmc.kodi              ││
-│                            │                                     darker                 │ MB used, 310 MB free      ││
+│                            │for   all     ▐▌    │           tab: the next               │───────────────────────────┐│
+│                            │                                                            │                           ││
+│                            │                                     lighter                │org.xbmc.kodi              ││
+│                            │▐▌                                   full                   │ MB used, 310 MB free      ││
+│                            │                                     darker                 │                           ││
 │                            │ white   warm   off                                         │                           ││
 │                            │                                                            │                           ││
-│                            │or type: █                                                  │                           ││
-│                            │red, warm, #ff8800                                          │6/512 MB                   ││
-│                            │                                                            │ 2.40                      ││
-│                            │now       →                                                 │───────────────────────────┘│
+│                            │or type: █                                                  │6/512 MB                   ││
+│                            │red, warm, #ff8800                                          │ 2.40                      ││
+│                            │                                                            │───────────────────────────┘│
+│                            │now       →                                                 │                            │
 │                            │arrows or click pick  type a name or #hex  ⏎ set  esc back  │                            │
 │                            └────────────────────────────────────────────────────────────┘                            │
-│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

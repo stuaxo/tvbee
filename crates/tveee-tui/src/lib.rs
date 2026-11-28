@@ -990,6 +990,8 @@ impl App {
                 self.prompt.clear();
                 self.ambi_set(row, col, actions);
             }
+            // another light (or any choice in the panel) while picking a colour
+            (Overlay::AmbiColour { .. }, Some(Hit::AmbiOption(r, c))) => self.ambi_switch(r, c, actions),
             (Overlay::AmbiColour { .. }, Some(Hit::Popup)) => {}
             (Overlay::AmbiColour { row, col }, _) => self.overlay = Overlay::Ambilight { row, col },
             // the PIN box: a click outside it cancels
