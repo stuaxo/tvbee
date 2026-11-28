@@ -657,6 +657,23 @@ pub fn restart(tv: &Tv, pkg: &str, target: &str, restore: bool) -> Result<String
     }
 }
 
+/// `restart [<app>] [--fresh]`: the app in front (or `<app>`) closed and
+/// started again, back where it was unless `--fresh`.
+fn restart_action(cx: &crate::actions::Cx, args: &[String]) -> Result<crate::actions::Output> {
+    let fresh = args.iter().any(|a| a == "--fresh");
+    let named: Vec<&String> = args.iter().filter(|a| *a != "--fresh").collect();
+    let (pkg, target) = match named.as_slice() {
+        [] => {
+            let pkg = super::info::focus_package(&cx.tv.window_dump()?).filter(|p| !passes_through(p));
+            let Some(pkg) = pkg else { return failed("restart: nothing in front to restart (the home screen is)") };
+            (pkg.clone(), pkg)
+        }
+        [app] => (pkg_of(app).to_string(), (*app).clone()),
+        _ => return crate::error::usage("restart: one app at most (see 'tveee restart --help')"),
+    };
+    restart(cx.tv, &pkg, &target, !fresh).map(Into::into)
+}
+
 /// What `tveee app <app>` was asked to do.
 #[derive(Debug, PartialEq)]
 pub enum AppAsk {
@@ -860,6 +877,14 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
         ActionDescriptor::terminal("apps.launch", CAT, "launch an app", launch).cli("launch", "[--free] [--quiet] <app>", "launch an app").long(
             "<app> is an alias (see 'tveee apps'), a package name, or package/activity.\n  'home' goes to the home screen (same as 'tveee home').\n  --free   run 'tveee free' first\n  --quiet  mute the TV first",
         ),
+        ActionDescriptor::new("apps.restart", CAT, "restart the app in front, back where it was", restart_action)
+            .cli("restart", "[<app>] [--fresh]", "restart the app in front (or <app>), back where it was (YouTube, Kodi)")
+            .long(
+                "Closes the app and starts it again. Apps tveee knows well (YouTube, Kodi)\n\
+         come back to what they were playing, at the same place, with the same\n\
+         tracks; --fresh starts it from the beginning instead. With no <app>, the\n\
+         one in front. (In the ui: R.)",
+            ),
         ActionDescriptor::terminal("apps.foreground", CAT, "bring an app's existing task to the front", foreground).cli("foreground", "<app>", "bring an app's existing task to the front")
             .long("Same app naming as 'launch'. Starts the app if it is not running.")
             .aliases(&["fg"]),
@@ -895,6 +920,16 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn restart_takes_one_app_at_most() {
+        let tv = crate::tv::Tv { ip: "192.0.2.1".into() };
+        let cx = crate::actions::Cx { tv: &tv, front: true };
+        let two = [String::from("youtube"), String::from("kodi")];
+        let e = super::restart_action(&cx, &two).unwrap_err();
+        assert!(matches!(e, crate::error::Error::Usage(_)), "{e}");
+        assert!(crate::actions::find(&super::actions(), "apps.restart").is_some_and(|a| a.cli.is_some()));
+    }
 
     #[test]
     fn front_named_even_without_its_app() {

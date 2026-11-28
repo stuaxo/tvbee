@@ -128,6 +128,7 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
     launch       launch an app
     open         open a link in the app that handles it
     quit         quit the current app
+    restart      restart the app in front (or <app>), back where it was (YouTube, Kodi)
     search       search inside an app (YouTube, Kodi, live TV, ...)
 
 [debloat]
