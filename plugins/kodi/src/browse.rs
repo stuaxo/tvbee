@@ -3,7 +3,7 @@
 //! where browsing starts ([`super::library`]), and the ▶ mark. Also what
 //! a folder's path can say of where it is (the breadcrumbs).
 
-use super::{call, Result, Tv};
+use super::{Result, Tv, call};
 use serde_json::Value;
 use tveee_core::more::Go;
 use tveee_core::provider::{ListCrumb, ListPlace};
@@ -60,7 +60,10 @@ pub fn place_of(window: u64, l: &Value) -> Option<Place> {
 pub fn place(tv: &Tv) -> Result<Option<Place>> {
     let w = call(tv, "GUI.GetProperties", r#"{"properties":["currentwindow"]}"#)?;
     let window = w.pointer("/currentwindow/id").and_then(Value::as_u64).unwrap_or(0);
-    let names: Vec<String> = ["Container.FolderPath", "Container.FolderName", "Container.NumItems", "ListItem.Label", "ListItem.FileNameAndPath"].iter().map(|s| s.to_string()).collect();
+    let names: Vec<String> = ["Container.FolderPath", "Container.FolderName", "Container.NumItems", "ListItem.Label", "ListItem.FileNameAndPath"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     Ok(place_of(window, &labels(tv, &names)?))
 }
 
@@ -117,7 +120,11 @@ pub fn path_crumbs(window: u64, path: &str) -> (Vec<ListCrumb>, bool) {
         let mut c = w.chars();
         c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect::<String>())
     };
-    let crumb = |title: String, p: &str| ListCrumb { title, key: format!("{window}|{}", bare(p)), go: Some(Go::Link(if p.is_empty() { format!("kodi-window:{w}") } else { format!("kodi-window:{w}|{p}") })) };
+    let crumb = |title: String, p: &str| ListCrumb {
+        title,
+        key: format!("{window}|{}", bare(p)),
+        go: Some(Go::Link(if p.is_empty() { format!("kodi-window:{w}") } else { format!("kodi-window:{w}|{p}") })),
+    };
     let mut out = vec![crumb(top_title, "")];
     let path = bare(path);
     if path.is_empty() {
@@ -219,8 +226,8 @@ mod tests {
         assert!(place_of(10000, &place_labels()).is_none());
         assert!(place_of(10502, &json!({ "Container.FolderPath": "", "Container.NumItems": "0" })).is_none());
         // the top of Music (Genres, Artists, Albums...): a list, no path, named after it
-        let top = place_of(10502, &json!({ "Container.FolderPath": "", "Container.FolderName": "", "Container.NumItems": "15", "ListItem.Label": "Genres" })).expect("a list");
+        let top = place_of(10502, &json!({ "Container.FolderPath": "", "Container.FolderName": "", "Container.NumItems": "15", "ListItem.Label": "Genres" }))
+            .expect("a list");
         assert_eq!((top.name.as_str(), top.path.as_str(), top.rows), ("Music", "", 15));
     }
-
 }

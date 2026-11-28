@@ -1,8 +1,8 @@
 //! The worker lanes: actions are routed to keys, act, read or idle lanes,
 //! and the refresh reads the TV's state; they share [`Shared`].
 
-use crate::readings::{Power, Window};
 use super::*;
+use crate::readings::{Power, Window};
 
 /// A thread with a name (shown in the debug log, `TVEEE_LOG`).
 pub fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
@@ -25,7 +25,13 @@ pub enum Lane {
 pub fn lane(a: &Action) -> Lane {
     match a {
         Action::Key(_) | Action::Text(_) => Lane::Keys,
-        Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => Lane::Read,
+        Action::LoadGuide
+        | Action::LoadList
+        | Action::CheckRunning
+        | Action::WatchPanel(..)
+        | Action::PreviewPanel(_)
+        | Action::WatchSystem(_)
+        | Action::WatchList(_) => Lane::Read,
         Action::PrefetchInfo => Lane::Idle,
         _ => Lane::Act,
     }
@@ -522,7 +528,9 @@ impl Refresher {
         };
         // where the list is, while the ui shows it (one small read)
         let list_place = match (pkg.as_deref(), awake && self.shared.list_watch.load(Ordering::Relaxed)) {
-            (Some(p), true) => crate::provider::for_package(p).and_then(|pr| pr.player()).filter(|pl| pl.has_list()).and_then(|pl| pl.list_place(&self.tv).handled().flatten()),
+            (Some(p), true) => {
+                crate::provider::for_package(p).and_then(|pr| pr.player()).filter(|pl| pl.has_list()).and_then(|pl| pl.list_place(&self.tv).handled().flatten())
+            }
             _ => None,
         };
         let activity = activity.map(|a| nowplaying::keep_title(self.last_activity.as_ref(), a));
@@ -768,7 +776,16 @@ impl Actor {
                 crate::pairing::save(id, &self.tv.ip, &saved)?;
                 "paired with the TV".into()
             }
-            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::PrefetchInfo | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => String::new(),
+            Action::Key(_)
+            | Action::Text(_)
+            | Action::LoadGuide
+            | Action::LoadList
+            | Action::CheckRunning
+            | Action::PrefetchInfo
+            | Action::WatchPanel(..)
+            | Action::PreviewPanel(_)
+            | Action::WatchSystem(_)
+            | Action::WatchList(_) => String::new(),
         })
     }
 }
@@ -946,7 +963,6 @@ mod tests {
         // and what the refresh reads is set
         assert!(!shared.list_watch.load(Ordering::Relaxed) && shared.system_watch.load(Ordering::Relaxed));
     }
-
 
     #[test]
     fn low_bandwidth_waits() {

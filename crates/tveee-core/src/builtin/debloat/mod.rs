@@ -7,10 +7,10 @@
 //! disabled, and `apply` re-enables them if something turned them off.
 //! `speed` entries only apply on low-spec TVs (see [`Spec`]).
 
-use crate::error::{failed, usage, Result};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::tv::Tv;
 use std::collections::BTreeSet;
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
@@ -34,13 +34,14 @@ pub enum Tag {
     /// Kept: a core part of the system.
     System,
     /// Kept: these packages need it.
-    Dependency { of: Vec<String> },
+    Dependency {
+        of: Vec<String>,
+    },
 }
 
 impl Tag {
     /// Every tag id, in the order groups are shown.
-    pub const IDS: &[&str] =
-        &["telemetry", "voice", "discontinued", "sync", "phoneservices", "games", "speed", "system", "dependency"];
+    pub const IDS: &[&str] = &["telemetry", "voice", "discontinued", "sync", "phoneservices", "games", "speed", "system", "dependency"];
 
     pub fn id(&self) -> &'static str {
         match self {
@@ -196,11 +197,7 @@ pub fn parse_profile(text: &str) -> std::result::Result<Profile, String> {
                     if !["global", "secure", "system"].contains(&ns) || key.is_empty() || value.is_empty() {
                         return Err(at("expected: setting <tag> <global|secure|system> <key> <value> <reason>"));
                     }
-                    p.entries.push(Entry {
-                        action: Action::Setting { ns: ns.into(), key: key.into(), value: value.into() },
-                        tag,
-                        why: why.into(),
-                    });
+                    p.entries.push(Entry { action: Action::Setting { ns: ns.into(), key: key.into(), value: value.into() }, tag, why: why.into() });
                     continue;
                 } else {
                     let (pkg, why) = word(rest);
@@ -289,7 +286,13 @@ impl Spec {
     pub fn summary(&self) -> String {
         let ram = self.ram_mb.map_or("? RAM".into(), |mb| format!("{:.1} GB RAM", mb as f64 / 1024.0));
         let cores = self.cores.map_or(String::new(), |c| format!(", {c} cores"));
-        let bits = if self.abilist.contains("64") { "64-bit" } else if self.abilist.is_empty() { "?" } else { "32-bit" };
+        let bits = if self.abilist.contains("64") {
+            "64-bit"
+        } else if self.abilist.is_empty() {
+            "?"
+        } else {
+            "32-bit"
+        };
         let api = self.sdk.map_or(String::new(), |s| format!(" (API {s})"));
         format!("{ram}{cores}, {bits} {}, Android {}{api}", self.platform, self.release)
     }
@@ -328,9 +331,7 @@ pub struct States {
 const STATE_CMD: &str = "cmd package list packages --user 0; echo @@; cmd package list packages -d --user 0; echo @@; cmd package list packages -u";
 
 pub fn parse_states(out: &str) -> States {
-    let mut parts = out
-        .split("@@")
-        .map(|p| p.lines().filter_map(|l| l.trim().strip_prefix("package:")).map(str::to_string).collect::<BTreeSet<_>>());
+    let mut parts = out.split("@@").map(|p| p.lines().filter_map(|l| l.trim().strip_prefix("package:")).map(str::to_string).collect::<BTreeSet<_>>());
     States { installed: parts.next().unwrap_or_default(), disabled: parts.next().unwrap_or_default(), known: parts.next().unwrap_or_default() }
 }
 
@@ -577,22 +578,15 @@ fn load_profile(file: Option<&str>, model: Option<&str>) -> Result<(Profile, Str
 }
 
 fn setting_values(tv: &Tv, p: &Profile) -> Result<Vec<((String, String), String)>> {
-    let keys: Vec<(String, String)> = p
-        .entries
-        .iter()
-        .filter_map(|e| if let Action::Setting { ns, key, .. } = &e.action { Some((ns.clone(), key.clone())) } else { None })
-        .collect();
+    let keys: Vec<(String, String)> =
+        p.entries.iter().filter_map(|e| if let Action::Setting { ns, key, .. } = &e.action { Some((ns.clone(), key.clone())) } else { None }).collect();
     if keys.is_empty() {
         return Ok(Vec::new());
     }
     let cmd = keys.iter().map(|(n, k)| format!("settings get {n} {k}")).collect::<Vec<_>>().join("; echo @@; ");
     let out = tv.shell(&[&cmd])?;
     let vals: Vec<String> = out.split("@@").map(|v| v.trim().to_string()).collect();
-    Ok(keys
-        .into_iter()
-        .zip(vals.into_iter().chain(std::iter::repeat(String::new())))
-        .map(|(k, v)| (k, if v.is_empty() { "null".into() } else { v }))
-        .collect())
+    Ok(keys.into_iter().zip(vals.into_iter().chain(std::iter::repeat(String::new()))).map(|(k, v)| (k, if v.is_empty() { "null".into() } else { v })).collect())
 }
 
 fn free_data(tv: &Tv) -> String {
@@ -616,11 +610,7 @@ fn confirm(question: &str, yes: bool) -> Result<()> {
     std::io::stdout().flush()?;
     let mut answer = String::new();
     std::io::stdin().lock().read_line(&mut answer)?;
-    if answer.trim().eq_ignore_ascii_case("yes") {
-        Ok(())
-    } else {
-        failed("debloat: not confirmed, nothing changed")
-    }
+    if answer.trim().eq_ignore_ascii_case("yes") { Ok(()) } else { failed("debloat: not confirmed, nothing changed") }
 }
 
 struct Opts {
@@ -825,9 +815,15 @@ fn debloat(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("debloat.debloat", CAT, "disable unwanted system apps (reversible)", debloat).cli("debloat", "[status|list|apply|restore|trim] [-n] [--only G,..] [--skip G,..] [--yes] [--force] [--profile FILE]", "disable unwanted system apps (reversible)")
-    .long(
-        "Disables or removes (for user 0 only) system apps a profile lists, and pins a\n\
+    vec![
+        ActionDescriptor::terminal("debloat.debloat", CAT, "disable unwanted system apps (reversible)", debloat)
+            .cli(
+                "debloat",
+                "[status|list|apply|restore|trim] [-n] [--only G,..] [--skip G,..] [--yes] [--force] [--profile FILE]",
+                "disable unwanted system apps (reversible)",
+            )
+            .long(
+                "Disables or removes (for user 0 only) system apps a profile lists, and pins a\n\
          few settings; 'restore' undoes it. Nothing is deleted and no root is needed.\n\
          \n\
          \x20 status    what the profile covers and its state on the TV (the default)\n\
@@ -850,7 +846,8 @@ pub fn actions() -> Vec<ActionDescriptor> {
          nettvregistration breaks iPlayer, Arte and the app gallery). 'speed' changes\n\
          apply when the TV looks low-spec: under 2 GB RAM, a 32-bit CPU, Android's\n\
          low-RAM flag, or Android older than 9; '--only speed' applies them anyway.",
-    )]
+            ),
+    ]
 }
 
 #[cfg(test)]
@@ -974,7 +971,12 @@ mod tests {
         let back = plan(&profile(), &tv, &Selection::default(), Direction::Restore);
         assert_eq!(
             changes(&back),
-            pairs(&[("a.disabled", "enable"), ("gone.already", "reinstall for user 0"), ("keep.off", "re-enable (needed)"), ("global/anim", "delete (was unset)")])
+            pairs(&[
+                ("a.disabled", "enable"),
+                ("gone.already", "reinstall for user 0"),
+                ("keep.off", "re-enable (needed)"),
+                ("global/anim", "delete (was unset)")
+            ])
         );
     }
 

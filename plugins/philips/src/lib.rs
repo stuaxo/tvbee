@@ -4,10 +4,10 @@
 
 pub mod ambilight;
 
-use tveee_core::error::{failed, usage, Result};
-use tveee_core::actions::ActionDescriptor;
-use tveee_core::tv::Tv;
 use tveee_core::Ctx;
+use tveee_core::actions::ActionDescriptor;
+use tveee_core::error::{Result, failed, usage};
+use tveee_core::tv::Tv;
 
 const CAT: &str = "philips";
 const JOINTSPACE_PKG: &str = "org.droidtv.xtv";
@@ -64,7 +64,14 @@ pub fn paired(tv: &Tv) -> bool {
 
 fn https_get(tv: &Tv, saved: &tveee_core::pairing::Saved, path: &str) -> Result<(u16, String)> {
     let Some(digest) = credentials(saved) else { return Err(tveee_core::pairing::required_error(PAIRING, path)) };
-    tveee_core::https::request(&tveee_core::https::Request { url: &https_url(&tv.ip, path), body: None, digest: Some(digest), basic: None, retry: Some(&|| awake(tv)), timeout_secs: 10 })
+    tveee_core::https::request(&tveee_core::https::Request {
+        url: &https_url(&tv.ip, path),
+        body: None,
+        digest: Some(digest),
+        basic: None,
+        retry: Some(&|| awake(tv)),
+        timeout_secs: 10,
+    })
 }
 
 /// GET a path that needs pairing; `what` names it in the "pairing required"
@@ -78,7 +85,14 @@ pub fn js_get_paired(tv: &Tv, path: &str, what: &str) -> Result<(u16, String)> {
 pub fn js_post(tv: &Tv, path: &str, body: &str, what: &str) -> Result<(u16, String)> {
     let saved = tveee_core::pairing::require(PAIRING, tv, what)?;
     let Some(digest) = credentials(&saved) else { return Err(tveee_core::pairing::required_error(PAIRING, what)) };
-    tveee_core::https::request(&tveee_core::https::Request { url: &https_url(&tv.ip, path), body: Some(body), digest: Some(digest), basic: None, retry: Some(&|| awake(tv)), timeout_secs: 10 })
+    tveee_core::https::request(&tveee_core::https::Request {
+        url: &https_url(&tv.ip, path),
+        body: Some(body),
+        digest: Some(digest),
+        basic: None,
+        retry: Some(&|| awake(tv)),
+        timeout_secs: 10,
+    })
 }
 
 fn read_pin() -> Result<String> {
@@ -109,8 +123,14 @@ pub struct PairStart {
 pub fn pair_start(tv: &Tv) -> Result<PairStart> {
     let id = new_device_id();
     let ask = format!(r#"{{"scope":["read","write","control"],"device":{}}}"#, device_json(&id));
-    let (status, reply) =
-        tveee_core::https::request(&tveee_core::https::Request { url: &https_url(&tv.ip, "/6/pair/request"), body: Some(&ask), digest: None, basic: None, retry: Some(&|| awake(tv)), timeout_secs: 15 })?;
+    let (status, reply) = tveee_core::https::request(&tveee_core::https::Request {
+        url: &https_url(&tv.ip, "/6/pair/request"),
+        body: Some(&ask),
+        digest: None,
+        basic: None,
+        retry: Some(&|| awake(tv)),
+        timeout_secs: 15,
+    })?;
     let v = tveee_core::http::json(&reply).unwrap_or_default();
     let key = tveee_core::http::text(&v, "auth_key");
     let timestamp = tveee_core::http::number(&v, "timestamp").map(|t| t as i64);
@@ -133,7 +153,9 @@ pub fn pair_finish(tv: &Tv, s: &PairStart, pin: &str) -> Result<tveee_core::pair
         url: &https_url(&tv.ip, "/6/pair/grant"),
         body: Some(&grant),
         digest: Some((&s.id, &s.key)),
-        basic: None, retry: Some(&|| awake(tv)), timeout_secs: 15,
+        basic: None,
+        retry: Some(&|| awake(tv)),
+        timeout_secs: 15,
     })?;
     let ok = status == 200 && tveee_core::http::json(&reply).and_then(|v| tveee_core::http::text(&v, "error_id")).is_none_or(|e| e == "SUCCESS");
     if !ok {
@@ -249,7 +271,7 @@ pub fn namers() -> Vec<tveee_core::nowplaying::Namer> {
 /// Philips' apps: the NetTV web apps (each a small wrapper package that opens
 /// org.droidtv.nettvbrowser), the browser itself, and the TV app.
 pub fn apps() -> Vec<tveee_core::builtin::apps::App> {
-    use tveee_core::builtin::apps::{app, known, Kind};
+    use tveee_core::builtin::apps::{Kind, app, known};
     vec![
         app("iplayer", "iPlayer", "org.droidtv.nettvapp4340/com.zeasn.app.linux.MainActivity", Kind::Video),
         app("dailymotion", "Dailymotion", "org.droidtv.nettvapp1984/com.zeasn.app.linux.MainActivity", Kind::Video),
@@ -336,7 +358,6 @@ pub fn parse_events(out: &str) -> Vec<tveee_core::provider::Event> {
 /// How long a copy of the guide is good for. The broadcast guide changes
 /// slowly, and reading it takes the TV a few seconds.
 const GUIDE_FRESH: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-
 
 /// Rows of `--projection presetid:starttime:shortinfo`: (channel, start, description).
 pub fn parse_infos(out: &str) -> (usize, Vec<(u32, i64, String)>) {
@@ -554,7 +575,8 @@ fn remembered_network(tv: &Tv) -> Option<tveee_core::provider::Network> {
 /// (`broadcast:antenna:9018` is Freeview's). Paired, the list is read for
 /// that if it hasn't been yet; else it's just `broadcast:antenna`.
 fn guide_source(tv: &Tv) -> String {
-    let net = remembered_network(tv).or_else(|| paired(tv).then(|| tveee_core::provider::Channels::network(&FREEVIEW, &tveee_core::provider::Cx { tv })).flatten());
+    let net =
+        remembered_network(tv).or_else(|| paired(tv).then(|| tveee_core::provider::Channels::network(&FREEVIEW, &tveee_core::provider::Cx { tv })).flatten());
     match net.and_then(|n| n.onid) {
         Some(onid) => format!("broadcast:antenna:{onid}"),
         None => "broadcast:antenna".into(),
@@ -708,13 +730,17 @@ pub fn providers() -> Vec<&'static dyn tveee_core::provider::Provider> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    let mut v = vec![ActionDescriptor::terminal("philips.jointspace", CAT, "read a path of Philips' TV API (JointSpace)", jointspace).cli("jointspace", "[/6/<path>]", "read a path of Philips' TV API (JointSpace)").long(
-        "Reads a JointSpace path (default /6/system: model, API version, features).\n\
+    let mut v = vec![
+        ActionDescriptor::terminal("philips.jointspace", CAT, "read a path of Philips' TV API (JointSpace)", jointspace)
+            .cli("jointspace", "[/6/<path>]", "read a path of Philips' TV API (JointSpace)")
+            .long(
+                "Reads a JointSpace path (default /6/system: model, API version, features).\n\
          Unpaired, only the public routes work (plain HTTP on :1925); others say\n\
          pairing is required. After 'tveee pair jointspace' (the TV shows a PIN),\n\
          paths are read over HTTPS on :1926 with the saved key: the current channel\n\
          (/6/activities/tv), channel lists (/6/channeldb/tv) and more.",
-    )];
+            ),
+    ];
     v.extend(crate::ambilight::actions());
     v
 }
@@ -743,7 +769,8 @@ mod guide_tests {
         assert!(device_json("abc").contains(r#""id":"abc""#));
     }
 
-    const OUT: &str = "Row: 0 presetid=12, starttime=100, endtime=200, genre=2, eventname=The Make a Difference Show, shortinfo=Stories of people, places, and change.
+    const OUT: &str =
+        "Row: 0 presetid=12, starttime=100, endtime=200, genre=2, eventname=The Make a Difference Show, shortinfo=Stories of people, places, and change.
 Row: 1 presetid=12, starttime=200, endtime=300, genre=NULL, eventname=Dotun Adebayo, shortinfo=NULL
 Row: 2 presetid=1, starttime=150, endtime=250, genre=4, eventname=News, Weather, and Sport, shortinfo=The headlines.
 Then the weather.
@@ -765,7 +792,15 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
 
     #[test]
     fn builds_tune_requests() {
-        let ch = tveee_core::provider::Channel { id: 143, number: Some("18".into()), name: Some("More \"4\"".into()), radio: false, favourite: false, delivery: None, dvb: None };
+        let ch = tveee_core::provider::Channel {
+            id: 143,
+            number: Some("18".into()),
+            name: Some("More \"4\"".into()),
+            radio: false,
+            favourite: false,
+            delivery: None,
+            dvb: None,
+        };
         assert_eq!(
             tune_body(&ch, r#"{"id":"allter","version":"1352"}"#),
             r#"{"channel":{"ccid":143,"preset":"18","name":"More \"4\""},"channelList":{"id":"allter","version":"1352"}}"#
@@ -777,7 +812,6 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
         assert_eq!(clean("Pokémon the Movie...\u{0}\u{0}"), "Pokémon the Movie...");
         let e = parse_events("Row: 0 presetid=101, starttime=1, endtime=2, genre=NULL, eventname=Countryfile\u{0}, shortinfo=NULL\n");
         assert_eq!(e[0].title, "Countryfile");
-
     }
 
     #[test]
@@ -787,7 +821,6 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
         assert_eq!(rows, 3);
         assert_eq!(infos, [(12, 100, "Stories.".to_string()), (1, 150, "Line one,\nline two.".to_string())]);
     }
-
 
     #[test]
     fn reads_favourite_lists() {

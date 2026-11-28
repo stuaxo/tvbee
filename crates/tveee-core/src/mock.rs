@@ -50,13 +50,7 @@ fn fnv(text: &str) -> u64 {
 /// words, tidied) and a hash of all of it.
 pub fn file_name(what: &[&str]) -> String {
     let all = what.join("\u{1f}");
-    let slug: String = what
-        .iter()
-        .flat_map(|w| w.split(|c: char| !c.is_ascii_alphanumeric()))
-        .filter(|w| !w.is_empty())
-        .take(6)
-        .collect::<Vec<_>>()
-        .join("-");
+    let slug: String = what.iter().flat_map(|w| w.split(|c: char| !c.is_ascii_alphanumeric())).filter(|w| !w.is_empty()).take(6).collect::<Vec<_>>().join("-");
     let slug: String = slug.chars().take(60).collect();
     format!("{slug}-{:016x}", fnv(&all))
 }

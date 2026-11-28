@@ -100,8 +100,7 @@ pub fn split_tags(text: &str) -> (&str, Vec<&'static str>) {
     let mut found: Vec<&'static str> = Vec::new();
     while let Some(open) = rest.strip_suffix(']').and_then(|r| r.rfind('[')) {
         let inner = &rest[open + 1..rest.len() - 1];
-        let words: Option<Vec<&'static str>> =
-            inner.split(',').map(|t| DVB_TAGS.iter().find(|(k, _)| *k == t.trim()).map(|(_, w)| *w)).collect();
+        let words: Option<Vec<&'static str>> = inner.split(',').map(|t| DVB_TAGS.iter().find(|(k, _)| *k == t.trim()).map(|(_, w)| *w)).collect();
         let Some(words) = words else { break };
         for w in words.into_iter().rev() {
             if !found.contains(&w) {
@@ -116,7 +115,13 @@ pub fn split_tags(text: &str) -> (&str, Vec<&'static str>) {
 /// The details panel's text for programme `e` on channel `ch`, wrapped to
 /// `width`: title, then when/how long/channel/genre, then the description.
 /// `info`: None while it's being read, Some(None) if the guide has none.
-pub fn details_text(e: &tveee_core::provider::Event, ch: &tveee_core::provider::Channel, info: Option<Option<&str>>, width: usize, offset: i64) -> Vec<(String, Seg)> {
+pub fn details_text(
+    e: &tveee_core::provider::Event,
+    ch: &tveee_core::provider::Channel,
+    info: Option<Option<&str>>,
+    width: usize,
+    offset: i64,
+) -> Vec<(String, Seg)> {
     use tveee_core::builtin::guide::{day_hhmm, hhmm};
     let mins = (e.end - e.start) / 60;
     let length = if mins >= 60 { format!("{}h{:02}", mins / 60, mins % 60) } else { format!("{mins} min") };
@@ -410,7 +415,10 @@ impl App {
                 let t = self.guide_time();
                 let dim = Style::new().fg(Color::DarkGray);
                 let (ruler, marker) = grid_ruler(view, spc, grid_w, tveee_core::builtin::guide::now(), off);
-                let mut head = vec![Span::styled(format!("  {}  ", fit(&format!("channel   {}", tveee_core::builtin::guide::day_hhmm(view, off).split(' ').next().unwrap_or("")), ch_w)), dim)];
+                let mut head = vec![Span::styled(
+                    format!("  {}  ", fit(&format!("channel   {}", tveee_core::builtin::guide::day_hhmm(view, off).split(' ').next().unwrap_or("")), ch_w)),
+                    dim,
+                )];
                 match marker {
                     Some(m) => {
                         let r: Vec<char> = ruler.chars().collect();

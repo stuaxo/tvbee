@@ -164,7 +164,13 @@ impl App {
             None => (first + lines.len()).saturating_sub(room).max(first),
             Some(cur) => {
                 let top = self.log_top.unwrap_or(cur).max(first);
-                let top = if cur < top { cur } else if cur >= top + room { cur + 1 - room } else { top };
+                let top = if cur < top {
+                    cur
+                } else if cur >= top + room {
+                    cur + 1 - room
+                } else {
+                    top
+                };
                 top.min((last + 1).saturating_sub(room).max(first))
             }
         };
@@ -192,7 +198,7 @@ impl App {
         let picked = if lo <= hi { hi - lo + 1 } else { 0 };
         let title = match (at, from) {
             (None, _) => format!(" log - {} lines, following the newest (TVEEE_LOG=<file> keeps them) ", lines.len()),
-            (Some(_), Some(_)) => format!(" log - {picked} lines selected ", ),
+            (Some(_), Some(_)) => format!(" log - {picked} lines selected ",),
             (Some(cur), None) => format!(" log - line {} of {} ", cur - first + 1, lines.len()),
         };
         let keys = if from.is_some() { " y copy them  s save the log " } else { " shift/v select  y copy  s save  end follows new lines " };

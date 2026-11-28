@@ -8,7 +8,7 @@
 //! EventServer only listens on the TV itself, which adb's shell can't reach
 //! with UDP; a restart is what's left.
 
-use super::{call, failed, Result, Tv, PACKAGE};
+use super::{PACKAGE, Result, Tv, call, failed};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::io::Read;

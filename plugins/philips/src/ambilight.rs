@@ -6,11 +6,11 @@
 //! it (`mode manual` / `expert`: tveee, or a program such as Hyperion),
 //! which then sets the colours.
 
-use tveee_core::error::{failed, usage, Result};
 use crate::{js_get_paired, js_post};
-use tveee_core::actions::ActionDescriptor;
-use tveee_core::tv::Tv;
 use tveee_core::Ctx;
+use tveee_core::actions::ActionDescriptor;
+use tveee_core::error::{Result, failed, usage};
+use tveee_core::tv::Tv;
 
 const CAT: &str = "philips";
 const WHAT: &str = "ambilight";
@@ -25,7 +25,10 @@ fn get(tv: &Tv, path: &str) -> Result<String> {
 fn post(tv: &Tv, path: &str, body: &str) -> Result<()> {
     match js_post(tv, path, body, WHAT)? {
         (200, _) => Ok(()),
-        (code, said) => failed(format!("ambilight: the TV answered HTTP {code} for {path}{}", if said.trim().is_empty() { String::new() } else { format!(": {}", said.trim()) })),
+        (code, said) => failed(format!(
+            "ambilight: the TV answered HTTP {code} for {path}{}",
+            if said.trim().is_empty() { String::new() } else { format!(": {}", said.trim()) }
+        )),
     }
 }
 
@@ -461,7 +464,10 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
         }
         ["colour" | "color", name] => {
             let Some((_, s, label)) = COLOURS.iter().find(|(n, _, _)| n == name) else {
-                return usage(format!("ambilight colour: one of {} (or 'tveee ambilight set <colour>' for any colour)", COLOURS.iter().map(|c| c.0).collect::<Vec<_>>().join(", ")));
+                return usage(format!(
+                    "ambilight colour: one of {} (or 'tveee ambilight set <colour>' for any colour)",
+                    COLOURS.iter().map(|c| c.0).collect::<Vec<_>>().join(", ")
+                ));
             };
             set_style(tv, "FOLLOW_COLOR", Some(s), Some(label))?;
             format!("ambilight: {label}")
@@ -492,16 +498,26 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
             post(tv, "/6/HueLamp/power", &format!(r#"{{"power":"{}"}}"#, if *on == "on" { "On" } else { "Off" }))?;
             format!("Ambilight+Hue {on}")
         }
-        _ => return usage("usage: tveee ambilight [on|off | lights | video [setting] | audio [effect] | colour <name> | set [<side> <n>] <colour> | mode [internal|manual|expert] | hue on|off]"),
+        _ => {
+            return usage(
+                "usage: tveee ambilight [on|off | lights | video [setting] | audio [effect] | colour <name> | set [<side> <n>] <colour> | mode [internal|manual|expert] | hue on|off]",
+            );
+        }
     };
     println!("{said}");
     Ok(())
 }
 
 pub fn command_actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("ambilight.ambilight", CAT, "Ambilight: what it's doing, its styles, and handing it to outside control", ambilight).cli("ambilight", "[on|off | lights | video | audio | colour | set | mode | hue]", "Ambilight: what it's doing, its styles, and handing it to outside control")
-    .long(
-        "With nothing: what the lights are doing (power, who's in control, style,\n\
+    vec![
+        ActionDescriptor::terminal("ambilight.ambilight", CAT, "Ambilight: what it's doing, its styles, and handing it to outside control", ambilight)
+            .cli(
+                "ambilight",
+                "[on|off | lights | video | audio | colour | set | mode | hue]",
+                "Ambilight: what it's doing, its styles, and handing it to outside control",
+            )
+            .long(
+                "With nothing: what the lights are doing (power, who's in control, style,\n\
          Ambilight+Hue, how many lights). Needs pairing ('tveee pair jointspace').\n\
          \n\
          \x20 on | off                 the lights on or off\n\
@@ -525,7 +541,8 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
          \x20 hue on|off               Ambilight+Hue: sync Hue bulbs with the TV\n\
          \n\
          Picking a style gives the lights back to the TV.",
-    )]
+            ),
+    ]
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
@@ -533,7 +550,9 @@ pub fn actions() -> Vec<ActionDescriptor> {
     let mut v = command_actions();
     v.extend([
         A::new("ambilight.power", WHAT, "ambilight on/off", |cx, _| {
-            let on = tveee_core::http::json(&get(cx.tv, "/6/ambilight/power")?).and_then(|v| tveee_core::http::text(&v, "power")).is_some_and(|p| p.eq_ignore_ascii_case("on"));
+            let on = tveee_core::http::json(&get(cx.tv, "/6/ambilight/power")?)
+                .and_then(|v| tveee_core::http::text(&v, "power"))
+                .is_some_and(|p| p.eq_ignore_ascii_case("on"));
             set_power(cx.tv, !on).map(Into::into)
         })
         .key('A'),
@@ -600,7 +619,14 @@ mod tests {
 
     #[test]
     fn dialog_rows() {
-        let st = State { power: true, mode: Some("internal".into()), style: Some("FOLLOW_VIDEO".into()), setting: Some("VIVID".into()), hue: Some(true), sides: vec![] };
+        let st = State {
+            power: true,
+            mode: Some("internal".into()),
+            style: Some("FOLLOW_VIDEO".into()),
+            setting: Some("VIVID".into()),
+            hue: Some(true),
+            sides: vec![],
+        };
         let lights = vec![Light { layer: 1, side: "left".into(), n: 0, rgb: (1, 2, 3) }];
         let r = rows(&st, &lights);
         assert_eq!(r.iter().map(|r| r.name).collect::<Vec<_>>(), ["power", "style", "setting", "ambi+hue", "lights"]);

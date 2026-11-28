@@ -8,7 +8,7 @@
 //! for again ([`Tv::read`]); where something keeps going (the refresh), the
 //! last whole one stands in ([`Kept`]).
 
-use crate::error::{failed, Result};
+use crate::error::{Result, failed};
 use crate::tv::Tv;
 
 /// A reading from the TV: the command, and what its answer means.

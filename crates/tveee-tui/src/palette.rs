@@ -55,10 +55,8 @@ pub fn palette_matches(actions: &[ActionDescriptor], query: &str) -> Vec<Item> {
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut buf = Vec::new();
-    let mut scored: Vec<(u32, usize, Item)> = all
-        .enumerate()
-        .filter_map(|(order, (item, hay))| pattern.score(Utf32Str::new(&hay, &mut buf), &mut matcher).map(|s| (s, order, item)))
-        .collect();
+    let mut scored: Vec<(u32, usize, Item)> =
+        all.enumerate().filter_map(|(order, (item, hay))| pattern.score(Utf32Str::new(&hay, &mut buf), &mut matcher).map(|s| (s, order, item))).collect();
     // best first; equal scores keep the order
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     scored.into_iter().map(|(_, _, item)| item).collect()
@@ -75,7 +73,10 @@ impl App {
     /// Whether this key opens the commands over the pop-up that's open: ^P
     /// anywhere, : where it isn't typed (a search, a filter, a prompt).
     pub(super) fn palette_wanted(&self, code: KeyCode, mods: KeyModifiers) -> bool {
-        let typing = matches!(self.overlay, Overlay::Search(_) | Overlay::Prompt(_) | Overlay::Pin | Overlay::Guide { .. } | Overlay::AmbiColour { .. } | Overlay::SaveLog);
+        let typing = matches!(
+            self.overlay,
+            Overlay::Search(_) | Overlay::Prompt(_) | Overlay::Pin | Overlay::Guide { .. } | Overlay::AmbiColour { .. } | Overlay::SaveLog
+        );
         let open = !matches!(self.overlay, Overlay::None | Overlay::Palette(_));
         open && match code {
             KeyCode::Char('p') => mods.contains(KeyModifiers::CONTROL),

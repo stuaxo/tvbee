@@ -6,7 +6,6 @@
 //!
 //! Plain data, so plugins describe them whether or not a front end is built.
 
-
 use crate::tv::Tv;
 
 /// A colour: red, green, blue.
@@ -30,7 +29,10 @@ pub enum View {
     /// Not here after all: why.
     Missing(String),
     /// It needs this pairing first (`crate::pairing`): why.
-    NeedsPairing { pairing: &'static str, why: String },
+    NeedsPairing {
+        pairing: &'static str,
+        why: String,
+    },
     Failed(String),
     Shown(Shown),
 }

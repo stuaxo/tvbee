@@ -9,12 +9,12 @@
 //!   on a hardware layer). Needs scrcpy and ffmpeg installed here.
 //! - `screencap`, raw, every few seconds: menus and apps only.
 
-use crate::error::{failed, Result};
+use crate::error::{Result, failed};
 use crate::tv::Tv;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
 use std::sync::OnceLock;
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 /// The size pictures are made at.

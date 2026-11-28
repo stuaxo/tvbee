@@ -1,16 +1,42 @@
-use crate::actions::{ActionDescriptor as A, Cx, Output};
-use crate::error::{usage, Result};
 use crate::Ctx;
+use crate::actions::{ActionDescriptor as A, Cx, Output};
+use crate::error::{Result, usage};
 
 const CAT: &str = "input";
 
 const KEYS: &[(&str, u32)] = &[
-    ("up", 19), ("down", 20), ("left", 21), ("right", 22), ("ok", 23), ("enter", 66),
-    ("back", 4), ("home", 3), ("menu", 82), ("info", 165), ("guide", 172), ("power", 26),
-    ("wake", 224), ("sleep", 223), ("play", 126), ("pause", 127), ("stop", 86),
-    ("playpause", 85), ("next", 87), ("prev", 88), ("ff", 90), ("rw", 89), ("rew", 89), ("mute", 164),
-    ("volup", 24), ("voldown", 25), ("chup", 166), ("chdown", 167),
-    ("red", 183), ("green", 184), ("yellow", 185), ("blue", 186),
+    ("up", 19),
+    ("down", 20),
+    ("left", 21),
+    ("right", 22),
+    ("ok", 23),
+    ("enter", 66),
+    ("back", 4),
+    ("home", 3),
+    ("menu", 82),
+    ("info", 165),
+    ("guide", 172),
+    ("power", 26),
+    ("wake", 224),
+    ("sleep", 223),
+    ("play", 126),
+    ("pause", 127),
+    ("stop", 86),
+    ("playpause", 85),
+    ("next", 87),
+    ("prev", 88),
+    ("ff", 90),
+    ("rw", 89),
+    ("rew", 89),
+    ("mute", 164),
+    ("volup", 24),
+    ("voldown", 25),
+    ("chup", 166),
+    ("chdown", 167),
+    ("red", 183),
+    ("green", 184),
+    ("yellow", 185),
+    ("blue", 186),
 ];
 
 /// input source name -> keycode

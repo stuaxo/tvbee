@@ -1,6 +1,6 @@
-use crate::error::{failed, Result};
-use crate::actions::ActionDescriptor;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed};
 use std::process::Command as Proc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -91,9 +91,7 @@ fn scrcpy(tv: &crate::tv::Tv) -> Result<Proc> {
         return failed("mirror: scrcpy not found (install it, e.g. 'sudo apt install scrcpy')");
     }
     let mut cmd = Proc::new("scrcpy");
-    cmd.args(["-s", &tv.serial()])
-        .args(["--window-title", &format!("TV {}", tv.ip)])
-        .args(["--max-size", "1280", "--video-bit-rate", "4M"]);
+    cmd.args(["-s", &tv.serial()]).args(["--window-title", &format!("TV {}", tv.ip)]).args(["--max-size", "1280", "--video-bit-rate", "4M"]);
     Ok(cmd)
 }
 
@@ -119,7 +117,6 @@ fn mirror_item(tv: &crate::tv::Tv) -> Result<String> {
     }
     Ok("mirroring in a new window (close it to stop)".into())
 }
-
 
 pub fn command_actions() -> Vec<ActionDescriptor> {
     vec![

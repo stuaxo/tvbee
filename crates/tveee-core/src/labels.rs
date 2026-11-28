@@ -12,7 +12,7 @@
 //! app is installed again or updated, so an app is only read once a version.
 //! The ui finds them (in the background); everything else uses what it found.
 
-use crate::error::{failed, Result};
+use crate::error::{Result, failed};
 use crate::tv::Tv;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -225,11 +225,7 @@ pub fn read_label(tv: &Tv, apk: &str, id: u32, lang: &str) -> Result<Option<Stri
     let tail = &raw[nl + 1..];
     let tail_at = size.saturating_sub(tail.len() as u64);
     let Some((dir_at, dir_len)) = zip_directory(tail) else { return Ok(None) };
-    let dir = if dir_at >= tail_at {
-        tail.get((dir_at - tail_at) as usize..).unwrap_or_default().to_vec()
-    } else {
-        read_range(tv, apk, dir_at, dir_len)?
-    };
+    let dir = if dir_at >= tail_at { tail.get((dir_at - tail_at) as usize..).unwrap_or_default().to_vec() } else { read_range(tv, apk, dir_at, dir_len)? };
     let Some((local, len)) = zip_entry(&dir, "resources.arsc") else { return Ok(None) };
     // the local header (30 bytes, then a name and an extra field of its own:
     // allow for those), and the file after it, in one read

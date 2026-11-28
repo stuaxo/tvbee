@@ -6,7 +6,7 @@
 //! protocol, which lets us read the page's `<video>` element. Everything here
 //! is read-only.
 
-use crate::error::{failed, Error, Result};
+use crate::error::{Error, Result, failed};
 use crate::http;
 use crate::tv::Tv;
 use crate::ws::{Recv, WsClient};
@@ -143,9 +143,7 @@ impl Conn {
             .page_list()?
             .into_iter()
             .map(|(url, ws)| {
-                let progress = ws
-                    .and_then(|p| evaluate(self.fwd.port, &p, VIDEO_EXPR).ok())
-                    .and_then(|v| parse_progress(&v));
+                let progress = ws.and_then(|p| evaluate(self.fwd.port, &p, VIDEO_EXPR).ok()).and_then(|v| parse_progress(&v));
                 Page { url, progress }
             })
             .collect())
@@ -277,9 +275,7 @@ pub fn ws_path(ws_url: &str) -> Option<String> {
 pub fn evaluate(port: u16, path: &str, expr: &str) -> Result<String> {
     let mut ws = WsClient::connect("127.0.0.1", port, path)?;
     let quoted = format!("\"{}\"", expr.replace('\\', "\\\\").replace('"', "\\\""));
-    ws.send_text(&format!(
-        r#"{{"id":1,"method":"Runtime.evaluate","params":{{"expression":{quoted},"returnByValue":true}}}}"#
-    ))?;
+    ws.send_text(&format!(r#"{{"id":1,"method":"Runtime.evaluate","params":{{"expression":{quoted},"returnByValue":true}}}}"#))?;
     // skip any events until our reply arrives
     for _ in 0..20 {
         let Some(text) = ws.recv_text()? else { break };
@@ -332,7 +328,8 @@ mod tests {
 
     #[test]
     fn reads_page_items() {
-        let lines = page_lines(r##"{"route":"#/","title":"YouTube on TV","items":[{"tag":"a","text":"A","focused":true},{"tag":"b","text":"B","focused":false}]}"##);
+        let lines =
+            page_lines(r##"{"route":"#/","title":"YouTube on TV","items":[{"tag":"a","text":"A","focused":true},{"tag":"b","text":"B","focused":false}]}"##);
         assert_eq!(lines[0], "route:   #/");
         assert!(lines[2].starts_with("  > a") && lines[3].starts_with("    b"), "{lines:?}");
         // the focused element is reported too: the items are what's listed
@@ -341,7 +338,6 @@ mod tests {
         assert_eq!(lines.len(), 4);
         assert!(lines[3].contains("ytlr-button") && lines[3].ends_with(" B"));
     }
-
 
     #[test]
     fn finds_sockets() {
