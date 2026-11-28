@@ -627,8 +627,17 @@ fn list_cmd(c: &crate::actions::Cx, args: &[String]) -> Result<crate::actions::O
     match rest {
         [] => {
             let mut lines = list_lines(&l, &name);
-            lines.push("(tveee list N: choose one)".into());
+            let up = if l.up.is_some() { "; tveee list up: the list it's in" } else { "" };
+            lines.push(format!("(tveee list N: choose one{up})"));
             Ok(lines.join("\n").into())
+        }
+        [u] if u == "up" => {
+            let Some((_, go_up)) = l.up.clone() else { return Ok(format!("{} isn't inside another list", l.title).into()) };
+            let said = match player.go(tv, &go_up).or_fallback()? {
+                Some(said) => said,
+                None => go(tv, &pkg, &go_up)?,
+            };
+            Ok(format!("up from {}: {said}", l.title).into())
         }
         [n] => {
             let Some(item) = n.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|i| l.items.get(i)) else {
@@ -640,7 +649,7 @@ fn list_cmd(c: &crate::actions::Cx, args: &[String]) -> Result<crate::actions::O
             };
             Ok(format!("{}: {said}", item.label).into())
         }
-        _ => crate::error::usage("usage: tveee list [app] [N]"),
+        _ => crate::error::usage("usage: tveee list [app] [N|up]"),
     }
 }
 
@@ -746,7 +755,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
              \x20 --full   the whole description, not just its first lines",
         ),
         ActionDescriptor::new("info.list", CAT, "the list the app shows (Kodi's folder), or choose from it", list_cmd)
-            .cli("list", "[app] [N]", "the list the app in front shows, or choose item N from it")
+            .cli("list", "[app] [N|up]", "the list the app in front shows, or choose item N from it")
             .long(
                 "Prints the list the app in front is showing, numbered, the highlighted one\n\
                  marked (› or ▶): in Kodi, the folder or add-on listing on its screen, as\n\
@@ -755,9 +764,10 @@ pub fn actions() -> Vec<ActionDescriptor> {
                  \n\
                  \x20 tveee list          the app in front's list\n\
                  \x20 tveee list kodi     Kodi's, even behind another app\n\
-                 \x20 tveee list 3        choose item 3: a folder opens, anything else plays",
+                 \x20 tveee list 3        choose item 3: a folder opens, anything else plays\n\
+                 \x20 tveee list up       back to the list it's in (Kodi's ..)",
             )
-            .args("[app] [N]"),
+            .args("[app] [N|up]"),
         ActionDescriptor::terminal("info.goto", CAT, "go to a place in an app, or a link from what's on", goto_cmd).cli("goto", "[app] [place|channel|chapter N|N]", "go to a place in an app, or a link from what's on").long(
             "With nothing more, lists where you can go: the app's places (YouTube: home,\n\
              subscriptions, history, library, watchlater) and, for what's on, its channel,\n\
@@ -791,7 +801,7 @@ mod tests {
     fn list_printed() {
         use crate::provider::{ContextList, ListItem};
         let item = |label: &str, folder, meta: Option<&str>| ListItem { section: None, id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
-        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], at: Some(1) };
+        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], at: Some(1), up: None, reopen: None };
         let lines = list_lines(&l, "Kodi");
         assert_eq!(lines[0], "Artists (Kodi, 3 items)");
         assert_eq!(lines[1], "    1  Portishead/");

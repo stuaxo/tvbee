@@ -305,6 +305,12 @@ pub struct ContextList {
     pub items: Vec<ListItem>,
     /// The highlighted (or playing) item, if the app says.
     pub at: Option<usize>,
+    /// The list it's in, if it's in one (Kodi's ".." row): that list's
+    /// [`ContextList::key`], and how to go there.
+    pub up: Option<(String, crate::more::Go)>,
+    /// How to come back to this list later (from further in): for the
+    /// breadcrumbs.
+    pub reopen: Option<crate::more::Go>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

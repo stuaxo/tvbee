@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 504
+assertion_line: 669
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -23,7 +23,7 @@ expression: s
 │       │ › Radiohead/                                                                              9 albums   │       │
 │       │   Exit Music.flac                                                                             4:24   │       │
 │       │                                                                                                      │       │
-│       │↑↓ pgup pgdn home end  ⏎/click choose  type to filter  esc closes                                     │       │
+│       │↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  type to filter  esc closes                             │       │
 │       └──────────────────────────────────────────────────────────────────────────────────────────────────────┘       │
 │                                                                                                                      │
 │                                                                                                                      │
