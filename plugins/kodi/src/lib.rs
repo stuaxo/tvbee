@@ -579,6 +579,8 @@ impl tveee_core::provider::Player for Kodi {
         let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };
         match link::Link::parse(link) {
             Some(link::Link::Play { .. }) => return library::play(tv, link).into(),
+            // an audio stream or subtitle of the video playing
+            Some(link::Link::Track { audio, index }) => return switch_track(tv, audio, index).into(),
             // an item of the queue playing: play from there
             Some(link::Link::GoTo { position }) => {
                 let done = player_id(tv).and_then(|p| {
@@ -973,7 +975,23 @@ fn visualiser(tv: &Tv, want: Option<bool>) -> Result<bool> {
 }
 
 /// The playing video's player id, or a failure saying nothing is playing.
-fn video_player(tv: &Tv) -> Result<u32> {
+/// Switch the video playing to audio stream `index` (`audio`), or to
+/// subtitle `index` (None: subtitles off).
+fn switch_track(tv: &Tv, audio: bool, index: Option<u64>) -> Result<String> {
+    let id = video_player(tv)?;
+    match (audio, index) {
+        (true, Some(n)) => {
+            call_json(tv, "Player.SetAudioStream", serde_json::json!({ "playerid": id, "stream": n })).map(|_| format!("audio: track {}", n + 1))
+        }
+        (true, None) => failed("an audio track to switch to, by its number"),
+        (false, Some(n)) => call_json(tv, "Player.SetSubtitle", serde_json::json!({ "playerid": id, "subtitle": n, "enable": true }))
+            .map(|_| format!("subtitles: track {}", n + 1)),
+        (false, None) => call_json(tv, "Player.SetSubtitle", serde_json::json!({ "playerid": id, "subtitle": "off" })).map(|_| "subtitles off".to_string()),
+    }
+}
+
+/// The video player's id; an error if Kodi isn't playing a video.
+pub(crate) fn video_player(tv: &Tv) -> Result<u32> {
     match player_id(tv)? {
         Some((id, kind)) if kind == "video" => Ok(id),
         _ => failed("Kodi isn't playing a video"),

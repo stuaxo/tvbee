@@ -92,7 +92,88 @@ pub fn link(m: Media, name: &str, path: &str) -> String {
 
 /// Whether `at` is a place to browse (Kodi's top, or a folder).
 pub fn is_link(at: &str) -> bool {
-    matches!(Link::parse(at), Some(Link::Root | Link::Browse { .. } | Link::Queue { .. }))
+    matches!(Link::parse(at), Some(Link::Root | Link::Browse { .. } | Link::Queue { .. } | Link::Tracks))
+}
+
+/// The video playing's audio streams and subtitles, as a list: the audio
+/// stream playing marked, the subtitle shown said; choosing one switches.
+pub fn tracks_list(tv: &Tv) -> Result<ContextList> {
+    let id = super::video_player(tv)?;
+    let props = super::call_json(
+        tv,
+        "Player.GetProperties",
+        serde_json::json!({ "playerid": id, "properties": ["audiostreams", "currentaudiostream", "subtitles", "currentsubtitle", "subtitleenabled"] }),
+    )?;
+    Ok(tracks_of(&props))
+}
+
+/// The list from `Player.GetProperties`' answer (see [`tracks_list`]).
+pub fn tracks_of(p: &Value) -> ContextList {
+    let index = |t: &Value| t.get("index").and_then(Value::as_u64);
+    let name = |t: &Value| {
+        let text = |k: &str| t.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        let what = text("name").or_else(|| text("language")).unwrap_or_else(|| format!("track {}", index(t).map_or(0, |n| n + 1)));
+        match (text("language"), text("name")) {
+            (Some(l), Some(_)) => format!("{what} ({l})"),
+            _ => what,
+        }
+    };
+    let list = |k: &str| p.get(k).and_then(Value::as_array).cloned().unwrap_or_default();
+    let current_audio = p.get("currentaudiostream").and_then(index);
+    let subs_on = p.get("subtitleenabled").and_then(Value::as_bool).unwrap_or(false);
+    let current_sub = p.get("currentsubtitle").and_then(index).filter(|_| subs_on);
+    let mut items = Vec::new();
+    let mut playing = None;
+    for a in list("audiostreams") {
+        let codec = a.get("codec").and_then(Value::as_str).map(str::to_uppercase);
+        let channels = a.get("channels").and_then(Value::as_u64).map(|c| format!("{c} ch"));
+        let meta = [codec, channels].into_iter().flatten().collect::<Vec<_>>().join(" ");
+        if index(&a).is_some() && index(&a) == current_audio {
+            playing = Some(items.len());
+        }
+        items.push(ListItem {
+            section: Some("Audio".into()),
+            id: format!("audio:{}", index(&a).unwrap_or(0)),
+            label: name(&a),
+            meta: Some(meta).filter(|m| !m.is_empty()),
+            folder: false,
+            go: Link::Track { audio: true, index: index(&a) }.go(),
+        });
+    }
+    let shown = |on: bool| if on { Some("shown".to_string()) } else { None };
+    items.push(ListItem {
+        section: Some("Subtitles".into()),
+        id: "subtitle:off".into(),
+        label: "Off".into(),
+        meta: shown(current_sub.is_none()),
+        folder: false,
+        go: Link::Track { audio: false, index: None }.go(),
+    });
+    for s in list("subtitles") {
+        items.push(ListItem {
+            section: Some("Subtitles".into()),
+            id: format!("subtitle:{}", index(&s).unwrap_or(0)),
+            label: name(&s),
+            meta: shown(index(&s).is_some() && index(&s) == current_sub),
+            folder: false,
+            go: Link::Track { audio: false, index: index(&s) }.go(),
+        });
+    }
+    ContextList {
+        title: "Audio and subtitles".into(),
+        kind: "tracks",
+        key: "kodi-tracks".into(),
+        items,
+        playing,
+        at: None,
+        up: Some((ROOT_KEY.to_string(), Link::Root.go())),
+        reopen: Some(Link::Tracks.go()),
+        crumbs: vec![ListCrumb { title: "Kodi".into(), key: ROOT_KEY.into(), go: Some(Link::Root.go()) }],
+        crumbs_whole: true,
+        location: None,
+        open_location: Some("music||{}".into()),
+        browsed: true,
+    }
 }
 
 /// The queue playing: its playlist, how many items, and which is playing
@@ -281,6 +362,20 @@ pub fn list_at(tv: &Tv, at: &str) -> Result<ContextList> {
         // Kodi's top: its categories, and what's queued when there's a queue
         Some(Link::Root) => {
             let mut r = root();
+            // a video playing: its audio and subtitles
+            if super::video_player(tv).is_ok() {
+                r.items.insert(
+                    0,
+                    ListItem {
+                        section: None,
+                        id: "kodi-tracks".into(),
+                        label: "Audio and subtitles".into(),
+                        meta: Some("of the video playing".into()),
+                        folder: true,
+                        go: Link::Tracks.go(),
+                    },
+                );
+            }
             if let Some((playlist, n, _)) = queue_now(tv).filter(|(_, n, _)| *n > 1) {
                 r.items.insert(
                     0,
@@ -297,6 +392,7 @@ pub fn list_at(tv: &Tv, at: &str) -> Result<ContextList> {
             return Ok(r);
         }
         Some(Link::Queue { playlist }) => return queue_list(tv, playlist),
+        Some(Link::Tracks) => return tracks_list(tv),
         _ => {}
     }
     let (m, name, path) = parse(at);
@@ -396,6 +492,31 @@ pub fn play(tv: &Tv, link: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_videos_tracks_as_a_list() {
+        let p: Value = serde_json::from_str(r#"{
+            "audiostreams":[{"index":0,"name":"","language":"eng","codec":"ac3","channels":6},{"index":1,"name":"Commentary","language":"eng","codec":"aac","channels":2}],
+            "currentaudiostream":{"index":1},
+            "subtitles":[{"index":0,"name":"","language":"eng"},{"index":1,"name":"Forced","language":"fre"}],
+            "currentsubtitle":{"index":0},"subtitleenabled":true}"#)
+        .unwrap();
+        let l = tracks_of(&p);
+        let labels: Vec<&str> = l.items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, ["eng", "Commentary (eng)", "Off", "eng", "Forced (fre)"]);
+        assert_eq!(l.items[0].meta.as_deref(), Some("AC3 6 ch"));
+        // the audio playing marked; the subtitle shown said
+        assert_eq!(l.playing, Some(1));
+        assert_eq!(l.items[3].meta.as_deref(), Some("shown"));
+        assert_eq!(l.items[2].meta, None);
+        assert_eq!(l.items[1].go, Link::Track { audio: true, index: Some(1) }.go());
+        assert_eq!(l.items[2].go, Link::Track { audio: false, index: None }.go());
+        assert_eq!(l.items[3].section.as_deref(), Some("Subtitles"));
+        // subtitles off: "Off" is the one shown
+        let mut off = p.clone();
+        off["subtitleenabled"] = false.into();
+        assert_eq!(tracks_of(&off).items[2].meta.as_deref(), Some("shown"));
+    }
 
     #[test]
     fn the_queue_as_a_list() {
