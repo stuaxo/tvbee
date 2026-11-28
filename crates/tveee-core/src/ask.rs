@@ -126,6 +126,16 @@ impl Cmd {
         self.pipe(Cmd::new("grep").arg("-E").arg(pattern))
     }
 
+    /// Its words, when it's one program whose arguments need no quoting:
+    /// given to adb as they are (what tveee always did, so a recording made
+    /// before still matches); else None (sent as one [`Cmd::render`]ed line).
+    pub fn words(&self) -> Option<Vec<String>> {
+        match self.stages.as_slice() {
+            [Stage::Argv(v)] if v.iter().all(|a| quote(a) == *a) => Some(v.clone()),
+            _ => None,
+        }
+    }
+
     /// The command line, each argument quoted if it needs to be.
     pub fn render(&self) -> String {
         self.stages
@@ -156,7 +166,13 @@ impl Tv {
     /// an error; an HTTP error status is a reply).
     pub fn send(&self, r: &Request) -> Result<Reply> {
         match r {
-            Request::Shell(c) => Ok(Reply { status: 0, body: self.shell(&[&c.render()])? }),
+            Request::Shell(c) => {
+                let body = match c.words() {
+                    Some(w) => self.shell(&w.iter().map(String::as_str).collect::<Vec<_>>())?,
+                    None => self.shell(&[&c.render()])?,
+                };
+                Ok(Reply { status: 0, body })
+            }
             Request::Http(h) => {
                 let pair = |u: &String, p: &String| (u.clone(), p.clone());
                 let (basic, digest) = match &h.auth {
@@ -240,6 +256,10 @@ mod tests {
         // raw text as written
         assert_eq!(Cmd::raw("for f in a b; do echo $f; done").render(), "for f in a b; do echo $f; done");
         assert_eq!(quote("$HOME"), "'$HOME'");
+        // one plain program: its words as they are; else one line
+        assert_eq!(Cmd::new("dumpsys").arg("audio").words(), Some(vec!["dumpsys".to_string(), "audio".to_string()]));
+        assert_eq!(Cmd::new("dumpsys").arg("power").grep("x").words(), None);
+        assert_eq!(Cmd::new("ls").arg("a b").words(), None);
     }
 
     #[test]

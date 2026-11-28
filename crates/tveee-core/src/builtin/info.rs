@@ -157,7 +157,8 @@ pub fn parse_system(out: &str) -> System {
 }
 
 pub fn read_system(tv: &crate::tv::Tv) -> Result<System> {
-    Ok(parse_system(&tv.shell(&[SYSTEM_CMD])?))
+    // not a whole answer: no figures, as before (the panel says unknown)
+    Ok(tv.read_whole::<System>()?.unwrap_or_default())
 }
 
 /// kB as "78 MB" or "3.6 GB".
@@ -282,7 +283,7 @@ fn push_activity(out: &mut String, a: &Activity) {
 fn status_text(tv: &Tv) -> Result<String> {
     let ((power, window), ((audio, system), media)) = join2(
         || join2(|| tv.read_whole::<crate::readings::Power>(), || tv.read::<crate::readings::Window>()),
-        || join2(|| join2(|| tv.shell(&["dumpsys", "audio"]), || read_system(tv)), || tv.shell(&["dumpsys", "media_session"])),
+        || join2(|| join2(|| tv.audio_text(), || read_system(tv)), || tv.media_text()),
     );
     let (power, window, audio, system) = (power?, window?, audio?, system?);
     // media sessions only feed the optional what/title lines, so don't fail on them
@@ -330,7 +331,7 @@ const NOTHING: &str = "nothing playing that tveee recognises\n";
 fn nowplaying_text(tv: &Tv) -> Result<String> {
     let ((power, window), (media, audio)) = join2(
         || join2(|| tv.read_whole::<crate::readings::Power>(), || tv.read::<crate::readings::Window>()),
-        || join2(|| tv.shell(&["dumpsys", "media_session"]), || tv.shell(&["dumpsys", "audio"])),
+        || join2(|| tv.media_text(), || tv.audio_text()),
     );
     let (power, window, media) = (power?, window?, media?);
     // only for apps without a media session: don't fail on it
@@ -472,7 +473,7 @@ fn current(tv: &Tv) -> Result<(String, Option<&'static super::apps::App>, Option
     let app = super::apps::by_package(&pkg);
     // only apps whose player can say (YouTube) have a link to what's on
     let url = if crate::provider::for_package(&pkg).is_some_and(|p| p.player().is_some()) {
-        let sessions = super::media::parse_media_sessions(&tv.shell(&["dumpsys", "media_session"]).unwrap_or_default());
+        let sessions = super::media::parse_media_sessions(&tv.media_text().unwrap_or_default());
         nowplaying::activity(tv, &pkg, &sessions).and_then(|a| a.url)
     } else {
         None

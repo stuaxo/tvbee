@@ -452,10 +452,10 @@ impl Refresher {
             let l = sc.spawn(move || open.iter().map(|p| (p.id, (p.read)(tv))).collect::<Vec<_>>());
             let p = sc.spawn(|| tv.read_whole::<Power>());
             let w = sc.spawn(|| tv.read_whole::<Window>());
-            let m = sc.spawn(|| tv.shell(&["dumpsys", "media_session"]));
+            let m = sc.spawn(|| tv.media_text());
             // the system figures: only while shown (and less often with low bandwidth)
             let y = sc.spawn(|| if want_system { info::read_system(tv).map(Some) } else { Ok(None) });
-            let a = tv.shell(&["dumpsys", "audio"]);
+            let a = tv.audio_text();
             let j = |h: std::thread::ScopedJoinHandle<'_, Result<String>>| h.join().unwrap_or_else(|_| Ok(String::new()));
             let y = y.join().ok().and_then(|r| r.ok()).flatten();
             let p = p.join().unwrap_or(Ok(None));
