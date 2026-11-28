@@ -2,9 +2,6 @@
 
 use super::*;
 
-pub(super) const DPAD: [(KeyCode, u32, &str); 4] =
-    [(KeyCode::Up, 19, "up"), (KeyCode::Down, 20, "down"), (KeyCode::Left, 21, "left"), (KeyCode::Right, 22, "right")];
-
 /// What the arrow keys do: seek/volume, or move around the TV's menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -85,63 +82,24 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Tab, _) => Input::ToggleMode,
         // remote mode: the keyboard is the TV's (Tab leaves, Ctrl-C quits)
         (_, Mode::Remote) => remote_input(code, mods),
-        (KeyCode::Char('q') | KeyCode::Esc, _) => Input::Quit,
-        (KeyCode::Char('?'), _) => Input::ToggleHelp,
-        (KeyCode::Char('.'), _) => Input::OpenMenu,
-        (KeyCode::Char(':'), _) => Input::OpenPalette,
-        (KeyCode::Char('F'), _) => act(Run { id: "apps.free", args: Vec::new() }),
-        (KeyCode::Char('S'), _) => act(Run { id: "power.sleep", args: Vec::new() }),
-        (KeyCode::Char('w'), _) => act(Run { id: "power.wake", args: Vec::new() }),
-        (KeyCode::Char('R'), _) => Input::RestartFront,
-        (KeyCode::Char('u'), _) => Input::ToggleUrl,
-        (KeyCode::Char('y'), _) => Input::CopyUrl,
-        (KeyCode::Char('i'), _) => Input::ToggleInfo,
-        (KeyCode::Char('I'), _) => Input::PauseInfo,
-        (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
-        (KeyCode::Char('P'), _) => Input::Pair,
-        (KeyCode::Char('L'), _) => Input::AmbilightDialog,
-        (KeyCode::Char('v'), _) => Input::TogglePreview,
-        (KeyCode::Char('a'), _) => Input::OpenApps,
-        (KeyCode::Char('g'), _) => Input::OpenGuide,
-        (KeyCode::Char('z'), _) => Input::ToggleVisualiser,
-        (KeyCode::Char('t'), _) => Input::OpenList,
-        (KeyCode::Char(','), _) => Input::OpenOptions,
-        (KeyCode::Char('/'), _) => Input::OpenSearch,
-        (KeyCode::Char(' ' | 'p'), _) => act(PlayPause),
-        (KeyCode::Backspace, _) => act(Key(KEY_BACK)),
-        (KeyCode::Char('h'), _) => act(Key(KEY_HOME)),
-        (KeyCode::Char('['), _) => act(Seek(-60.0)),
-        (KeyCode::Char(']'), _) => act(Seek(60.0)),
+        // the digits jump through what's playing
         (KeyCode::Char(d @ '0'..='9'), _) => act(Jump(f64::from(d.to_digit(10).unwrap_or(0)) / 10.0)),
-        (KeyCode::Char('+' | '='), _) => act(Volume(1)),
-        (KeyCode::Char('-'), _) => act(Volume(-1)),
-        (KeyCode::Char('m'), _) => act(Mute),
-        (KeyCode::Char('r'), _) => act(Refresh),
-        // player mode: arrows seek and change volume
-        (KeyCode::Left, _) => act(Seek(-10.0)),
-        (KeyCode::Right, _) => act(Seek(10.0)),
-        (KeyCode::Up, _) => act(Volume(1)),
-        (KeyCode::Down, _) => act(Volume(-1)),
-        _ => Input::Nothing,
+        // the rest: as the key table has them
+        _ => super::keys::PLAYER.iter().find(|k| k.codes.contains(&code)).map_or(Input::Nothing, |k| k.input.clone()),
     }
 }
 
 /// A key in remote mode: arrows are the d-pad, Enter is OK, Esc is back,
 /// and what you type is typed into the TV.
 pub(super) fn remote_input(code: KeyCode, mods: KeyModifiers) -> Input {
-    let key = |k| Input::Do(Action::Key(k));
+    if let Some(k) = super::keys::REMOTE.iter().find(|k| k.code == code) {
+        return Input::Do(Action::Key(k.key));
+    }
     match code {
-        KeyCode::Enter => key(KEY_OK),
-        KeyCode::Esc => key(KEY_BACK),
-        KeyCode::Backspace => key(KEY_DEL),
-        KeyCode::Delete => key(KEY_FORWARD_DEL),
-        KeyCode::Home => key(KEY_HOME),
-        KeyCode::PageUp => key(KEY_PAGE_UP),
-        KeyCode::PageDown => key(KEY_PAGE_DOWN),
         // Android's `input text` takes plain ASCII
         KeyCode::Char(c) if !mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) && c.is_ascii() && !c.is_ascii_control() => {
             Input::Do(Action::Text(c.to_string()))
         }
-        c => DPAD.iter().find(|(k, _, _)| *k == c).map_or(Input::Nothing, |(_, code, _)| key(*code)),
+        _ => Input::Nothing,
     }
 }

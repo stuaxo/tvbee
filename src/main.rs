@@ -114,6 +114,30 @@ mod tests {
         assert!(readme[from..to] == want, "README's command list is out of date; replace the block between the commands markers with:\n\n{want}");
     }
 
+    /// The '.' menu's letters work inside the menu; on the main screen the
+    /// same letter can do something else (S sleeps there, but is the
+    /// screenshot in the menu). These are the ones that do: a new one must
+    /// be added here on purpose, not by accident.
+    #[cfg(feature = "ui")]
+    #[test]
+    fn menu_letters_that_differ_on_the_main_screen() {
+        const ACCEPTED: &str = "1234FLRSaltuv";
+        let main = tveee_tui::keys::player_chars();
+        let mut differ: Vec<String> = Vec::new();
+        for a in plugins::all().iter().flat_map(|p| (p.actions)()) {
+            let Some(k) = a.key else { continue };
+            // the same letter running the same action is no clash
+            if let Some((_, id, what)) = main.iter().find(|(c, _, _)| *c == k)
+                && *id != Some(a.id)
+            {
+                differ.push(format!("{k}: menu '{}', main screen '{what}'", a.title));
+            }
+        }
+        differ.sort();
+        let letters: String = differ.iter().map(|d| d.chars().next().unwrap_or(' ')).collect();
+        assert_eq!(letters, ACCEPTED, "menu letters that mean something else on the main screen:\n{}", differ.join("\n"));
+    }
+
     #[test]
     fn menu_keys_are_unique() {
         let mut seen = HashSet::new();
