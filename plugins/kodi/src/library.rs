@@ -10,10 +10,15 @@ use super::browse::{bare, path_crumbs, section_name, unescape};
 use super::{call, quote, Result, Tv};
 use serde_json::Value;
 use tveee_core::more::Go;
-use tveee_core::provider::{ContextList, ListItem, ListPlace};
+use tveee_core::provider::{ContextList, ListCrumb, ListItem, ListPlace};
 
 /// The start of a link that plays a file, from its folder (see [`play`]).
 pub const PLAY: &str = "kodi-play:";
+
+/// Above the libraries: Kodi's own top, its categories (music, videos).
+pub const ROOT: &str = "kodi|";
+/// Its key (as a list, and the libraries' way up).
+const ROOT_KEY: &str = "kodi";
 
 /// Which of Kodi's libraries.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,7 +92,27 @@ pub fn link(m: Media, name: &str, path: &str) -> String {
 
 /// Whether `at` is a place to browse (a [`link`]).
 pub fn is_link(at: &str) -> bool {
-    at.split_once('|').is_some_and(|(m, _)| Media::parse(m).is_some())
+    at == ROOT || at.split_once('|').is_some_and(|(m, _)| Media::parse(m).is_some())
+}
+
+/// Kodi's top: its categories, each its library's top.
+pub fn root() -> ContextList {
+    let category = |m: Media, what: &str| ListItem { section: None, id: m.db().to_string(), label: m.top().to_string(), meta: Some(what.to_string()), folder: true, go: Go::Link(link(m, m.top(), "")) };
+    ContextList {
+        title: "Kodi".into(),
+        kind: "folder",
+        key: ROOT_KEY.into(),
+        items: vec![category(Media::Music, "library and shares"), category(Media::Video, "library and shares")],
+        playing: None,
+        at: None,
+        up: None,
+        reopen: Some(Go::Link(ROOT.into())),
+        crumbs: Vec::new(),
+        crumbs_whole: true,
+        location: None,
+        open_location: Some("music||{}".into()),
+        browsed: true,
+    }
 }
 
 /// A [`link`]'s media, name and path; a bare path (typed) is music's,
@@ -182,6 +207,9 @@ pub fn items_of(m: Media, dir: &str, v: &Value, key: &str, section: Option<&str>
 /// The list at `at` (a [`link`], or a path typed), read from Kodi without
 /// changing its screen.
 pub fn list_at(tv: &Tv, at: &str) -> Result<ContextList> {
+    if at == ROOT {
+        return Ok(root());
+    }
     let (m, name, path) = parse(at);
     let path = if bare(&path) == m.db() { String::new() } else { path };
     let dir = if path.is_empty() { m.db().to_string() } else { path.clone() };
@@ -207,12 +235,18 @@ pub fn list_at(tv: &Tv, at: &str) -> Result<ContextList> {
 pub fn shape(m: Media, name: &str, path: &str, items: Vec<ListItem>) -> ContextList {
     let title = if name.is_empty() { name_of(m, path) } else { name.to_string() };
     let key_for = |p: &str| format!("{}|{}", m.window(), bare(p));
-    let up = parent(path).map(|p| (key_for(&p), Go::Link(link(m, "", &p))));
+    // a library's top: Kodi's top above it (its categories)
+    let up = match parent(path) {
+        Some(p) => Some((key_for(&p), Go::Link(link(m, "", &p)))),
+        None => Some((ROOT_KEY.to_string(), Go::Link(ROOT.into()))),
+    };
     let (mut crumbs, crumbs_whole) = path_crumbs(m.window(), path);
     for c in &mut crumbs {
         let p = c.key.split_once('|').map_or("", |(_, p)| p).to_string();
         c.go = Some(Go::Link(link(m, &c.title, &p)));
     }
+    // every way starts at Kodi's top: a click from another category
+    crumbs.insert(0, ListCrumb { title: "Kodi".into(), key: ROOT_KEY.into(), go: Some(Go::Link(ROOT.into())) });
     ContextList {
         title: title.clone(),
         kind: "folder",
@@ -315,14 +349,22 @@ mod tests {
         assert!(l.browsed);
         assert_eq!(l.key, "10502|musicdb://albums/251/");
         assert_eq!(l.up, Some(("10502|musicdb://albums/".into(), Go::Link("music||musicdb://albums/".into()))));
-        assert_eq!(l.crumbs.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["Music", "Albums"]);
-        assert_eq!(l.crumbs[1].go, Some(Go::Link("music|Albums|musicdb://albums/".into())));
+        assert_eq!(l.crumbs.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["Kodi", "Music", "Albums"]);
+        assert_eq!(l.crumbs[2].go, Some(Go::Link("music|Albums|musicdb://albums/".into())));
+        assert_eq!(l.crumbs[0].go, Some(Go::Link(ROOT.into())));
         assert_eq!(l.open_location.as_deref(), Some("music||{}"));
         // the top: the library, then the sources
         let s: Value = serde_json::from_str(r#"{"sources":[{"file":"smb://192.168.1.80/media/","label":"media"}]}"#).unwrap();
         let src = items_of(Media::Music, "musicdb://", &s, "sources", Some("Files"));
         assert!(src[0].folder && src[0].section.as_deref() == Some("Files"));
         let top = shape(Media::Music, "", "", src);
-        assert_eq!((top.title.as_str(), top.up.is_none(), top.location.as_deref()), ("Music", true, Some("musicdb://")));
+        assert_eq!((top.title.as_str(), top.location.as_deref()), ("Music", Some("musicdb://")));
+        // up from a library's top: Kodi's, its categories
+        assert_eq!(top.up, Some(("kodi".into(), Go::Link(ROOT.into()))));
+        assert_eq!(top.crumbs.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["Kodi"]);
+        let r = root();
+        assert_eq!(r.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Music", "Videos"]);
+        assert_eq!(r.items[1].go, Go::Link("video|Videos|".into()));
+        assert!(r.up.is_none() && r.browsed && is_link(ROOT));
     }
 }

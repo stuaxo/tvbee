@@ -547,6 +547,10 @@ impl tveee_core::provider::Player for Kodi {
         }
     }
     fn show_at(&self, tv: &Tv, at: &str) -> Outcome<()> {
+        // Kodi's top: its home screen
+        if at == library::ROOT {
+            return tveee_core::provider::Provider::open_here(self, tv, "kodi-window:home");
+        }
         let (m, _, path) = library::parse(at);
         let window = if path.is_empty() { format!("kodi-window:{}", m.window_name()) } else { format!("kodi-window:{}|{path}", m.window_name()) };
         tveee_core::provider::Provider::open_here(self, tv, &window)
