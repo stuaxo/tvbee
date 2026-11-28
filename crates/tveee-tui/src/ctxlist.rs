@@ -82,6 +82,8 @@ pub struct ListPane {
     pub seen: Option<ListPlace>,
     /// The refresh has been asked to read where the list is.
     pub watching: bool,
+    /// The lists last asked to be read ahead (asked again only on a change).
+    pub ahead: Vec<String>,
 }
 
 impl App {
@@ -166,6 +168,7 @@ impl App {
             c if listnav::is_move(c) => {
                 if let Some(to) = listnav::step(pos, shown.len(), c) {
                     self.overlay = Overlay::List { sel: shown[to] };
+                    self.read_ahead(shown[to]);
                 }
                 return;
             }
@@ -182,6 +185,27 @@ impl App {
         let shown = self.list_shown();
         if !shown.contains(&sel) {
             self.overlay = Overlay::List { sel: shown.first().copied().unwrap_or(0) };
+        }
+    }
+
+    /// Ask for the lists likely to be opened next to be read ahead, in a
+    /// lull: a browsed list's folder above, and the folder highlighted.
+    pub(super) fn read_ahead(&mut self, sel: usize) {
+        let Some(l) = self.list_ok().filter(|l| l.browsed) else { return };
+        let link = |g: &tveee_core::more::Go| match g {
+            tveee_core::more::Go::Link(s) => Some(s.clone()),
+            _ => None,
+        };
+        let mut ats: Vec<String> = Vec::new();
+        if let Some(at) = l.items.get(sel).filter(|i| i.folder).and_then(|i| link(&i.go)) {
+            ats.push(at);
+        }
+        if let Some(at) = l.up.as_ref().and_then(|(_, g)| link(g)) {
+            ats.push(at);
+        }
+        if !ats.is_empty() && ats != self.list.ahead {
+            self.list.ahead = ats.clone();
+            let _ = self.engine.send(Action::ListAhead(ats));
         }
     }
 
@@ -332,6 +356,7 @@ impl App {
                 // back up from a folder: on it
                 let at = from.and_then(|f| l.items.iter().position(|i| i.id.split('?').next().unwrap_or("").trim_end_matches('/') == f)).unwrap_or(at);
                 self.overlay = Overlay::List { sel: at };
+                self.read_ahead(at);
             }
             self.list.seen = place;
             return;
