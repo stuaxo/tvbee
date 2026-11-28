@@ -164,6 +164,88 @@ impl Reading for Window {
     }
 }
 
+/// The audio service's dump (`dumpsys audio`): the music stream's volume
+/// and mute, and which apps are playing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Audio {
+    /// The dump, for what reads it whole.
+    pub text: String,
+}
+
+impl Audio {
+    /// (current, max) music volume for the output in use.
+    pub fn volume(&self) -> Option<(u32, u32)> {
+        crate::builtin::media::parse_volume(&self.text)
+    }
+    /// Whether the music stream is muted (None: it doesn't say).
+    pub fn muted(&self) -> Option<bool> {
+        crate::builtin::media::parse_muted(&self.text)
+    }
+    /// The apps playing audio: (uid, state).
+    pub fn players(&self) -> Vec<(u32, String)> {
+        crate::builtin::media::parse_audio_players(&self.text)
+    }
+}
+
+impl Reading for Audio {
+    fn cmd() -> Cmd {
+        Cmd::new("dumpsys").arg("audio")
+    }
+    const NAME: &'static str = "audio";
+    fn parse(out: &str) -> Option<Audio> {
+        // the service always has something to say: nothing is the busy TV
+        (!out.trim().is_empty()).then(|| Audio { text: out.to_string() })
+    }
+}
+
+/// The media sessions (`dumpsys media_session`): what apps say they play.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaSessions {
+    /// The dump, for what reads it whole.
+    pub text: String,
+}
+
+impl MediaSessions {
+    pub fn sessions(&self) -> Vec<crate::builtin::media::MediaInfo> {
+        crate::builtin::media::parse_media_sessions(&self.text)
+    }
+}
+
+impl Reading for MediaSessions {
+    fn cmd() -> Cmd {
+        Cmd::new("dumpsys").arg("media_session")
+    }
+    const NAME: &'static str = "media sessions";
+    fn parse(out: &str) -> Option<MediaSessions> {
+        (!out.trim().is_empty()).then(|| MediaSessions { text: out.to_string() })
+    }
+}
+
+/// The system's figures (memory, load, uptime, storage, cores), in one
+/// shell call.
+impl Reading for crate::builtin::info::System {
+    fn cmd() -> Cmd {
+        Cmd::raw(crate::builtin::info::SYSTEM_CMD)
+    }
+    const NAME: &'static str = "system";
+    fn parse(out: &str) -> Option<Self> {
+        // whole: the memory part, at least
+        let s = crate::builtin::info::parse_system(out);
+        s.mem.is_some().then_some(s)
+    }
+}
+
+impl Tv {
+    /// `dumpsys audio`'s text (empty if the TV didn't give a whole one).
+    pub fn audio_text(&self) -> Result<String> {
+        Ok(self.read_whole::<Audio>()?.map(|a| a.text).unwrap_or_default())
+    }
+    /// `dumpsys media_session`'s text (empty if the TV didn't give a whole one).
+    pub fn media_text(&self) -> Result<String> {
+        Ok(self.read_whole::<MediaSessions>()?.map(|m| m.text).unwrap_or_default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +271,17 @@ mod tests {
         // nothing in focus yet is an answer; an empty one isn't
         assert_eq!(Window::parse("  mCurrentFocus=null\n").unwrap().package(), None);
         assert_eq!(Window::parse(""), None);
+    }
+
+    #[test]
+    fn audio_sessions_system() {
+        // an empty answer (the busy TV) isn't a whole one
+        assert_eq!(Audio::parse("  \n"), None);
+        assert_eq!(MediaSessions::parse(""), None);
+        let a = Audio::parse("- STREAM_MUSIC:\n   Muted: true\n   Max: 60\n   Current: 2 (speaker): 30\n   Devices: speaker\n").unwrap();
+        assert_eq!((a.muted(), a.volume()), (Some(true), Some((30, 60))));
+        assert_eq!(<crate::builtin::info::System as Reading>::parse(""), None);
+        assert_eq!(<crate::builtin::info::System as Reading>::cmd().render(), crate::builtin::info::SYSTEM_CMD);
     }
 
     #[test]

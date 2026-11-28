@@ -41,7 +41,7 @@ pub fn parse_volume(dump: &str) -> Option<(u32, u32)> {
 }
 
 pub fn is_muted(tv: &Tv) -> Result<Option<bool>> {
-    Ok(parse_muted(&tv.shell(&["dumpsys", "audio"])?))
+    Ok(tv.read_whole::<crate::readings::Audio>()?.and_then(|a| a.muted()))
 }
 
 /// KEYCODE_VOLUME_MUTE only toggles, so check the state first, and after:
@@ -344,7 +344,7 @@ fn skip_by(c: &Cx, secs: f64, step: f64) -> Result<String> {
 }
 
 fn session(c: &Cx) -> Result<Session> {
-    match parse_session(&c.tv.shell(&["dumpsys", "media_session"])?) {
+    match parse_session(&c.tv.media_text()?) {
         Some(s) => Ok(s),
         None => failed("no active media session on the TV (the app may not publish one)"),
     }
