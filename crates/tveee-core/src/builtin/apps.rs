@@ -593,7 +593,7 @@ pub fn running(ps: &str) -> std::collections::BTreeSet<String> {
 }
 
 /// The command whose output [`persistent`] reads.
-pub const PERSISTENT_CMD: &str = "dumpsys activity processes | grep '[*]PERS[*]'";
+pub const PERSISTENT_CMD: &str = "dumpsys activity processes | grep -F '*PERS*'";
 
 /// Packages Android keeps running whatever happens ("persistent": live TV,
 /// system UI, ...): a force-stop is undone straight away, so they can't be

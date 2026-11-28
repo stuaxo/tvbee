@@ -445,7 +445,8 @@ impl Session {
     fn map(&mut self) -> Option<&Map> {
         if self.map.is_none() {
             // this boot's map is fine as it is; otherwise work it out again
-            let boot = self.tv.shell(&["cat", BOOT_ID]).ok().map(|b| b.trim().to_string());
+            // the shell's own read: no process started for it
+            let boot = self.tv.shell(&[&format!("read b < {BOOT_ID}; echo $b")]).ok().map(|b| b.trim().to_string());
             let m = match cached(&self.tv) {
                 Some(m) if Some(&m.boot) == boot.as_ref() => Some(m),
                 _ => discover(&self.tv).ok().inspect(|m| save(&self.tv, m)),
