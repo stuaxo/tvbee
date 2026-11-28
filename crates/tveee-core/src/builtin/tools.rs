@@ -93,6 +93,10 @@ fn commands_list(c: &Ctx, _: &[String]) -> Result<()> {
 
 /// `tveee do [<id> [args...]]`: run any action by id, or list them.
 fn do_action(c: &Ctx, args: &[String]) -> Result<()> {
+    if args.first().is_some_and(|a| a == "--all") {
+        print!("{}", actions_all(c));
+        return Ok(());
+    }
     let Some(id) = args.first() else {
         let mut all: Vec<_> = c.actions.iter().collect();
         all.sort_by_key(|a| a.id);
@@ -121,6 +125,43 @@ fn do_action(c: &Ctx, args: &[String]) -> Result<()> {
     }
 }
 
+/// `tveee do --all`: every plugin's actions, enabled or not: id, title,
+/// menu key, what it takes, and where it's reached (the palette, the
+/// command line).
+fn actions_all(c: &Ctx) -> String {
+    let mut out = String::from(
+        "Every action of every plugin ('tveee do <id> [args]' runs one).\n\
+         palette: in the ui's command palette; cli: also a command of its own; key: its key in the ui's '.' menu.\n",
+    );
+    for (p, s) in (c.all)().iter().zip(&c.plugins) {
+        let acts = (p.actions)();
+        if acts.is_empty() {
+            continue;
+        }
+        let off = if s.enabled { "" } else { " (not enabled for this TV)" };
+        out.push_str(&format!("\n[{}]{off}\n", p.name));
+        for a in acts {
+            let mut where_ = Vec::new();
+            if matches!(a.run, crate::actions::Run::Do(_)) {
+                where_.push("palette".to_string());
+            }
+            if let Some(cli) = a.cli {
+                where_.push(format!("cli: {}", cli.name));
+            }
+            if let Some(k) = a.key {
+                where_.push(format!("key: {k}"));
+            }
+            out.push_str(&format!("  {:<30} {}\n      [{}]", a.id, a.title, where_.join(", ")));
+            let input = a.input_text();
+            if !input.is_empty() {
+                out.push_str(&format!(" {input}"));
+            }
+            out.push('\n');
+        }
+    }
+    out
+}
+
 fn completion(_: &Ctx, _: &[String]) -> Result<()> {
     print!("{COMPLETION}");
     Ok(())
@@ -128,6 +169,14 @@ fn completion(_: &Ctx, _: &[String]) -> Result<()> {
 
 fn help(c: &Ctx, args: &[String]) -> Result<()> {
     match args.first() {
+        Some(a) if a == "--all" => {
+            let groups: Vec<registry::Group> = (c.all)()
+                .iter()
+                .zip(&c.plugins)
+                .map(|(p, s)| registry::Group { plugin: p.name, desc: p.desc, enabled: s.enabled, commands: p.commands() })
+                .collect();
+            print!("{}", registry::usage_all(&groups));
+        }
         None => {
             print!("{}", registry::usage_text(&c.commands));
             let off: Vec<_> = c.plugins.iter().filter(|p| !p.enabled).collect();
@@ -173,7 +222,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             "Vendor plugins are enabled by detection, cached per TV in ~/.cache/tveee.\n  --refresh  re-probe the TV now (contacts it) and update the cache\nTVEEE_PLUGINS=philips,-other forces plugins on or off.",
         ),
         ActionDescriptor::terminal("tools.do", CAT, "run an action by id", do_action)
-            .cli("do", "[<id> [args...]]", "run any action by its id (list them with no id)")
+            .cli("do", "[<id> [args...] | --all]", "run any action by its id (list them with no id; --all: every plugin's, with what they take)")
             .long(
                 "Everything tveee can do has an id, including what only the ui menu offers\n\
                  (e.g. 'tveee do kodi.subtitles.off'). With no id, lists them, with the\n\
@@ -181,7 +230,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             ),
         ActionDescriptor::terminal("tools.commands", CAT, "list all command names and aliases", commands_list).cli("commands", "", "list all command names and aliases"),
         ActionDescriptor::terminal("tools.completion", CAT, "print a bash/zsh completion script", completion).cli("completion", "", "print a bash/zsh completion script"),
-        ActionDescriptor::terminal("tools.help", CAT, "show this help, or help for one command", help).cli("help", "[command]", "show this help, or help for one command"),
+        ActionDescriptor::terminal("tools.help", CAT, "show this help, or help for one command", help).cli("help", "[command | --all]", "show this help, or help for one command (--all: every command, with its arguments)"),
     ]
 }
 

@@ -328,6 +328,22 @@ impl ActionDescriptor {
         self
     }
 
+    /// What it takes, in words, for listings: its arguments, the text it
+    /// asks for (with the example), or its choices; and whether it asks
+    /// first. Empty: nothing.
+    pub fn input_text(&self) -> String {
+        let mut t = match self.params {
+            Params::None if self.args.is_empty() => String::new(),
+            Params::None => format!("args: {}", self.args),
+            Params::Text { prompt, hint } => format!("asks \"{prompt}\" (e.g. {hint})"),
+            Params::Choice(c) => format!("choose: {}", c.iter().map(|(t, _)| *t).collect::<Vec<_>>().join(" | ")),
+        };
+        if self.confirm.is_some() {
+            t.push_str(if t.is_empty() { "asks to confirm" } else { "; asks to confirm" });
+        }
+        t
+    }
+
     /// Run it with these arguments. A [`Run::Terminal`] action can't run
     /// this way (it needs the command line's context).
     pub fn run(&self, tv: &Tv, args: &[String]) -> Result<Output> {
@@ -453,5 +469,18 @@ mod tests {
         let tv = Tv { ip: "127.0.0.1".into() };
         let a = ActionDescriptor::new("x.say", "x", "say it", said);
         assert_eq!(a.run(&tv, &["hi".into(), "there".into()]).unwrap().text, "hi there");
+    }
+
+    #[test]
+    fn says_what_it_takes() {
+        fn ok(_: &Cx, _: &[String]) -> Result<Output> {
+            Ok(Output::default())
+        }
+        let a = ActionDescriptor::new("x.y", "x", "y", ok);
+        assert_eq!(a.input_text(), "");
+        assert_eq!(a.args("<n>").input_text(), "args: <n>");
+        assert_eq!(a.text("Link:", "https://...").confirm("Sure?").input_text(), "asks \"Link:\" (e.g. https://...); asks to confirm");
+        assert_eq!(a.choices(&[("on", "on"), ("off", "off")]).input_text(), "choose: on | off");
+        assert_eq!(a.confirm("Sure?").input_text(), "asks to confirm");
     }
 }

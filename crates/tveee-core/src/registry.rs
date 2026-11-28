@@ -110,6 +110,39 @@ pub fn usage_text(cmds: &[Command]) -> String {
     out
 }
 
+/// How a command is called, flags and all: `tveee open [--dry-run] [app] <url>`.
+pub fn call_line(c: &Command) -> String {
+    let flag = if c.fronts.is_some() { format!(" [{}]", crate::actions::NO_FRONT) } else { String::new() };
+    format!("tveee {} {}{flag}", c.name, c.usage).split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A plugin's part of `tveee help --all`: its name, what it's for, whether
+/// it's enabled for this TV, and its commands.
+pub struct Group<'a> {
+    pub plugin: &'a str,
+    pub desc: &'a str,
+    pub enabled: bool,
+    pub commands: Vec<Command>,
+}
+
+/// `tveee help --all`: every plugin's commands, enabled or not, each with
+/// how it's called (its arguments), what it does and its aliases.
+pub fn usage_all(groups: &[Group]) -> String {
+    let mut out = String::from(
+        "Every command of every plugin, with its arguments ('tveee help <command>' for more).
+",
+    );
+    for g in groups.iter().filter(|g| !g.commands.is_empty()) {
+        let off = if g.enabled { "" } else { " (not enabled for this TV)" };
+        out.push_str(&format!("\n[{}] {}{off}\n", g.plugin, g.desc));
+        for c in &g.commands {
+            let alias = if c.aliases.is_empty() { String::new() } else { format!(" (alias: {})", c.aliases.join(", ")) };
+            out.push_str(&format!("  {}\n      {}{alias}\n", call_line(c), c.desc));
+        }
+    }
+    out
+}
+
 pub fn help_for(c: &Command) -> String {
     let flag = if c.fronts.is_some() { format!(" [{}]", crate::actions::NO_FRONT) } else { String::new() };
     let mut out = format!("usage: tveee {} {}{flag}\n\n{}\n", c.name, c.usage, c.desc).replace("  [", " [").replace(" \n\n", "\n\n");
@@ -203,5 +236,28 @@ mod tests {
     fn help_trims_empty_usage() {
         let s = sample();
         assert!(help_for(find(&s, "sleep").unwrap()).starts_with("usage: tveee sleep\n\nstandby"));
+    }
+
+    #[test]
+    fn lists_every_command() {
+        let c = |name, usage, aliases: &'static [&'static str]| Command {
+            category: "x",
+            name,
+            usage,
+            desc: "does it",
+            long: "",
+            aliases,
+            fronts: None,
+            run: crate::actions::Run::Terminal(|_, _| Ok(())),
+        };
+        let groups = [
+            Group { plugin: "a", desc: "the a plugin", enabled: true, commands: vec![c("open", "[app]  <url>", &["o"])] },
+            Group { plugin: "b", desc: "the b plugin", enabled: false, commands: vec![c("bee", "", &[])] },
+            Group { plugin: "c", desc: "nothing", enabled: true, commands: vec![] },
+        ];
+        let out = usage_all(&groups);
+        assert!(out.contains("\n[a] the a plugin\n  tveee open [app] <url>\n      does it (alias: o)\n"), "{out}");
+        assert!(out.contains("[b] the b plugin (not enabled for this TV)\n  tveee bee\n"), "{out}");
+        assert!(!out.contains("[c]"));
     }
 }
