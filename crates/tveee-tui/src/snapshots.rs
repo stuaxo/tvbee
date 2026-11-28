@@ -851,3 +851,39 @@ fn ambilight_panel_edits_in_place() {
     a.click(spot.x, spot.y, &h);
     assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["all", "#ffffff"])));
 }
+
+#[test]
+fn ambilight_picker_switches_lights() {
+    let (mut a, rx, h) = app_seeing(with_ambilight());
+    a.ambi_open = true;
+    // picking a colour for every light
+    a.overlay = Overlay::Ambilight { row: 4, col: 0 };
+    a.ambi_key(4, 0, KeyCode::Enter, &h);
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 0 });
+    for c in "warm".chars() {
+        a.ambi_ask_key(4, 0, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("for   all ") && s.contains("tab: the next"), "{s}");
+    // click another light (in the panel): the picker is for that one now
+    let spot = |a: &App, hit: Hit| a.hits.iter().rev().find(|(_, x)| *x == hit).map(|(r, _)| *r).expect("on screen");
+    let r = spot(&a, Hit::AmbiOption(4, 3));
+    a.click(r.x, r.y, &h);
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 3 });
+    // tab: the next light; what's typed is kept
+    a.ambi_ask_key(4, 3, KeyCode::Tab, KeyModifiers::NONE, &h);
+    assert_eq!((a.overlay, a.prompt.as_str()), (Overlay::AmbiColour { row: 4, col: 4 }, "warm"));
+    // "all" in the picker's own row of lights
+    let _ = screen(&mut a, DESKTOP);
+    let r = spot(&a, Hit::AmbiOption(4, 0));
+    a.click(r.x, r.y, &h);
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 0 });
+    assert!(!rx.try_iter().any(|x| matches!(x, Action::Run { .. })), "switching sets nothing");
+    // a choice that isn't a light (power off): the picker goes, it's changed
+    let _ = screen(&mut a, DESKTOP);
+    let r = spot(&a, Hit::AmbiOption(0, 1));
+    a.click(r.x, r.y, &h);
+    assert_eq!(a.overlay, Overlay::Ambilight { row: 0, col: 1 });
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["power", "off"])));
+}

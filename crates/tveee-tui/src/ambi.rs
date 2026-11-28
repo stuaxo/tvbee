@@ -37,6 +37,21 @@ impl App {
         }
     }
 
+    /// Another light clicked while the colour picker is open (in the panel,
+    /// or the picker's row of lights): the picker sets that one instead, what
+    /// was picked or typed kept. Anything else: changed as in the panel.
+    pub(super) fn ambi_switch(&mut self, row: usize, col: usize, actions: &Handle) {
+        let asks = self.ambi_rows().get(row).and_then(|r| r.options.get(col)).is_some_and(|o| matches!(o.run, Run::Ask { .. }));
+        match self.overlay {
+            Overlay::AmbiColour { row: open, .. } if open == row && asks => self.overlay = Overlay::AmbiColour { row, col },
+            _ => {
+                self.prompt.clear();
+                self.overlay = Overlay::Ambilight { row, col };
+                self.ambi_pick(row, col, actions);
+            }
+        }
+    }
+
     /// Pick option `col` of row `row` in the dialog: run it, or ask for
     /// what it needs (a light: its colour).
     pub(super) fn ambi_pick(&mut self, row: usize, col: usize, actions: &Handle) {
@@ -91,6 +106,12 @@ impl App {
         match code {
             KeyCode::Esc => self.overlay = Overlay::Ambilight { row, col },
             KeyCode::Enter => self.ambi_set(row, col, actions),
+            // the next light (or back): what's picked or typed stays
+            KeyCode::Tab | KeyCode::BackTab => {
+                let n = self.ambi_rows().get(row).map_or(1, |r| r.options.len()).max(1);
+                let to = if code == KeyCode::Tab { (col + 1) % n } else { (col + n - 1) % n };
+                self.overlay = Overlay::AmbiColour { row, col: to };
+            }
             KeyCode::Left => self.pick = ((gx + pick_width(gy) - 1) % pick_width(gy), gy),
             KeyCode::Right => self.pick = ((gx + 1) % pick_width(gy), gy),
             KeyCode::Up | KeyCode::Down => {
@@ -252,7 +273,46 @@ impl App {
         };
         let dim = Style::new().fg(Color::DarkGray);
         let block = |(r, g, b): (u8, u8, u8)| Style::new().bg(Color::Rgb(r, g, b));
-        let mut text = vec![Line::from(prompt.trim_end_matches(':').to_string()), Line::default()];
+        let mut text = vec![Line::from(prompt.trim_end_matches(':').to_string())];
+        // the lights, together: the one being set marked; click one (or
+        // Tab) to set that one instead
+        let mut lights: Vec<(usize, usize, usize)> = Vec::new();
+        if let Some(r) = rows.get(row) {
+            let mut spans = vec![Span::styled("for  ", dim)];
+            let mut x = 5;
+            let mut side: Option<&str> = None;
+            for (ci, o) in r.options.iter().enumerate() {
+                let here = ci == col;
+                let (shown, mut st) = match o.colour {
+                    Some(c) => {
+                        let this = o.label.split(' ').next().unwrap_or("");
+                        if side.is_some_and(|s| s != this) {
+                            spans.push(Span::styled("│ ", dim));
+                            x += 2;
+                        }
+                        side = Some(this);
+                        let dark = u32::from(c.0) * 3 + u32::from(c.1) * 6 + u32::from(c.2) < 1280;
+                        (if here { "▐▌" } else { "  " }.to_string(), block(c).fg(if dark { Color::White } else { Color::Black }))
+                    }
+                    None => (format!(" {} ", o.label), Style::new()),
+                };
+                if here {
+                    st = st.add_modifier(Modifier::BOLD);
+                    if o.colour.is_none() {
+                        st = st.reversed();
+                    }
+                }
+                let w = shown.chars().count();
+                lights.push((x, w, ci));
+                spans.push(Span::styled(shown, st));
+                spans.push(Span::raw(" "));
+                x += w + 1;
+            }
+            spans.push(Span::styled(" tab: the next", dim));
+            text.push(Line::from(spans));
+        }
+        let lights_line = text.len() - 1;
+        text.push(Line::default());
         let grid_top = text.len();
         let mut spots = Vec::new();
         for (gy, name) in PICK_ROWS.iter().enumerate() {
@@ -310,6 +370,11 @@ impl App {
             let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
             let x = r.x + 1 + u16::try_from(x).unwrap_or(0);
             self.hits.push((ratatui::layout::Rect { x, y, width: u16::try_from(w).unwrap_or(1), height: 1 }, Hit::AmbiPick(gx, gy)));
+        }
+        for (x, w, ci) in lights {
+            let y = r.y + 1 + u16::try_from(lights_line).unwrap_or(0);
+            let x = r.x + 1 + u16::try_from(x).unwrap_or(0);
+            self.hits.push((ratatui::layout::Rect { x, y, width: u16::try_from(w).unwrap_or(1), height: 1 }, Hit::AmbiOption(row, ci)));
         }
     }
 }
