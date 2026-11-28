@@ -619,3 +619,33 @@ fn view_keys() {
     assert_eq!(view_key(KeyCode::Char('2'), none), None);
     assert_eq!(view_key(KeyCode::F(4), none), None);
 }
+
+#[test]
+fn the_main_layout_without_drawing() {
+    use super::drawing::{Wants, main_layout};
+    use ratatui::layout::Rect;
+    let ambi = |_: u16| 7u16;
+    let all = Wants { dpad: true, preview: true, ambilight: Some(&ambi), system: Some(9) };
+    // wide: the panels in a column on the right, top to bottom
+    let l = main_layout(Rect::new(1, 1, 118, 60), false, 1, &all);
+    assert!(l.wide);
+    let (d, p, a, s) = (l.dpad.unwrap(), l.preview.unwrap(), l.ambilight.unwrap(), l.system.unwrap());
+    assert!(d.y < p.y && p.y < a.y && a.y < s.y, "{l:?}");
+    assert_eq!(a.height, 7);
+    assert!(l.body.right() <= d.x, "the card left of the column");
+    assert_eq!((l.spine.y, l.status.y), (1, 60));
+    // a shorter column: what doesn't fit is left out, from the bottom
+    let short = main_layout(Rect::new(1, 1, 118, 33), false, 1, &all);
+    assert!(short.dpad.is_some() && short.preview.is_some() && short.system.is_none(), "{short:?}");
+    // narrow: no D-pad; below the card, from the bottom: preview, Ambilight, system
+    let l = main_layout(Rect::new(1, 1, 58, 40), false, 1, &all);
+    assert!(!l.wide && l.dpad.is_none());
+    let (p, a, s) = (l.preview.unwrap(), l.ambilight.unwrap(), l.system.unwrap());
+    assert!(s.y < a.y && a.y < p.y && l.body.bottom() <= s.y, "{l:?}");
+    assert!(l.body.height >= 4);
+    // nothing asked for: the card has it all
+    let none = Wants { dpad: false, preview: false, ambilight: None, system: None };
+    let l = main_layout(Rect::new(1, 1, 58, 20), true, 1, &none);
+    assert_eq!(l.body.width, 58);
+    assert!(l.preview.is_none() && l.system.is_none());
+}
