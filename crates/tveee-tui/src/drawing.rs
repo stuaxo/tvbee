@@ -432,8 +432,10 @@ pub(super) fn compact_buttons(mode: Mode) -> Vec<Button> {
     match mode {
         Mode::Player => vec![
             button("space", "play", Input::Do(PlayPause)),
-            button("←", "", Input::Do(Seek(-10.0))),
-            button("→", "", Input::Do(Seek(10.0))),
+            // both arrows, one button saying what they do (bare arrows read
+            // as orphans; two labelled ones leave no room for help): a click
+            // skips forward
+            button("←→", "seek", Input::Do(Seek(10.0))),
             // the other mode, findable at any width
             button("tab", "remote", Input::ToggleMode),
             // (the commands are on the top line already: [:] commands)
