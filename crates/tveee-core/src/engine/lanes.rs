@@ -38,7 +38,7 @@ pub fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender
         // not work for anyone: what the refresh should read. Opened, it's
         // read now (the user is looking), not at the next refresh
         if let Some(opened) = watch(&a, shared) {
-            if opened && let Some((_, to)) = lanes.iter().find(|(x, _)| *x == Lane::Act) {
+            if let Some((_, to)) = lanes.iter().find(|(x, _)| *x == Lane::Act).filter(|_| opened) {
                 let _ = to.send(Action::Wake);
             }
             continue;
@@ -728,6 +728,17 @@ impl Actor {
                 }
                 let _ = tx.send(Msg::List(read_list(&self.shared, &self.tv)));
                 said
+            }
+            Action::ListOpen { at, show } => {
+                let pkg = lock(&self.shared.pkg).clone().unwrap_or_default();
+                let player = crate::provider::for_package(&pkg).and_then(|p| p.player()).filter(|p| p.has_list());
+                let Some(p) = player else { return Err(crate::error::Error::Failed("the app in front has no list to browse".into())) };
+                // on the app's screen too, if asked (not reaching it isn't
+                // a reason not to browse)
+                let shown = if show { p.show_at(&self.tv, &at).or_fallback().err().map(|e| format!("couldn't show it on the TV: {e}")) } else { None };
+                let l = p.list_at(&self.tv, &at).or_fallback().map_err(|e| e.to_string());
+                let _ = tx.send(Msg::List(l));
+                shown.unwrap_or_default()
             }
             Action::Refresh => "refreshed".into(),
             // the refresh is woken after every action: nothing more to do

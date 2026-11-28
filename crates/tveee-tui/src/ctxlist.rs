@@ -107,6 +107,11 @@ impl App {
         if self.location.is_some() {
             return self.location_key(code, mods, actions);
         }
+        // alt+↑: up a level, as in a file manager (wherever the keys are)
+        if code == KeyCode::Up && mods.contains(KeyModifiers::ALT) {
+            self.crumb_at = None;
+            return self.list_up(actions);
+        }
         // on the breadcrumbs (Tab): keys go to them
         if let Some(at) = self.crumb_at
             && !(code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL))
@@ -120,6 +125,9 @@ impl App {
                 self.note = "no breadcrumbs here (this list isn't inside another tveee has seen)".into();
             }
             return;
+        }
+        if code == KeyCode::Char('s') && mods.contains(KeyModifiers::CONTROL) && self.list_ok().is_some_and(|l| l.browsed) {
+            return self.toggle_list_sync();
         }
         if code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL) {
             self.crumb_at = None;
@@ -170,7 +178,9 @@ impl App {
                 if let (false, Some(t)) = (typed.is_empty(), template) {
                     self.note = format!("opening {typed}...");
                     self.prompt.clear();
-                    let _ = actions.send(Action::ListGo(tveee_core::more::Go::Link(t.replace("{}", &typed))));
+                    let to = tveee_core::more::Go::Link(t.replace("{}", &typed));
+                    self.location = None;
+                    return self.list_open(to, actions);
                 }
                 self.location = None;
             }
@@ -204,12 +214,41 @@ impl App {
         }
     }
 
+    /// Open a folder of the list shown (its way up, a breadcrumb, a typed
+    /// location): a browsed list's in the pane (and on the TV too, with
+    /// sync folder on), else on the app's screen, the pane following.
+    fn list_open(&mut self, go: tveee_core::more::Go, actions: &Handle) {
+        let browsed = self.list_ok().filter(|l| l.browsed);
+        match (browsed, go) {
+            (Some(l), tveee_core::more::Go::Link(at)) => {
+                // coming back up: land on the folder left
+                self.list_from = l.location.clone();
+                let show = self.opt(tveee_core::options::LIST_SYNC);
+                let _ = actions.send(Action::ListOpen { at, show });
+            }
+            (_, go) => {
+                let _ = actions.send(Action::ListGo(go));
+            }
+        }
+    }
+
+    /// Flip sync folder: browsing a list here opens its folders on the TV
+    /// too (off: only what's played reaches it).
+    pub(super) fn toggle_list_sync(&mut self) {
+        let on = !self.opt(tveee_core::options::LIST_SYNC);
+        self.note = match self.set_opt(tveee_core::options::LIST_SYNC, on) {
+            Ok(()) if on => "sync folder: on (folders you open here open on the TV too)".into(),
+            Ok(()) => "sync folder: off (only what you play reaches the TV)".into(),
+            Err(e) => format!("couldn't save the option: {e}"),
+        };
+    }
+
     /// Go up: to the list this one's in (Kodi's "..").
     pub(super) fn list_up(&mut self, actions: &Handle) {
         match self.list_ok().and_then(|l| l.up.clone()) {
             Some((_, go)) => {
                 self.note = "up...".into();
-                let _ = actions.send(Action::ListGo(go));
+                self.list_open(go, actions);
             }
             None => self.note = "this list isn't inside another".into(),
         }
@@ -220,7 +259,7 @@ impl App {
         if let Some(go) = self.crumbs.get(i).and_then(|c| c.go.clone()) {
             self.prompt.clear();
             self.note = format!("{}...", self.crumbs[i].title);
-            let _ = actions.send(Action::ListGo(go));
+            self.list_open(go, actions);
         }
     }
 
@@ -229,7 +268,11 @@ impl App {
     pub(super) fn list_choose(&mut self, sel: usize, actions: &Handle) {
         let Some(item) = self.list_ok().and_then(|l| l.items.get(sel)).cloned() else { return };
         self.note = format!("{}...", item.label);
-        let _ = actions.send(Action::ListGo(item.go));
+        if item.folder {
+            self.list_open(item.go, actions);
+        } else {
+            let _ = actions.send(Action::ListGo(item.go));
+        }
         if item.folder {
             self.prompt.clear();
         } else {
@@ -257,14 +300,23 @@ impl App {
                 // another list: the breadcrumbs changed under the cursor
                 self.crumb_at = None;
             }
+            let from = self.list_from.take().map(|f| f.trim_end_matches('/').to_string());
             if let Some(l) = self.list_ok() {
                 let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id))).or(l.at).or(l.playing).unwrap_or(0);
+                // back up from a folder: on it
+                let at = from.and_then(|f| l.items.iter().position(|i| i.id.split('?').next().unwrap_or("").trim_end_matches('/') == f)).unwrap_or(at);
                 self.overlay = Overlay::List { sel: at };
             }
             self.list_seen = place;
             return;
         }
         let Some(p) = place else { return };
+        // browsed here: it doesn't follow the app's screen
+        if self.list_ok().is_some_and(|l| l.browsed) {
+            self.overlay = Overlay::List { sel };
+            self.list_seen = Some(p);
+            return;
+        }
         // an app with a highlight of its own (Kodi) is followed by that;
         // one without (YouTube) by what's playing
         let has_focus = !p.focus_id.is_empty() || !p.focus_label.is_empty();
@@ -350,6 +402,11 @@ impl App {
                     text.push(Line::from(spans));
                     rows_at.push(None);
                 }
+                // the last read failed: this is the one before, kept
+                if let Some(e) = &self.st.list_failed {
+                    text.push(Line::from(format!("couldn't read it again ({e}): showing it as it was")).fg(Color::Yellow));
+                    rows_at.push(None);
+                }
                 text.push(if self.prompt.is_empty() {
                     Line::from(Span::styled("type to filter", dim))
                 } else {
@@ -360,7 +417,12 @@ impl App {
                 // the same marks in every list: ▶ playing now, › the app's own highlight
                 let place = self.st.snap.as_ref().and_then(|s| s.list_place.as_ref()).filter(|p| p.key == l.key);
                 let theirs = place.map_or(l.at, |p| l.find(p));
-                let playing = place.map_or(l.playing, |p| l.find_playing(&p.playing_id));
+                let playing = if l.browsed {
+                    // what's playing, wherever Kodi's screen is
+                    self.st.snap.as_ref().and_then(|s| s.list_place.as_ref()).map_or(l.playing, |p| l.find_playing(&p.playing_id))
+                } else {
+                    place.map_or(l.playing, |p| l.find_playing(&p.playing_id))
+                };
                 // rows that fit: heading, filter, hint and borders aside
                 let room = usize::from(area.height.saturating_sub(8)).max(3);
                 // the rows: the items shown, each part's subheading before it
@@ -406,11 +468,16 @@ impl App {
                 let reading = if self.st.list_loading { "  reading..." } else { "" };
                 // ^L only where a location can be typed (Kodi's folders)
                 let loc = if l.open_location.is_some() { "^L location  " } else { "" };
+                let sync = match (l.browsed, self.opt(tveee_core::options::LIST_SYNC)) {
+                    (false, _) => "",
+                    (true, true) => "^S sync folder: on  ",
+                    (true, false) => "^S sync folder: off  ",
+                };
                 let tab = if self.crumbs.len() > 1 { "tab breadcrumbs  " } else { "" };
                 let hint = if self.crumb_at.is_some() {
                     format!("←→ choose a step  ⏎ go there  {loc}tab/↓/esc back to the list")
                 } else {
-                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  {tab}{loc}type to filter  esc closes{more}{reading}")
+                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  {tab}{loc}{sync}type to filter  esc closes{more}{reading}")
                 };
                 text.push(Line::from(hint).fg(Color::DarkGray));
                 rows_at.push(None);

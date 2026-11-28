@@ -802,7 +802,7 @@ mod tests {
     fn list_printed() {
         use crate::provider::{ContextList, ListItem};
         let item = |label: &str, folder, meta: Option<&str>| ListItem { section: None, id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
-        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], playing: None, at: Some(1), up: None, reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None };
+        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], playing: None, at: Some(1), up: None, reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None, browsed: false };
         let lines = list_lines(&l, "Kodi");
         assert_eq!(lines[0], "Artists (Kodi, 3 items)");
         assert_eq!(lines[1], "    1  Portishead/");

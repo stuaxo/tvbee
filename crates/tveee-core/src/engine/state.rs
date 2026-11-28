@@ -60,6 +60,9 @@ pub struct TvState {
     pub list: Option<Arc<std::result::Result<Option<crate::provider::ContextList>, String>>>,
     /// A read of the list has been asked for and hasn't come yet.
     pub list_loading: bool,
+    /// The last read of the list failed, but the one before is kept (a
+    /// connection dropping out doesn't take the list away): why.
+    pub list_failed: Option<String>,
     /// Programme descriptions read so far (None: there is none), by
     /// (channel, start).
     pub infos: Arc<HashMap<(u32, i64), Option<String>>>,
@@ -87,6 +90,7 @@ impl TvState {
             guide_loading: false,
             list: None,
             list_loading: false,
+            list_failed: None,
             infos: Arc::default(),
             mem_history: Vec::new(),
             // shown as old: it's from before
@@ -107,6 +111,19 @@ impl TvState {
     /// The apps with a proper search (none until read).
     pub fn searchable_list(&self) -> &[search::Searchable] {
         self.searchable.as_deref().map_or(&[], |v| &v[..])
+    }
+}
+
+/// Whether reading `new` should keep the list `old` instead: a failed
+/// read (the connection dropping out) keeps one read before, as does a read
+/// saying there's no list when the one shown was browsed here (it doesn't
+/// depend on what the app shows).
+pub fn keeps_list(old: Option<&std::result::Result<Option<crate::provider::ContextList>, String>>, new: &std::result::Result<Option<crate::provider::ContextList>, String>) -> bool {
+    let Some(Ok(Some(old))) = old else { return false };
+    match new {
+        Err(_) => true,
+        Ok(None) => old.browsed,
+        Ok(Some(_)) => false,
     }
 }
 
@@ -174,7 +191,7 @@ impl Handle {
     pub fn send(&self, a: Action) -> std::result::Result<(), mpsc::SendError<Action>> {
         match &a {
             Action::LoadGuide => self.update(|s| s.guide_loading = true),
-            Action::LoadList | Action::ListGo(_) => self.update(|s| s.list_loading = true),
+            Action::LoadList | Action::ListGo(_) | Action::ListOpen { .. } => self.update(|s| s.list_loading = true),
             Action::Favourite(ch, on) => self.update(|s| {
                 if let Some(Ok(g)) = s.guide.as_mut().map(Arc::make_mut) {
                     if let Some(row) = g.rows.iter_mut().find(|r| r.channel.id == ch.id) {
@@ -252,8 +269,19 @@ pub fn keep(ip: &str, state: &Mutex<Arc<TvState>>, mut kept: Option<LastSeen>, l
                 if let Err(e) = &l {
                     crate::tlog!("list FAILED: {e}");
                 }
-                update(&mut |st| (st.list, st.list_loading) = (Some(Arc::new(l.clone())), false));
-                CoreEvent::Changed(Change::List)
+                let mut kept = false;
+                update(&mut |st| {
+                    st.list_loading = false;
+                    kept = keeps_list(st.list.as_deref(), &l);
+                    if kept {
+                        // the list shown stays; only why it couldn't be read again
+                        st.list_failed = l.as_ref().err().cloned().or_else(|| Some("it said there's no list".into()));
+                    } else {
+                        st.list_failed = None;
+                        st.list = Some(Arc::new(l.clone()));
+                    }
+                });
+                CoreEvent::Changed(if kept { Change::Snapshot } else { Change::List })
             }
             Msg::Info(key, info) => {
                 let info = info.unwrap_or_else(|e| Some(format!("(couldn't read the description: {e})")));

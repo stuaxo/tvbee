@@ -324,6 +324,11 @@ pub struct ContextList {
     pub location: Option<String>,
     /// How to open a typed location: a link with `{}` for it.
     pub open_location: Option<String>,
+    /// Browsed here, not on the app's screen: its folders (and the way up,
+    /// the breadcrumbs, a typed location) open with [`Player::list_at`] as
+    /// links, and the list doesn't follow what the app shows; only choosing
+    /// something to play tells the app.
+    pub browsed: bool,
 }
 
 /// A step on the way to a list (a breadcrumb): its name, its list's key,
@@ -401,6 +406,17 @@ pub trait Player: Sync {
     /// The list on its screen to choose from, if there is one (fall back:
     /// the app can't say, or it isn't showing a list).
     fn list(&self, _tv: &crate::tv::Tv) -> Outcome<ContextList> {
+        Outcome::Fallback
+    }
+    /// The list at `at` (a link from a browsed list: a folder, the way up,
+    /// a breadcrumb, a typed location), read without changing the app's
+    /// screen.
+    fn list_at(&self, _tv: &crate::tv::Tv, _at: &str) -> Outcome<ContextList> {
+        Outcome::Fallback
+    }
+    /// Show the folder at `at` on the app's screen too (following a browsed
+    /// list there, when asked to).
+    fn show_at(&self, _tv: &crate::tv::Tv, _at: &str) -> Outcome<()> {
         Outcome::Fallback
     }
     /// Choose an item from [`Player::list`] (fall back: do it the usual way

@@ -174,6 +174,7 @@ pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
         crumbs_whole,
         location: Some(p.path.clone()),
         open_location: Some(format!("kodi-window:{w}|{{}}")),
+        browsed: false,
     };
     // the highlighted row: by its path, else its label
     l.at = l.find(&list_place(p));
@@ -181,15 +182,14 @@ pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
 }
 
 /// `%20` and friends in a path, back to what they stand for.
-fn unescape(s: &str) -> String {
+pub fn unescape(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%'
-            && i + 2 < b.len()
-            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
-        {
+        // (no let chains here: this crate builds with Rust 1.85)
+        let escaped = if b[i] == b'%' && i + 2 < b.len() { u8::from_str_radix(&s[i + 1..i + 3], 16).ok() } else { None };
+        if let Some(v) = escaped {
             out.push(v);
             i += 3;
             continue;
@@ -201,7 +201,7 @@ fn unescape(s: &str) -> String {
 }
 
 /// The library's sections, as their paths name them.
-fn section_name(part: &str) -> String {
+pub fn section_name(part: &str) -> String {
     match part {
         "top100" => "Top 100".into(),
         "recentlyaddedalbums" => "Recently added albums".into(),
