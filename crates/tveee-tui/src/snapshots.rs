@@ -632,7 +632,7 @@ fn kodi_artists() -> TvState {
         ],
         playing: None, at: Some(2),
         up: None,
-        reopen: None,
+        reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None,
     };
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
@@ -942,6 +942,10 @@ fn list_trail_and_going_up() {
         playing: None, at: None,
         up: up.map(|(k, g)| (k.to_string(), Go::Link(g.into()))),
         reopen: Some(Go::Link(format!("open:{key}"))),
+        crumbs: Vec::new(),
+        crumbs_whole: false,
+        location: None,
+        open_location: None,
     };
     let music = list("Music", "10502|", None);
     let albums = list("Albums", "10502|musicdb://albums/", Some(("10502|", "kodi-window:music")));
@@ -1015,4 +1019,73 @@ fn playing_marked_apart_from_the_highlight() {
     b.st = hb.state();
     b.list_sync(Change::Snapshot);
     assert_eq!(b.overlay, Overlay::List { sel: 3 });
+}
+
+#[test]
+fn breadcrumbs_from_the_path_and_a_typed_location() {
+    use super::ctxlist::{breadcrumbs, Crumb};
+    use tveee_core::more::Go;
+    use tveee_core::provider::ContextList;
+    let crumb = |t: &str, k: &str| Crumb { title: t.into(), key: k.into(), go: Some(Go::Link(format!("open:{k}"))) };
+    let list = |title: &str, key: &str, crumbs: Vec<Crumb>, whole: bool| ContextList {
+        title: title.into(),
+        kind: "folder",
+        key: key.into(),
+        items: Vec::new(),
+        playing: None,
+        at: None,
+        up: None,
+        reopen: Some(Go::Link(format!("open:{key}"))),
+        crumbs,
+        crumbs_whole: whole,
+        location: Some(key.trim_start_matches("10502|").into()),
+        open_location: Some("kodi-window:music|{}".into()),
+    };
+    let titles = |c: &[Crumb]| c.iter().map(|x| x.title.clone()).collect::<Vec<_>>();
+    // a share: every step from the path, straight away
+    let album = list("Selected Ambient Works", "10502|smb://nas/music/Aphex Twin/Selected Ambient Works/", vec![crumb("Music", "10502|"), crumb("nas", "10502|smb://nas/"), crumb("music", "10502|smb://nas/music/"), crumb("Aphex Twin", "10502|smb://nas/music/Aphex Twin/")], true);
+    assert_eq!(titles(&breadcrumbs(&[], &album)), ["Music", "nas", "music", "Aphex Twin", "Selected Ambient Works"]);
+    // the library, opened straight into an album: its section, then …
+    let named = vec![crumb("Music", "10502|"), crumb("Albums", "10502|musicdb://albums/")];
+    let mut lib = list("A Polished Solid", "10502|musicdb://albums/251/", named.clone(), false);
+    // as Kodi's are: each in the one before (its ".." row)
+    lib.up = Some(("10502|musicdb://albums/".into(), Go::Link("kodi-parentdir".into())));
+    let straight = list("A Polished Solid", "10502|musicdb://albums/251/", vec![crumb("Music", "10502|"), crumb("Albums", "10502|musicdb://albums/")], false);
+    assert_eq!(titles(&breadcrumbs(&[], &straight)), ["Music", "Albums", "…", "A Polished Solid"]);
+    // ...and gone through here: the trail fills the gap
+    let albums = list("Albums", "10502|musicdb://albums/", vec![crumb("Music", "10502|")], true);
+    let mut disc = list("Disc 1", "10502|musicdb://albums/251/1/", named, false);
+    disc.up = Some(("10502|musicdb://albums/251/".into(), Go::Link("kodi-parentdir".into())));
+    let t = breadcrumbs(&[], &albums);
+    let t = breadcrumbs(&t, &lib);
+    let t = breadcrumbs(&t, &disc);
+    assert_eq!(titles(&t), ["Music", "Albums", "A Polished Solid", "Disc 1"]);
+
+    // ^L in the pane: the location to edit; ⏎ opens what's typed in Kodi
+    let mut st = kodi_artists();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        l.location = Some("musicdb://artists/".into());
+        l.open_location = Some("kodi-window:music|{}".into());
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, rx, h) = app_seeing(st);
+    a.overlay = Overlay::List { sel: 0 };
+    a.list_key(0, KeyCode::Char('l'), KeyModifiers::CONTROL, &h);
+    assert_eq!(a.location.as_deref(), Some("musicdb://artists/"));
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("location musicdb://artists/"), "{s}");
+    a.list_key(0, KeyCode::Char('u'), KeyModifiers::CONTROL, &h);
+    for c in "smb://nas/music/".chars() {
+        a.list_key(0, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    // typing went to the location, not the filter
+    assert!(a.prompt.is_empty());
+    a.list_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
+    assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-window:music|smb://nas/music/".into()))));
+    assert!(a.location.is_none());
+    // Esc: back to the list, nothing opened
+    a.list_key(0, KeyCode::Char('l'), KeyModifiers::CONTROL, &h);
+    a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert!(a.location.is_none() && matches!(a.overlay, Overlay::List { .. }));
 }

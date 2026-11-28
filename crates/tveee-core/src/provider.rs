@@ -314,6 +314,25 @@ pub struct ContextList {
     /// How to come back to this list later (from further in): for the
     /// breadcrumbs.
     pub reopen: Option<crate::more::Go>,
+    /// The lists it's in, named from where it is (Kodi's path: a share's
+    /// folders, or "Music › Albums"), outermost first, not itself.
+    pub crumbs: Vec<ListCrumb>,
+    /// Whether [`ContextList::crumbs`] go all the way to it (a share's
+    /// path); else the ones between are only known by having gone through.
+    pub crumbs_whole: bool,
+    /// Where it is, as a path that can be typed (Kodi's folder path).
+    pub location: Option<String>,
+    /// How to open a typed location: a link with `{}` for it.
+    pub open_location: Option<String>,
+}
+
+/// A step on the way to a list (a breadcrumb): its name, its list's key,
+/// and how to open it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListCrumb {
+    pub title: String,
+    pub key: String,
+    pub go: Option<crate::more::Go>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
