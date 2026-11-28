@@ -125,6 +125,9 @@ impl App {
 
     /// Keys in the list pane: the list keys move (through what the filter
     /// shows), ⏎ chooses, typing filters, Esc closes.
+    ///
+    /// Its keys are listed in keys.rs, "the app's list": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn list_key(&mut self, sel: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         // typing a location (^L): keys go to it
         if self.list.location.is_some() {
@@ -215,6 +218,9 @@ impl App {
     /// Keys while typing a location: ⏎ opens it (in the app: Kodi opens any
     /// path it knows, smb://, /storage/..., musicdb://albums/), Esc goes
     /// back to the list.
+    ///
+    /// Its keys are listed in keys.rs, "a location": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn location_key(&mut self, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         let Some(text) = self.list.location.as_mut() else { return };
         match code {
@@ -242,6 +248,9 @@ impl App {
 
     /// Keys on the breadcrumbs: ←/→ move along them, ⏎ goes to the one
     /// chosen, Tab, ↓ or Esc go back to the list.
+    ///
+    /// Its keys are listed in keys.rs, "the breadcrumbs": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn crumb_key(&mut self, at: usize, code: KeyCode, actions: &Handle) {
         let n = self.list.crumbs.len();
         match code {

@@ -302,6 +302,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     app.prompt = text;
                     app.apply_overlay(next, action, actions);
                 } else if let (Overlay::Apps { .. }, KeyCode::Char('#')) = (app.overlay, k.code) {
+                    // this, the launcher's / below and the PIN box: their keys are
+                    // listed in keys.rs ("the apps", "pairing"); change those rows with these
                     // package names in the launcher, or not (remembered)
                     let on = !tveee_core::options::get(tveee_core::options::SHOW_PACKAGES);
                     app.note = match tveee_core::options::set(tveee_core::options::SHOW_PACKAGES, on) {

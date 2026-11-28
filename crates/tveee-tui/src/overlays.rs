@@ -102,6 +102,9 @@ pub fn search_targets(first: Option<&str>, searchable: &[search::Searchable]) ->
 
 /// Keys in the search box: Tab / ↑ / ↓ change the app; the rest edit the
 /// query (as in [`prompt_key`]); Enter searches; Esc cancels.
+///
+/// Its keys are listed in keys.rs, "search": they're handled here, not
+/// from that table, so change the rows with this.
 pub fn search_key(at: usize, code: KeyCode, mods: KeyModifiers, text: &mut String, targets: &[SearchTarget]) -> (Overlay, Option<Action>) {
     let n = targets.len().max(1);
     match code {
@@ -135,6 +138,8 @@ pub fn prompt_step(id: &str, code: KeyCode) -> Option<Action> {
     }
 }
 
+/// Its keys are listed in keys.rs, "a box asking for text": they're handled here, not
+/// from that table, so change the rows with this.
 pub fn prompt_key(id: &'static str, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
     let here = Overlay::Prompt(id);
     match code {
@@ -166,6 +171,9 @@ pub fn paste_text(s: &str) -> String {
 
 /// What a key does while an overlay is open: the new overlay, and maybe an
 /// action to run. Esc (or the key that opened it) closes; it never quits.
+///
+/// Its keys are listed in keys.rs, "help", "the menu" and "are you sure": they're handled here, not
+/// from that table, so change the rows with this.
 pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) -> (Overlay, Option<Action>) {
     let pick_item = |i: usize| pick(items, i);
     match overlay {
@@ -394,6 +402,9 @@ impl App {
     /// ←/→ set the row (off/on, or its first/second choice), Space/⏎ flip
     /// it, Tab the other tab; on the tab bar (↑ from the first row) ←/→
     /// switch tabs. Esc leaves the tab bar, else closes.
+    ///
+    /// Its keys are listed in keys.rs, "options": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn options_key(&mut self, i: usize, code: KeyCode) {
         let n = if self.options.plugins { self.vendor_plugins().len() } else { tveee_core::options::OPTIONS.len() }.max(1);
         let switch = |a: &mut Self| {
@@ -647,6 +658,9 @@ impl App {
     }
 
     /// Keys in a list of choices: ↑/↓ choose, ⏎ runs it, Esc closes.
+    ///
+    /// Its keys are listed in keys.rs, "choices": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn choose_key(&mut self, id: &'static str, sel: usize, code: KeyCode, actions: &Handle) {
         let n = tveee_core::actions::find(&self.actions, id).map_or(0, |a| match a.params {
             Params::Choice(c) => c.len(),

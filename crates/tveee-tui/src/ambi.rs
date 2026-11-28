@@ -117,6 +117,9 @@ impl App {
     }
 
     /// Keys in the dialog: ↑/↓ rows, ←/→ change at once, ⏎ picks.
+    ///
+    /// Its keys are listed in keys.rs, "the Ambilight": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn ambi_key(&mut self, row: usize, col: usize, code: KeyCode, actions: &Handle) {
         let rows = self.ambi_rows();
         if matches!(code, KeyCode::Esc | KeyCode::Char('L' | 'q')) || rows.is_empty() {
@@ -147,6 +150,9 @@ impl App {
     /// Keys in the colour picker: the arrows move through the grid, typing
     /// goes in its field (a name, #hex), ⏎ sets what's typed or else the
     /// colour picked, Esc goes back to the panel.
+    ///
+    /// Its keys are listed in keys.rs, "a light's colour": they're handled here, not
+    /// from that table, so change the rows with this.
     pub(super) fn ambi_ask_key(&mut self, row: usize, col: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         let (gx, gy) = self.ambi.pick;
         match code {
