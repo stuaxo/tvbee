@@ -364,6 +364,19 @@ fn player_seek(c: &Cx, to: crate::devtools::SeekTo) -> Result<Option<String>> {
     Ok(player.seek(c.tv, to).or_fallback()?.map(|at| format!("now at {}", crate::nowplaying::clock(at))))
 }
 
+/// The next item queued (or the one before): the app's own way when its
+/// player has one (Kodi's playlist), else the remote's media keys.
+fn skip_item(c: &Cx, forward: bool) -> Result<Output> {
+    if let Some(player) = player_in_front(c.tv)
+        && let Some(said) = player.skip_item(c.tv, forward).or_fallback()?
+    {
+        return Ok(said.into());
+    }
+    let (key, said) = if forward { (87, "next") } else { (88, "previous") };
+    c.tv.key(key)?;
+    Ok(said.into())
+}
+
 fn playpause(c: &Cx, _: &[String]) -> Result<Output> {
     if let Some(player) = player_in_front(c.tv)
         && player.play_pause(c.tv).or_fallback()?.is_some()
@@ -462,6 +475,8 @@ pub fn actions() -> Vec<A> {
         A::new("media.pause", CAT, "pause", |c, _| c.tv.key(127).map(|()| "pause".into())).cli("pause", "", "media pause"),
         A::new("media.stop", CAT, "stop", |c, _| c.tv.key(86).map(|()| "stop".into())).cli("stop", "", "media stop"),
         A::new("media.playpause", CAT, "play/pause", playpause).cli("playpause", "", "toggle play/pause"),
+        A::new("media.next", CAT, "next track (or item)", |c, _| skip_item(c, true)).cli("next", "", "the next track or item queued"),
+        A::new("media.previous", CAT, "previous track (or item)", |c, _| skip_item(c, false)).cli("previous", "", "the track or item before").aliases(&["prev"]),
         A::new("media.mute", CAT, "mute", mute).cli("mute", "", "mute (no-op if already muted)"),
         A::new("media.visualiser", CAT, "music visualiser: show or hide it", visualiser)
             .cli("visualiser", "[on|off]", "show or hide the music visualiser (Kodi, while it plays music)")

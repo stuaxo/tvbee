@@ -88,7 +88,72 @@ pub fn link(m: Media, name: &str, path: &str) -> String {
 
 /// Whether `at` is a place to browse (Kodi's top, or a folder).
 pub fn is_link(at: &str) -> bool {
-    matches!(Link::parse(at), Some(Link::Root | Link::Browse { .. }))
+    matches!(Link::parse(at), Some(Link::Root | Link::Browse { .. } | Link::Queue { .. }))
+}
+
+/// The queue playing: its playlist, how many items, and which is playing
+/// (None: nothing is playing from a playlist).
+pub fn queue_now(tv: &Tv) -> Option<(u32, usize, Option<usize>)> {
+    let (id, _) = super::player_id(tv).ok()??;
+    let p = super::call_json(tv, "Player.GetProperties", serde_json::json!({ "playerid": id, "properties": ["playlistid", "position"] })).ok()?;
+    let playlist = u32::try_from(p.get("playlistid")?.as_i64()?).ok()?;
+    let position = p.get("position").and_then(Value::as_i64).and_then(|n| usize::try_from(n).ok());
+    let items = super::call_json(tv, "Playlist.GetItems", serde_json::json!({ "playlistid": playlist })).ok()?;
+    let n = items.pointer("/limits/total").and_then(Value::as_u64).map_or(0, |n| n as usize);
+    Some((playlist, n, position))
+}
+
+/// The queue playing as a list: each item, the one playing marked;
+/// choosing one plays from there.
+pub fn queue_list(tv: &Tv, playlist: u32) -> Result<ContextList> {
+    let r = super::call_json(tv, "Playlist.GetItems", serde_json::json!({ "playlistid": playlist, "properties": ["title", "artist", "duration", "file"] }))?;
+    let mut l = queue_of(playlist, &r);
+    l.playing = queue_now(tv).filter(|(p, _, _)| *p == playlist).and_then(|(_, _, at)| at);
+    Ok(l)
+}
+
+/// The list for queue `playlist` from `Playlist.GetItems`' answer `r`.
+pub fn queue_of(playlist: u32, r: &Value) -> ContextList {
+    let text = |f: &Value, k: &str| f.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let items = r
+        .get("items")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .enumerate()
+                .map(|(n, f)| {
+                    let title = Some(text(f, "title")).filter(|t| !t.is_empty()).unwrap_or_else(|| text(f, "label"));
+                    let artists: Vec<&str> =
+                        f.get("artist").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+                    let label = if artists.is_empty() { title } else { format!("{} - {title}", artists.join(", ")) };
+                    let meta = f.get("duration").and_then(Value::as_u64).filter(|d| *d > 0).map(duration);
+                    ListItem {
+                        section: None,
+                        id: text(f, "file"),
+                        label: format!("{}. {label}", n + 1),
+                        meta,
+                        folder: false,
+                        go: Link::GoTo { position: n }.go(),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ContextList {
+        title: "Playing queue".into(),
+        kind: "queue",
+        key: format!("kodi-queue|{playlist}"),
+        items,
+        playing: None,
+        at: None,
+        up: Some((ROOT_KEY.to_string(), Link::Root.go())),
+        reopen: Some(Link::Queue { playlist }.go()),
+        crumbs: vec![ListCrumb { title: "Kodi".into(), key: ROOT_KEY.into(), go: Some(Link::Root.go()) }],
+        crumbs_whole: true,
+        location: None,
+        open_location: Some("music||{}".into()),
+        browsed: true,
+    }
 }
 
 /// Kodi's top: its categories, each its library's top.
@@ -208,8 +273,27 @@ pub fn items_of(m: Media, dir: &str, v: &Value, key: &str, section: Option<&str>
 /// The list at `at` (a [`link`], or a path typed), read from Kodi without
 /// changing its screen.
 pub fn list_at(tv: &Tv, at: &str) -> Result<ContextList> {
-    if Link::parse(at) == Some(Link::Root) {
-        return Ok(root());
+    match Link::parse(at) {
+        // Kodi's top: its categories, and what's queued when there's a queue
+        Some(Link::Root) => {
+            let mut r = root();
+            if let Some((playlist, n, _)) = queue_now(tv).filter(|(_, n, _)| *n > 1) {
+                r.items.insert(
+                    0,
+                    ListItem {
+                        section: None,
+                        id: format!("kodi-queue:{playlist}"),
+                        label: "Playing queue".into(),
+                        meta: Some(format!("{n} items")),
+                        folder: true,
+                        go: Link::Queue { playlist }.go(),
+                    },
+                );
+            }
+            return Ok(r);
+        }
+        Some(Link::Queue { playlist }) => return queue_list(tv, playlist),
+        _ => {}
     }
     let (m, name, path) = parse(at);
     let path = if bare(&path) == m.db() { String::new() } else { path };
@@ -308,6 +392,25 @@ pub fn play(tv: &Tv, link: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_queue_as_a_list() {
+        let r: Value = serde_json::from_str(
+            r#"{"items":[
+            {"title":"A Polished Solid","artist":["Luke Vibert"],"duration":519,"file":"smb://a.mp3","label":"x"},
+            {"title":"","label":"Radart.mp3","duration":0,"file":"smb://b.mp3"}],"limits":{"total":2}}"#,
+        )
+        .unwrap();
+        let l = queue_of(0, &r);
+        assert_eq!(l.items[0].label, "1. Luke Vibert - A Polished Solid");
+        assert_eq!(l.items[0].meta.as_deref(), Some("8:39"));
+        // no title: its label
+        assert_eq!(l.items[1].label, "2. Radart.mp3");
+        assert_eq!(l.items[1].go, Link::GoTo { position: 1 }.go());
+        assert!(l.browsed && !l.items[0].folder);
+        assert_eq!(l.up, Some(("kodi".into(), Link::Root.go())));
+        assert!(is_link("kodi-queue:0"));
+    }
 
     #[test]
     fn links_and_parents() {

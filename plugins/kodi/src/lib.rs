@@ -568,8 +568,18 @@ impl tveee_core::provider::Player for Kodi {
     fn go(&self, tv: &Tv, to: &tveee_core::more::Go) -> Outcome<String> {
         use tveee_core::provider::Provider;
         let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };
-        if matches!(link::Link::parse(link), Some(link::Link::Play { .. })) {
-            return library::play(tv, link).into();
+        match link::Link::parse(link) {
+            Some(link::Link::Play { .. }) => return library::play(tv, link).into(),
+            // an item of the queue playing: play from there
+            Some(link::Link::GoTo { position }) => {
+                let done = player_id(tv).and_then(|p| {
+                    let Some((id, _)) = p else { return Err(Error::Unavailable("Kodi isn't playing anything".into())) };
+                    call_json(tv, "Player.GoTo", serde_json::json!({ "playerid": id, "to": position }))
+                        .map(|_| format!("playing item {} of the queue", position + 1))
+                });
+                return done.into();
+            }
+            _ => {}
         }
         // a folder (from the command line's list): shown on Kodi's screen
         if library::is_link(link) {
@@ -603,6 +613,18 @@ impl tveee_core::provider::Player for Kodi {
             r.get("time").and_then(seconds).map_or_else(|| failed("Kodi didn't say where it seeked to"), Ok)
         });
         seeked.into()
+    }
+    fn skip_item(&self, tv: &Tv, forward: bool) -> Outcome<String> {
+        let done = player_id(tv).and_then(|p| {
+            let Some((id, _)) = p else { return Err(Error::Unavailable("Kodi isn't playing anything".into())) };
+            let to = if forward { "next" } else { "previous" };
+            call_json(tv, "Player.GoTo", serde_json::json!({ "playerid": id, "to": to })).map(|_| format!("{to} in Kodi"))
+        });
+        match done {
+            // nothing playing: the media keys can't do better, but can't hurt
+            Err(Error::Unavailable(_)) => Outcome::Fallback,
+            r => r.into(),
+        }
     }
     fn play_pause(&self, tv: &Tv) -> Outcome<()> {
         let done = player_id(tv).and_then(|p| {
