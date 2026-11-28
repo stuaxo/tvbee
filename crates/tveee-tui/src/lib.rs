@@ -50,6 +50,12 @@ use tveee_core::engine::*;
 
 const CAT: &str = "ui";
 struct App {
+    /// The list pane's own state (its breadcrumbs, a typed location, ...).
+    list: ctxlist::ListPane,
+    /// The log pop-up's own state.
+    log: logview::LogView,
+    /// The options dialog's own state.
+    options: overlays::OptionsView,
     ip: String,
     /// The engine: where requests go, and what it knows (`st`).
     engine: Handle,
@@ -71,29 +77,14 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
-    /// The trail to the list shown (its breadcrumbs).
-    crumbs: Vec<ctxlist::Crumb>,
-    /// A location being typed in the list pane (^L), if one is.
-    location: Option<String>,
-    /// The breadcrumb chosen, while keys are on the breadcrumbs (Tab).
-    crumb_at: Option<usize>,
-    /// The folder a browsed list was left from: landed on when back up.
-    list_from: Option<String>,
     /// Where the colour picker is (column, row).
     pick: (usize, usize),
     /// Where the progress bar stays after a pause, seek or stop asked for
     /// here, until the next read says what it's doing (no prediction).
     frozen: Option<f64>,
-    /// The log as it was before saving it was asked for (back to it after).
-    log_back: Option<Overlay>,
     /// The file name ⏎ was pressed for that's there already (⏎ again
     /// writes over it).
     save_confirm: Option<String>,
-    /// The log's top line shown (by number), so the view only moves as far
-    /// as keeps the highlight in it.
-    log_top: Option<usize>,
-    /// A drag over the log's lines started (it selects).
-    log_drag: bool,
     /// A scrollbar being dragged (until the button's let go, the mouse is
     /// its): it, and where in its thumb it was grabbed.
     bar_drag: Option<(drawing::BarAt, u16)>,
@@ -109,16 +100,6 @@ struct App {
     /// The pop-up the command palette opened over (the log, the guide, ...)
     /// and its typed text: back to it when the palette closes.
     under: Option<(Overlay, String)>,
-    /// Where the app's list was at the last refresh (the list pane follows
-    /// its highlight when it moves).
-    list_seen: Option<tveee_core::provider::ListPlace>,
-    /// The refresh has been asked to read where the list is.
-    list_watching: bool,
-    /// The options dialog's tab: its options, or the plugins.
-    options_plugins: bool,
-    /// The keys are on the options' tab bar (↑ from the first row): ←/→
-    /// switch tabs there, and only there.
-    options_on_tabs: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
     plugins: Vec<tveee_core::plugin::PluginState>,
     /// The system panel paused (I): its figures as they were then, and the
@@ -537,25 +518,17 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
-            crumbs: Vec::new(),
-            location: None,
-            crumb_at: None,
-            list_from: None,
+            list: Default::default(),
+            log: Default::default(),
+            options: Default::default(),
             pick: (0, 1),
             frozen: None,
-            log_back: None,
             save_confirm: None,
-            log_top: None,
-            log_drag: false,
             bar_drag: None,
             bar_rows: Vec::new(),
             opts: None,
             system_watching: false,
             under: None,
-            list_seen: None,
-            list_watching: false,
-            options_plugins: false,
-            options_on_tabs: false,
             plugins: Vec::new(),
             info_frozen: None,
             all_plugins: None,
@@ -757,7 +730,7 @@ impl App {
             }
             Input::OpenList => self.open_list(actions),
             Input::OpenOptions => {
-                self.options_on_tabs = false;
+                self.options.on_tabs = false;
                 self.overlay = Overlay::Options(0);
             }
             Input::OpenMenu if !self.menu.is_empty() => {
@@ -928,15 +901,15 @@ impl App {
             {
                 if let Some(Hit::LogLine(n)) = self.hit_at(m.column, m.row) {
                     self.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
-                    self.log_drag = true;
+                    self.log.drag = true;
                 }
             }
-            MouseEventKind::Drag(MouseButton::Left) if self.log_drag => {
+            MouseEventKind::Drag(MouseButton::Left) if self.log.drag => {
                 if let Some(Hit::LogLine(n)) = self.hit_at(m.column, m.row) {
                     self.log_click(n, true);
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) => self.log_drag = false,
+            MouseEventKind::Up(MouseButton::Left) => self.log.drag = false,
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.click(m.column, m.row, actions) {
                     return true;
@@ -974,7 +947,7 @@ impl App {
                 let top = first + top;
                 // the highlight kept in what's shown (stops following the newest)
                 let cur = at.unwrap_or(last).clamp(top, (top + room).saturating_sub(1).min(last));
-                self.log_top = Some(top);
+                self.log.top = Some(top);
                 self.overlay = Overlay::Logs { at: Some(cur), from };
             }
             (drawing::Bar::List, Overlay::List { .. }) => {
@@ -1019,7 +992,7 @@ impl App {
             }
             (Overlay::Options(_), Some(Hit::OptionItem(i))) => self.toggle_option(i),
             (Overlay::Options(_), Some(Hit::OptionTab(plugins))) => {
-                self.options_plugins = plugins;
+                self.options.plugins = plugins;
                 self.overlay = Overlay::Options(0);
             }
             (Overlay::Options(_), Some(Hit::Popup)) => {}
@@ -1065,7 +1038,7 @@ impl App {
             (Overlay::Logs { .. }, Some(Hit::Popup)) => {}
             (Overlay::Logs { .. }, _) => self.overlay = Overlay::None,
             (Overlay::SaveLog, Some(Hit::Popup)) => {}
-            (Overlay::SaveLog, _) => self.overlay = self.log_back.take().unwrap_or(Overlay::None),
+            (Overlay::SaveLog, _) => self.overlay = self.log.back.take().unwrap_or(Overlay::None),
             // a click elsewhere closes the pop-up (cancelling a confirmation)
             (
                 Overlay::Help(_)

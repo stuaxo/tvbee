@@ -401,6 +401,16 @@ pub(super) const HELP: &str = " everywhere
    wheel    volume
    Shift+drag selects text as usual (to copy the url)";
 
+/// The options dialog's own state.
+#[derive(Default)]
+pub struct OptionsView {
+    /// The tab shown: the options, or the plugins.
+    pub plugins: bool,
+    /// The keys are on the tab bar (↑ from the first row): ←/→ switch tabs
+    /// there, and only there.
+    pub on_tabs: bool,
+}
+
 impl App {
     /// The plugins its tab lets you change: the vendor ones (built-in ones
     /// are always on).
@@ -413,16 +423,16 @@ impl App {
     /// it, Tab the other tab; on the tab bar (↑ from the first row) ←/→
     /// switch tabs. Esc leaves the tab bar, else closes.
     pub(super) fn options_key(&mut self, i: usize, code: KeyCode) {
-        let n = if self.options_plugins { self.vendor_plugins().len() } else { tveee_core::options::OPTIONS.len() }.max(1);
+        let n = if self.options.plugins { self.vendor_plugins().len() } else { tveee_core::options::OPTIONS.len() }.max(1);
         let switch = |a: &mut Self| {
-            a.options_plugins = !a.options_plugins;
+            a.options.plugins = !a.options.plugins;
             a.overlay = Overlay::Options(0);
         };
-        if self.options_on_tabs {
+        if self.options.on_tabs {
             match code {
                 KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => switch(self),
                 KeyCode::Down | KeyCode::Enter | KeyCode::Esc => {
-                    self.options_on_tabs = false;
+                    self.options.on_tabs = false;
                     self.overlay = Overlay::Options(0);
                 }
                 KeyCode::Char(',' | 'q') => self.close_options(),
@@ -434,27 +444,27 @@ impl App {
             KeyCode::Esc | KeyCode::Char(',' | 'q') | KeyCode::Backspace => self.close_options(),
             KeyCode::Tab | KeyCode::BackTab => switch(self),
             // up off the first row: the tab bar
-            KeyCode::Up if i == 0 => self.options_on_tabs = true,
+            KeyCode::Up if i == 0 => self.options.on_tabs = true,
             c if super::listnav::is_move(c) => {
                 let to = super::listnav::step(i, n, c).unwrap_or(i);
                 self.overlay = Overlay::Options(to);
             }
             KeyCode::Left | KeyCode::Right => self.set_option_row(i, code == KeyCode::Right),
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
-            KeyCode::Char('a') if self.options_plugins => self.plugin_choice(i, None),
+            KeyCode::Char('a') if self.options.plugins => self.plugin_choice(i, None),
             _ => {}
         }
     }
 
     /// Close the options (off the tab bar for next time).
     fn close_options(&mut self) {
-        self.options_on_tabs = false;
+        self.options.on_tabs = false;
         self.overlay = Overlay::None;
     }
 
     /// Set row `i` on (its second choice) or off (its first), if it isn't.
     fn set_option_row(&mut self, i: usize, on: bool) {
-        let now = if self.options_plugins {
+        let now = if self.options.plugins {
             self.vendor_plugins().get(i).map(|p| self.plugin_ticked(p))
         } else {
             tveee_core::options::OPTIONS.get(i).map(|o| self.opt(o.name))
@@ -557,7 +567,7 @@ impl App {
     /// Change row `i` of the tab shown: flip an option, or a vendor
     /// plugin's tick (saved as its choice).
     pub(super) fn toggle_option(&mut self, i: usize) {
-        if self.options_plugins {
+        if self.options.plugins {
             let Some(on) = self.vendor_plugins().get(i).map(|p| self.plugin_ticked(p)) else { return };
             self.plugin_choice(i, Some(!on));
             return;
@@ -674,10 +684,10 @@ impl App {
             }
         };
         // on the tab bar: the tab chosen marked, no row highlighted
-        let on_tabs = self.options_on_tabs;
+        let on_tabs = self.options.on_tabs;
         let sel = if on_tabs { usize::MAX } else { sel };
         let labels = [("Options", false), ("Plugins", true)];
-        let mut tabs: Vec<Span> = labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options_plugins), Span::raw(" ")]).collect();
+        let mut tabs: Vec<Span> = labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options.plugins), Span::raw(" ")]).collect();
         if on_tabs {
             tabs.push(Span::styled(" ←→ switch", dim));
             for t in tabs.iter_mut().filter(|t| t.style.bg == Some(Color::Blue)) {
@@ -689,7 +699,7 @@ impl App {
         // body line each choosable row is on
         let mut body: Vec<Line> = Vec::new();
         let mut at: Vec<usize> = Vec::new();
-        let foot: Vec<Line> = if self.options_plugins {
+        let foot: Vec<Line> = if self.options.plugins {
             let vendor: Vec<_> = self.vendor_plugins().into_iter().cloned().collect();
             body.push(Line::from(Span::styled(" vendor", dim)));
             for (i, p) in vendor.iter().enumerate() {

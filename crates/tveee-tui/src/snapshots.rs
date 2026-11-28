@@ -432,7 +432,7 @@ fn options_plugins_tab_desktop() {
     a.options_key(0, KeyCode::Down);
     assert_eq!(a.overlay, Overlay::Options(1));
     a.options_key(1, KeyCode::Tab);
-    assert!(!a.options_plugins);
+    assert!(!a.options.plugins);
 }
 
 #[test]
@@ -1046,7 +1046,7 @@ fn list_trail_and_going_up() {
         st.list = Some(Arc::new(Ok(Some(l))));
     }
     let (mut a, rx, h) = app_seeing(st);
-    a.crumbs = vec![
+    a.list.crumbs = vec![
         Crumb { title: "Music".into(), key: "10502|".into(), go: Some(Go::Link("kodi-window:music".into())) },
         Crumb { title: "Artists".into(), key: "10502|musicdb://artists/".into(), go: None },
     ];
@@ -1165,7 +1165,7 @@ fn breadcrumbs_from_the_path_and_a_typed_location() {
     let (mut a, rx, h) = app_seeing(st);
     a.overlay = Overlay::List { sel: 0 };
     a.list_key(0, KeyCode::Char('l'), KeyModifiers::CONTROL, &h);
-    assert_eq!(a.location.as_deref(), Some("musicdb://artists/"));
+    assert_eq!(a.list.location.as_deref(), Some("musicdb://artists/"));
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
     assert!(s.contains("location musicdb://artists/"), "{s}");
@@ -1177,11 +1177,11 @@ fn breadcrumbs_from_the_path_and_a_typed_location() {
     assert!(a.prompt.is_empty());
     a.list_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
     assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-window:music|smb://nas/music/".into()))));
-    assert!(a.location.is_none());
+    assert!(a.list.location.is_none());
     // Esc: back to the list, nothing opened
     a.list_key(0, KeyCode::Char('l'), KeyModifiers::CONTROL, &h);
     a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
-    assert!(a.location.is_none() && matches!(a.overlay, Overlay::List { .. }));
+    assert!(a.list.location.is_none() && matches!(a.overlay, Overlay::List { .. }));
 }
 
 #[test]
@@ -1190,27 +1190,27 @@ fn tab_to_the_breadcrumbs() {
     use tveee_core::more::Go;
     let (mut a, rx, h) = app_seeing(kodi_artists());
     let crumb = |t: &str, k: &str| Crumb { title: t.into(), key: k.into(), go: Some(Go::Link(format!("open:{k}"))) };
-    a.crumbs = vec![crumb("Music", "10502|"), crumb("Artists", "10502|musicdb://artists/")];
+    a.list.crumbs = vec![crumb("Music", "10502|"), crumb("Artists", "10502|musicdb://artists/")];
     a.overlay = Overlay::List { sel: 0 };
     // Tab: onto the breadcrumbs, on the list shown
     a.list_key(0, KeyCode::Tab, KeyModifiers::NONE, &h);
-    assert_eq!(a.crumb_at, Some(1));
+    assert_eq!(a.list.crumb_at, Some(1));
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
     assert!(s.contains("tab back to the list"), "{s}");
     // ← to Music, ⏎ goes there; the keys are back on the list
     a.list_key(0, KeyCode::Left, KeyModifiers::NONE, &h);
-    assert_eq!(a.crumb_at, Some(0));
+    assert_eq!(a.list.crumb_at, Some(0));
     a.list_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
     assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("open:10502|".into()))));
-    assert_eq!(a.crumb_at, None);
+    assert_eq!(a.list.crumb_at, None);
     // ⏎ on the list shown goes nowhere; Esc (or Tab, ↓) back to the list
     a.list_key(0, KeyCode::Tab, KeyModifiers::NONE, &h);
     a.list_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
     assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
     a.list_key(0, KeyCode::Tab, KeyModifiers::NONE, &h);
     a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
-    assert_eq!(a.crumb_at, None);
+    assert_eq!(a.list.crumb_at, None);
     assert!(matches!(a.overlay, Overlay::List { .. }), "Esc on the breadcrumbs doesn't close the pane");
     // with the keys on the list, ↓ moves in it again
     a.list_key(0, KeyCode::Down, KeyModifiers::NONE, &h);
@@ -1522,29 +1522,29 @@ fn options_left_right_set_the_row() {
     a.overlay = Overlay::Options(row);
     // → the second choice (low bandwidth), ← back; the tab doesn't change
     a.options_key(row, KeyCode::Right);
-    assert!(a.opt(LOW_BANDWIDTH) && !a.options_plugins);
+    assert!(a.opt(LOW_BANDWIDTH) && !a.options.plugins);
     a.options_key(row, KeyCode::Right);
     assert!(a.opt(LOW_BANDWIDTH), "→ again: still the second");
     a.options_key(row, KeyCode::Left);
-    assert!(!a.opt(LOW_BANDWIDTH) && !a.options_plugins);
+    assert!(!a.opt(LOW_BANDWIDTH) && !a.options.plugins);
     assert_eq!(a.overlay, Overlay::Options(row), "still open, on it");
     // ↑ from the first row: the tab bar, where ←/→ switch tabs
     a.overlay = Overlay::Options(0);
     a.options_key(0, KeyCode::Up);
-    assert!(a.options_on_tabs);
+    assert!(a.options.on_tabs);
     let s = screen(&mut a, DESKTOP);
     assert!(s.contains("←→ switch"), "{s}");
     a.options_key(0, KeyCode::Right);
-    assert!(a.options_plugins && a.options_on_tabs);
+    assert!(a.options.plugins && a.options.on_tabs);
     // ↓ back to the rows; Tab still switches from there
     a.options_key(0, KeyCode::Down);
-    assert!(!a.options_on_tabs);
+    assert!(!a.options.on_tabs);
     a.options_key(0, KeyCode::Tab);
-    assert!(!a.options_plugins);
+    assert!(!a.options.plugins);
     // Esc on the tab bar leaves it; Esc again closes
     a.options_key(0, KeyCode::Up);
     a.options_key(0, KeyCode::Esc);
-    assert!(!a.options_on_tabs && matches!(a.overlay, Overlay::Options(_)));
+    assert!(!a.options.on_tabs && matches!(a.overlay, Overlay::Options(_)));
     a.options_key(0, KeyCode::Esc);
     assert_eq!(a.overlay, Overlay::None);
 }
@@ -1555,7 +1555,7 @@ fn a_plugin_turned_off_goes_at_once() {
     let (mut a, _rx, _h) = app_seeing(kodi_paused());
     a.opts = Some(Vec::new());
     a.plugins = vec![PluginState { name: "kodi", desc: "Kodi", enabled: true, source: Source::Cache }];
-    a.options_plugins = true;
+    a.options.plugins = true;
     a.overlay = Overlay::Options(0);
     // ← turns it off: now, not at the next start
     a.options_key(0, KeyCode::Left);

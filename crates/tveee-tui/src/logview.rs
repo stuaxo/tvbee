@@ -48,6 +48,18 @@ pub fn lines_between(first: usize, lines: &[String], a: usize, b: usize) -> Stri
     (lo..=hi).filter_map(|n| n.checked_sub(first).and_then(|i| lines.get(i))).cloned().collect::<Vec<_>>().join("\n")
 }
 
+/// The log pop-up's own state.
+#[derive(Default)]
+pub struct LogView {
+    /// The log as it was before saving it was asked for (back to it after).
+    pub back: Option<Overlay>,
+    /// The top line shown (by number), so the view only moves as far as
+    /// keeps the highlight in it.
+    pub top: Option<usize>,
+    /// A drag over the lines started (it selects).
+    pub drag: bool,
+}
+
 impl App {
     /// Keys in the log: the list keys move the highlight (shift: select),
     /// v starts or ends a selection, y/⏎ copy, s saves, End follows the
@@ -83,7 +95,7 @@ impl App {
                 self.overlay = Overlay::Logs { at: Some(cur), from: None };
             }
             KeyCode::Char('s') => {
-                self.log_back = Some(Overlay::Logs { at, from });
+                self.log.back = Some(Overlay::Logs { at, from });
                 self.save_confirm = None;
                 self.prompt = default_log_name();
                 self.overlay = Overlay::SaveLog;
@@ -111,7 +123,7 @@ impl App {
     /// writing over a file), Esc goes back to the log.
     pub(super) fn save_log_key(&mut self, code: KeyCode, mods: KeyModifiers) {
         match code {
-            KeyCode::Esc => self.overlay = self.log_back.take().unwrap_or(Overlay::None),
+            KeyCode::Esc => self.overlay = self.log.back.take().unwrap_or(Overlay::None),
             KeyCode::Enter => {
                 let name = self.prompt.trim().to_string();
                 if name.is_empty() {
@@ -132,7 +144,7 @@ impl App {
                     Err(e) => format!("couldn't save the log to {}: {e}", path.display()),
                 };
                 self.save_confirm = None;
-                self.overlay = self.log_back.take().unwrap_or(Overlay::None);
+                self.overlay = self.log.back.take().unwrap_or(Overlay::None);
             }
             KeyCode::Backspace => {
                 self.prompt.pop();
@@ -163,7 +175,7 @@ impl App {
         let top = match at {
             None => (first + lines.len()).saturating_sub(room).max(first),
             Some(cur) => {
-                let top = self.log_top.unwrap_or(cur).max(first);
+                let top = self.log.top.unwrap_or(cur).max(first);
                 let top = if cur < top {
                     cur
                 } else if cur >= top + room {
@@ -174,7 +186,7 @@ impl App {
                 top.min((last + 1).saturating_sub(room).max(first))
             }
         };
-        self.log_top = at.map(|_| top);
+        self.log.top = at.map(|_| top);
         let (lo, hi) = match (at, from) {
             (Some(cur), Some(f)) => (cur.min(f), cur.max(f)),
             (Some(cur), None) => (cur, cur),

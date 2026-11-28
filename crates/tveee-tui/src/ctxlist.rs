@@ -66,6 +66,24 @@ pub fn list_matches(label: &str, filter: &str) -> bool {
     filter.split_whitespace().all(|w| label.contains(&w.to_lowercase()))
 }
 
+/// The list pane's own state.
+#[derive(Default)]
+pub struct ListPane {
+    /// The trail to the list shown (its breadcrumbs).
+    pub crumbs: Vec<Crumb>,
+    /// A location being typed (^L), if one is.
+    pub location: Option<String>,
+    /// The breadcrumb chosen, while keys are on the breadcrumbs (Tab).
+    pub crumb_at: Option<usize>,
+    /// The folder a browsed list was left from: landed on when back up.
+    pub from: Option<String>,
+    /// Where the app's list was at the last refresh (a list following the
+    /// app's screen follows its highlight when it moves).
+    pub seen: Option<ListPlace>,
+    /// The refresh has been asked to read where the list is.
+    pub watching: bool,
+}
+
 impl App {
     /// The list as last read, if it's one.
     pub(super) fn list_ok(&self) -> Option<&ContextList> {
@@ -81,22 +99,22 @@ impl App {
     /// it is while it's open.
     pub(super) fn open_list(&mut self, actions: &Handle) {
         self.prompt.clear();
-        self.list_seen = None;
+        self.list.seen = None;
         let at = self.list_ok().and_then(|l| l.at.or(l.playing)).unwrap_or(0);
         self.overlay = Overlay::List { sel: at };
         let _ = actions.send(Action::WatchList(true));
         let _ = actions.send(Action::LoadList);
-        self.list_watching = true;
+        self.list.watching = true;
     }
 
     pub(super) fn close_list(&mut self, actions: &Handle) {
         self.overlay = Overlay::None;
         self.prompt.clear();
-        self.location = None;
-        self.crumb_at = None;
-        if self.list_watching {
+        self.list.location = None;
+        self.list.crumb_at = None;
+        if self.list.watching {
             let _ = actions.send(Action::WatchList(false));
-            self.list_watching = false;
+            self.list.watching = false;
         }
     }
 
@@ -104,23 +122,23 @@ impl App {
     /// shows), ⏎ chooses, typing filters, Esc closes.
     pub(super) fn list_key(&mut self, sel: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         // typing a location (^L): keys go to it
-        if self.location.is_some() {
+        if self.list.location.is_some() {
             return self.location_key(code, mods, actions);
         }
         // alt+↑: up a level, as in a file manager (wherever the keys are)
         if code == KeyCode::Up && mods.contains(KeyModifiers::ALT) {
-            self.crumb_at = None;
+            self.list.crumb_at = None;
             return self.list_up(actions);
         }
         // on the breadcrumbs (Tab): keys go to them
-        if let Some(at) = self.crumb_at
+        if let Some(at) = self.list.crumb_at
             && !(code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL))
         {
             return self.crumb_key(at, code, actions);
         }
         if code == KeyCode::Tab || code == KeyCode::BackTab {
-            if self.crumbs.len() > 1 {
-                self.crumb_at = Some(self.crumbs.len() - 1);
+            if self.list.crumbs.len() > 1 {
+                self.list.crumb_at = Some(self.list.crumbs.len() - 1);
             } else {
                 self.note = "no breadcrumbs here (this list isn't inside another tveee has seen)".into();
             }
@@ -130,9 +148,9 @@ impl App {
             return self.toggle_list_sync();
         }
         if code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL) {
-            self.crumb_at = None;
+            self.list.crumb_at = None;
             match self.list_ok().filter(|l| l.open_location.is_some()) {
-                Some(l) => self.location = Some(l.location.clone().unwrap_or_default()),
+                Some(l) => self.list.location = Some(l.location.clone().unwrap_or_default()),
                 None => self.note = "this list can't be opened at a typed location".into(),
             }
             return;
@@ -169,9 +187,9 @@ impl App {
     /// path it knows, smb://, /storage/..., musicdb://albums/), Esc goes
     /// back to the list.
     pub(super) fn location_key(&mut self, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
-        let Some(text) = self.location.as_mut() else { return };
+        let Some(text) = self.list.location.as_mut() else { return };
         match code {
-            KeyCode::Esc => self.location = None,
+            KeyCode::Esc => self.list.location = None,
             KeyCode::Enter => {
                 let typed = text.trim().to_string();
                 let template = self.list_ok().and_then(|l| l.open_location.clone());
@@ -179,10 +197,10 @@ impl App {
                     self.note = format!("opening {typed}...");
                     self.prompt.clear();
                     let to = tveee_core::more::Go::Link(t.replace("{}", &typed));
-                    self.location = None;
+                    self.list.location = None;
                     return self.list_open(to, actions);
                 }
-                self.location = None;
+                self.list.location = None;
             }
             KeyCode::Backspace => {
                 text.pop();
@@ -196,20 +214,20 @@ impl App {
     /// Keys on the breadcrumbs: ←/→ move along them, ⏎ goes to the one
     /// chosen, Tab, ↓ or Esc go back to the list.
     pub(super) fn crumb_key(&mut self, at: usize, code: KeyCode, actions: &Handle) {
-        let n = self.crumbs.len();
+        let n = self.list.crumbs.len();
         match code {
-            KeyCode::Left | KeyCode::BackTab if at > 0 => self.crumb_at = Some(at - 1),
-            KeyCode::Right if at + 1 < n => self.crumb_at = Some(at + 1),
-            KeyCode::Home => self.crumb_at = Some(0),
-            KeyCode::End => self.crumb_at = Some(n.saturating_sub(1)),
+            KeyCode::Left | KeyCode::BackTab if at > 0 => self.list.crumb_at = Some(at - 1),
+            KeyCode::Right if at + 1 < n => self.list.crumb_at = Some(at + 1),
+            KeyCode::Home => self.list.crumb_at = Some(0),
+            KeyCode::End => self.list.crumb_at = Some(n.saturating_sub(1)),
             KeyCode::Enter => {
-                self.crumb_at = None;
+                self.list.crumb_at = None;
                 // the last is the list shown: nothing to go to
                 if at + 1 < n {
                     self.list_crumb(at, actions);
                 }
             }
-            KeyCode::Tab | KeyCode::Down | KeyCode::Esc => self.crumb_at = None,
+            KeyCode::Tab | KeyCode::Down | KeyCode::Esc => self.list.crumb_at = None,
             _ => {}
         }
     }
@@ -222,7 +240,7 @@ impl App {
         match (browsed, go) {
             (Some(l), tveee_core::more::Go::Link(at)) => {
                 // coming back up: land on the folder left
-                self.list_from = l.location.clone();
+                self.list.from = l.location.clone();
                 let show = self.opt(tveee_core::options::LIST_SYNC);
                 let _ = actions.send(Action::ListOpen { at, show });
             }
@@ -256,9 +274,9 @@ impl App {
 
     /// Go back along the trail to crumb `i`.
     pub(super) fn list_crumb(&mut self, i: usize, actions: &Handle) {
-        if let Some(go) = self.crumbs.get(i).and_then(|c| c.go.clone()) {
+        if let Some(go) = self.list.crumbs.get(i).and_then(|c| c.go.clone()) {
             self.prompt.clear();
-            self.note = format!("{}...", self.crumbs[i].title);
+            self.note = format!("{}...", self.list.crumbs[i].title);
             self.list_open(go, actions);
         }
     }
@@ -285,9 +303,9 @@ impl App {
     /// reading where the list is once the pane has closed another way.
     pub(super) fn list_sync(&mut self, change: Change) {
         let Overlay::List { sel } = self.overlay else {
-            if self.list_watching {
+            if self.list.watching {
                 let _ = self.engine.send(Action::WatchList(false));
-                self.list_watching = false;
+                self.list.watching = false;
             }
             return;
         };
@@ -296,11 +314,11 @@ impl App {
         // a new list came: start where the app is in it
         if change == Change::List {
             if let Some(l) = self.list_ok().cloned() {
-                self.crumbs = breadcrumbs(&self.crumbs, &l);
+                self.list.crumbs = breadcrumbs(&self.list.crumbs, &l);
                 // another list: the breadcrumbs changed under the cursor
-                self.crumb_at = None;
+                self.list.crumb_at = None;
             }
-            let from = self.list_from.take().map(|f| f.trim_end_matches('/').to_string());
+            let from = self.list.from.take().map(|f| f.trim_end_matches('/').to_string());
             if let Some(l) = self.list_ok() {
                 let at = place
                     .as_ref()
@@ -313,14 +331,14 @@ impl App {
                 let at = from.and_then(|f| l.items.iter().position(|i| i.id.split('?').next().unwrap_or("").trim_end_matches('/') == f)).unwrap_or(at);
                 self.overlay = Overlay::List { sel: at };
             }
-            self.list_seen = place;
+            self.list.seen = place;
             return;
         }
         let Some(p) = place else { return };
         // browsed here: it doesn't follow the app's screen
         if self.list_ok().is_some_and(|l| l.browsed) {
             self.overlay = Overlay::List { sel };
-            self.list_seen = Some(p);
+            self.list.seen = Some(p);
             return;
         }
         // an app with a highlight of its own (Kodi) is followed by that;
@@ -331,12 +349,12 @@ impl App {
             if !self.st.list_loading {
                 let _ = self.engine.send(Action::LoadList);
             }
-        } else if has_focus && self.list_seen.as_ref().is_none_or(|s| s.focus_id != p.focus_id || s.focus_label != p.focus_label) {
+        } else if has_focus && self.list.seen.as_ref().is_none_or(|s| s.focus_id != p.focus_id || s.focus_label != p.focus_label) {
             // the app's highlight moved: follow it
             if let Some(at) = self.list_ok().and_then(|l| l.find(&p)) {
                 self.overlay = Overlay::List { sel: at };
             }
-        } else if !has_focus && self.list_seen.as_ref().is_none_or(|s| s.playing_id != p.playing_id) {
+        } else if !has_focus && self.list.seen.as_ref().is_none_or(|s| s.playing_id != p.playing_id) {
             // no highlight of its own (YouTube): follow what's playing
             if let Some(at) = self.list_ok().and_then(|l| l.find_playing(&p.playing_id)) {
                 self.overlay = Overlay::List { sel: at };
@@ -344,7 +362,7 @@ impl App {
         } else {
             self.overlay = Overlay::List { sel };
         }
-        self.list_seen = Some(p);
+        self.list.seen = Some(p);
     }
 
     /// The list pane: its heading and count, the filter, the rows that fit
@@ -384,25 +402,25 @@ impl App {
                 let shown = self.list_shown();
                 let pos = shown.iter().position(|&i| i == sel);
                 // typing a location (^L): it, in place of the breadcrumbs
-                if let Some(typed) = &self.location {
+                if let Some(typed) = &self.list.location {
                     text.push(Line::from(vec![
                         Span::styled("location ", dim),
                         Span::styled(format!("{typed}█"), Style::new().fg(Color::White).bg(Color::DarkGray)),
                     ]));
                     rows_at.push(None);
-                } else if self.crumbs.len() > 1 {
+                } else if self.list.crumbs.len() > 1 {
                     // the trail to here (the last one is here), each to click
                     let mut spans = Vec::new();
                     let mut x = 0u16;
-                    for (i, c) in self.crumbs.iter().enumerate() {
+                    for (i, c) in self.list.crumbs.iter().enumerate() {
                         if i > 0 {
                             spans.push(Span::styled(" › ", dim));
                             x += 3;
                         }
-                        let last = i + 1 == self.crumbs.len();
+                        let last = i + 1 == self.list.crumbs.len();
                         let st = if last { Style::new().bold() } else { Style::new().fg(Color::Cyan) };
                         // the one chosen while on the breadcrumbs (Tab)
-                        let st = if self.crumb_at == Some(i) { st.reversed() } else { st };
+                        let st = if self.list.crumb_at == Some(i) { st.reversed() } else { st };
                         let w = u16::try_from(c.title.chars().count()).unwrap_or(0);
                         if !last && c.go.is_some() {
                             crumb_spots.push((x, w, i));
@@ -494,8 +512,8 @@ impl App {
                     (true, true) => "^S sync folder: on  ",
                     (true, false) => "^S sync folder: off  ",
                 };
-                let tab = if self.crumbs.len() > 1 { "tab breadcrumbs  " } else { "" };
-                let hint = if self.crumb_at.is_some() {
+                let tab = if self.list.crumbs.len() > 1 { "tab breadcrumbs  " } else { "" };
+                let hint = if self.list.crumb_at.is_some() {
                     format!("{loc}tab back to the list")
                 } else {
                     format!("⌫/alt+↑ up  {tab}{loc}{sync}type to filter{reading}")
