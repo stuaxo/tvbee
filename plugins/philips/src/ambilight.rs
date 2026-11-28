@@ -78,15 +78,14 @@ fn names(table: &[(&str, &str)]) -> String {
 
 /// The body that sets a style ("FOLLOW_VIDEO" with "STANDARD", ...).
 pub fn style_body(style: &str, setting: Option<&str>, label: Option<&str>) -> String {
-    let mut body = format!(r#"{{"styleName":"{style}","isExpert":false"#);
+    let mut body = serde_json::json!({ "styleName": style, "isExpert": false });
     if let Some(s) = setting {
-        body.push_str(&format!(r#","menuSetting":"{s}""#));
+        body["menuSetting"] = s.into();
     }
     if let Some(l) = label {
-        body.push_str(&format!(r#","stringValue":"{l}""#));
+        body["stringValue"] = l.into();
     }
-    body.push('}');
-    body
+    body.to_string()
 }
 
 /// A colour: `#ff8800`, `ff8800`, `255,136,0`, or a name (in the core: the
@@ -323,7 +322,7 @@ pub fn change(tv: &Tv, args: &[String]) -> Result<String> {
             Ok(format!("ambilight: {}", setting.to_lowercase().replace('_', " ")))
         }
         ["hue", on @ ("on" | "off")] => {
-            post(tv, "/6/HueLamp/power", &format!(r#"{{"power":"{}"}}"#, if *on == "on" { "On" } else { "Off" }))?;
+            post(tv, "/6/HueLamp/power", &serde_json::json!({ "power": if *on == "on" { "On" } else { "Off" } }).to_string())?;
             Ok(format!("Ambilight+Hue {on}"))
         }
         ["all", c @ ..] if !c.is_empty() => set_colour(tv, colour(c)?),
@@ -411,12 +410,12 @@ pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
 }
 
 pub fn set_power(tv: &Tv, on: bool) -> Result<String> {
-    post(tv, "/6/ambilight/power", &format!(r#"{{"power":"{}"}}"#, if on { "On" } else { "Off" }))?;
+    post(tv, "/6/ambilight/power", &serde_json::json!({ "power": if on { "On" } else { "Off" } }).to_string())?;
     Ok(format!("ambilight {}", if on { "on" } else { "off" }))
 }
 
 pub fn set_mode(tv: &Tv, mode: &str) -> Result<()> {
-    post(tv, "/6/ambilight/mode", &format!(r#"{{"current":"{mode}"}}"#))
+    post(tv, "/6/ambilight/mode", &serde_json::json!({ "current": mode }).to_string())
 }
 
 /// A style of the TV's own: the TV takes the lights back first.
@@ -429,14 +428,14 @@ pub fn set_style(tv: &Tv, style: &str, setting: Option<&str>, label: Option<&str
 /// others as they are: the lights go to outside control (manual).
 pub fn set_light(tv: &Tv, side: &str, n: u32, (r, g, b): (u8, u8, u8)) -> Result<String> {
     set_mode(tv, "manual")?;
-    post(tv, "/6/ambilight/cached", &format!(r#"{{"layer1":{{"{side}":{{"{n}":{{"r":{r},"g":{g},"b":{b}}}}}}}}}"#))?;
+    post(tv, "/6/ambilight/cached", &serde_json::json!({ "layer1": { side: { n.to_string(): { "r": r, "g": g, "b": b } } } }).to_string())?;
     Ok(format!("ambilight: {side} {n} #{r:02x}{g:02x}{b:02x} (outside control)"))
 }
 
 /// Every light one colour: the lights go to outside control (manual).
 pub fn set_colour(tv: &Tv, (r, g, b): (u8, u8, u8)) -> Result<String> {
     set_mode(tv, "manual")?;
-    post(tv, "/6/ambilight/cached", &format!(r#"{{"r":{r},"g":{g},"b":{b}}}"#))?;
+    post(tv, "/6/ambilight/cached", &serde_json::json!({ "r": r, "g": g, "b": b }).to_string())?;
     Ok(format!("ambilight: every light #{r:02x}{g:02x}{b:02x} (outside control; 'tveee ambilight video' gives it back to the TV)"))
 }
 
@@ -495,7 +494,7 @@ fn ambilight(c: &Ctx, args: &[String]) -> Result<()> {
             set_colour(tv, rgb)?
         }
         ["hue", on @ ("on" | "off")] => {
-            post(tv, "/6/HueLamp/power", &format!(r#"{{"power":"{}"}}"#, if *on == "on" { "On" } else { "Off" }))?;
+            post(tv, "/6/HueLamp/power", &serde_json::json!({ "power": if *on == "on" { "On" } else { "Off" } }).to_string())?;
             format!("Ambilight+Hue {on}")
         }
         _ => {
@@ -655,10 +654,15 @@ mod tests {
 
     #[test]
     fn styles() {
-        assert_eq!(style_body("FOLLOW_VIDEO", Some("STANDARD"), None), r#"{"styleName":"FOLLOW_VIDEO","isExpert":false,"menuSetting":"STANDARD"}"#);
+        // as JSON (an object's keys have no order)
+        let as_json = |s: String| serde_json::from_str::<serde_json::Value>(&s).unwrap();
         assert_eq!(
-            style_body("FOLLOW_COLOR", Some("HOT_LAVA"), Some("Hot Lava")),
-            r#"{"styleName":"FOLLOW_COLOR","isExpert":false,"menuSetting":"HOT_LAVA","stringValue":"Hot Lava"}"#
+            as_json(style_body("FOLLOW_VIDEO", Some("STANDARD"), None)),
+            serde_json::json!({ "styleName": "FOLLOW_VIDEO", "isExpert": false, "menuSetting": "STANDARD" })
+        );
+        assert_eq!(
+            as_json(style_body("FOLLOW_COLOR", Some("HOT_LAVA"), Some("Hot Lava"))),
+            serde_json::json!({ "styleName": "FOLLOW_COLOR", "isExpert": false, "menuSetting": "HOT_LAVA", "stringValue": "Hot Lava" })
         );
         assert_eq!(lookup(VIDEO, "vivid"), Some("VIVID"));
         assert_eq!(lookup(AUDIO, "VU_METER"), Some("VU_METER"));

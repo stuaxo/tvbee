@@ -46,6 +46,17 @@ pub struct Http {
     pub body: Option<String>,
     pub auth: Auth,
     pub timeout_secs: u32,
+    /// What to do when the connection is refused.
+    pub retry: Retry,
+}
+
+/// When a refused HTTP connection is worth trying again for a while.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Retry {
+    Never,
+    /// While the TV says it's awake: then the refusal is an app restarting
+    /// its API (live TV's JointSpace), not the TV in standby.
+    WhileAwake,
 }
 
 /// How an HTTP request authenticates.
@@ -180,12 +191,16 @@ impl Tv {
                     Auth::Basic { user, password } => (Some(pair(user, password)), None),
                     Auth::Digest { user, password } => (None, Some(pair(user, password))),
                 };
+                let awake = || self.read::<crate::readings::Power>().is_ok_and(|p| p.awake());
                 let (status, body) = crate::https::request(&crate::https::Request {
                     url: &h.url,
                     body: h.body.as_deref(),
                     digest: digest.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
                     basic: basic.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
-                    retry: None,
+                    retry: match h.retry {
+                        Retry::Never => None,
+                        Retry::WhileAwake => Some(&awake),
+                    },
                     timeout_secs: h.timeout_secs,
                 })?;
                 Ok(Reply { status, body })
