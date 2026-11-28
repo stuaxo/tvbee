@@ -1140,3 +1140,46 @@ fn alt_up_goes_up() {
     a.list_key(2, KeyCode::Up, KeyModifiers::NONE, &h);
     assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
 }
+
+#[test]
+fn moving_in_the_pane_moves_kodi() {
+    use tveee_core::provider::ListPlace;
+    let st = kodi_artists();
+    let (mut a, rx, h, held) = app_holding(st.clone());
+    a.open_list(&h);
+    a.list_sync(Change::Snapshot);
+    let _ = rx.try_iter().count();
+    let at = |label: &str, id: &str| {
+        let mut s = st.clone();
+        s.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: label.into(), focus_id: id.into(), playing_id: String::new() });
+        Arc::new(s)
+    };
+    // Kodi on Radiohead (2): ↑ ↑ in the pane, Kodi's highlight goes up with it
+    a.list_key(2, KeyCode::Up, KeyModifiers::NONE, &h);
+    a.list_key(1, KeyCode::Up, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::List { sel: 0 });
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListMove(-1), Action::ListMove(-1)]);
+    // a reading from before the moves landed doesn't pull the pane back
+    *held.lock().unwrap() = at("Radiohead", "musicdb://artists/9/");
+    a.st = h.state();
+    a.list_sync(Change::Snapshot);
+    assert_eq!(a.overlay, Overlay::List { sel: 0 });
+    // the one showing them agrees
+    *held.lock().unwrap() = at("Massive Attack", "musicdb://artists/1/");
+    a.st = h.state();
+    a.list_sync(Change::Snapshot);
+    assert_eq!(a.overlay, Overlay::List { sel: 0 });
+    assert_eq!(a.list_moved, None);
+    // End: straight to the last, in one move
+    a.list_key(0, KeyCode::End, KeyModifiers::NONE, &h);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListMove(3)]);
+    // the remote moves Kodi (once the move has settled): the pane follows
+    a.list_moved = None;
+    *held.lock().unwrap() = at("Portishead", "musicdb://artists/7/");
+    a.st = h.state();
+    a.list_sync(Change::Snapshot);
+    assert_eq!(a.overlay, Overlay::List { sel: 1 });
+    // and moves from there
+    a.list_key(1, KeyCode::Down, KeyModifiers::NONE, &h);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListMove(1)]);
+}
