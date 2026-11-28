@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 98
+assertion_line: 101
 expression: "screen(&mut app(kodi_paused()), CORNER)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
@@ -16,6 +16,6 @@ expression: "screen(&mut app(kodi_paused()), CORNER)"
 │                                                          │
 │                                                          │
 │                                                          │
-│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│ space  play   ←     →     tab  remote   ?  help   q  quit│
 │                                                          │
 └──────────────────────────────────────────────────────────┘

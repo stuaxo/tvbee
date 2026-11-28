@@ -1464,3 +1464,16 @@ fn a_plugin_turned_off_goes_at_once() {
     a.options_key(0, KeyCode::Right);
     assert!(a.plugins[0].enabled);
 }
+
+#[test]
+fn remote_mode_findable_when_narrow() {
+    let (mut a, _rx, h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let s = screen(&mut a, CORNER);
+    assert!(s.contains("tab  remote") || s.contains("tab remote"), "{s}");
+    // the tag top right switches mode when clicked
+    let first = s.lines().next().unwrap_or_default();
+    let x = first.chars().count() - " player ".len() + 1;
+    assert!(!a.click(u16::try_from(x).unwrap(), 0, &h));
+    assert_eq!(a.mode, Mode::Remote);
+}

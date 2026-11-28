@@ -16,6 +16,6 @@ expression: s
 │a letter jumps  tab switches  # package names            ││
 │right-click actions   F1 guide  F3 remote                ││
 └─────────────────────────────────────────────────────────┘│
-│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│ space  play   ←     →     tab  remote   ?  help   q  quit│
 │                                                          │
 └──────────────────────────────────────────────────────────┘

@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 179
+assertion_line: 182
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
@@ -16,6 +16,6 @@ expression: s
 │                                                          │
 │                                                          │
 │                                                          │
-│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│ space  play   ←     →     tab  remote   ?  help   q  quit│
 │                                                          │
 └──────────────────────────────────────────────────────────┘
