@@ -6,47 +6,47 @@
 //! the screen never waits on adb; the worker keeps one devtools connection
 //! open, which makes refreshing every second and exact seeking cheap.
 
-use tveee_core::error::Result;
-use tveee_core::actions::{ActionDescriptor, Params};
-use tveee_core::nowplaying::{self, Activity, bar, progress_bar};
-use tveee_core::builtin::apps::list_name;
-use tveee_core::builtin::{apps, info, search};
-use tveee_core::Ctx;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
+use tveee_core::Ctx;
+use tveee_core::actions::{ActionDescriptor, Params};
+use tveee_core::builtin::apps::list_name;
+use tveee_core::builtin::{apps, info, search};
+use tveee_core::error::Result;
+use tveee_core::nowplaying::{self, Activity, bar, progress_bar};
 
-mod keymap;
-mod guide;
-mod preview;
-mod launcher;
 mod ambi;
+mod ctxlist;
+mod drawing;
+mod guide;
+mod keymap;
+mod launcher;
+mod links;
+mod listnav;
+mod logview;
 mod overlays;
 mod palette;
-mod drawing;
-mod links;
-mod logview;
-mod listnav;
-mod ctxlist;
-#[cfg(test)]
-mod tests;
+mod preview;
 #[cfg(test)]
 mod snapshots;
+#[cfg(test)]
+mod tests;
 
-use tveee_core::engine::*;
-pub use self::keymap::*;
+pub use self::drawing::*;
 pub use self::guide::*;
-pub use self::preview::*;
+pub use self::keymap::*;
 pub use self::launcher::*;
 pub use self::overlays::*;
 pub use self::palette::*;
-pub use self::drawing::*;
+pub use self::preview::*;
+use tveee_core::engine::*;
 
 const CAT: &str = "ui";
 struct App {
@@ -94,6 +94,12 @@ struct App {
     log_top: Option<usize>,
     /// A drag over the log's lines started (it selects).
     log_drag: bool,
+    /// A scrollbar being dragged (until the button's let go, the mouse is
+    /// its): it, and where in its thumb it was grabbed.
+    bar_drag: Option<(drawing::BarAt, u16)>,
+    /// Which item each row of the list pane or options is (None: a
+    /// heading, a gap), as last drawn: a dragged scrollbar picks by row.
+    bar_rows: Vec<Option<usize>>,
     /// tveee's options as this app reads them: None, the saved ones; tests
     /// give each app its own (never the real file, nor each other's).
     opts: Option<Vec<(String, bool)>>,
@@ -110,8 +116,14 @@ struct App {
     list_watching: bool,
     /// The options dialog's tab: its options, or the plugins.
     options_plugins: bool,
+    /// The keys are on the options' tab bar (↑ from the first row): ←/→
+    /// switch tabs there, and only there.
+    options_on_tabs: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
     plugins: Vec<tveee_core::plugin::PluginState>,
+    /// Every plugin there is (from the start): what's installed again when
+    /// one is turned on or off. None in tests (nothing installed).
+    all_plugins: Option<fn() -> Vec<tveee_core::plugin::Plugin>>,
     /// What has been typed into the open prompt.
     prompt: String,
     /// The search box's app choices, made when it opens.
@@ -282,7 +294,6 @@ impl Drop for MouseCapture {
 }
 
 fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreEvent>) -> std::io::Result<()> {
-    use ratatui::crossterm::event::{MouseButton, MouseEventKind};
     // redraw when something changed (a key, news from the TV), and at least
     // every TICK so the progress bar moves
     const TICK: Duration = Duration::from_millis(200);
@@ -409,34 +420,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     _ => {}
                 }
             }
-            Event::Mouse(m) => match m.kind {
-                // the log's lines: shift+click selects to there; a drag selects
-                MouseEventKind::Down(MouseButton::Left) if matches!((app.overlay, app.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) => {
-                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
-                        app.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
-                        app.log_drag = true;
-                    }
-                }
-                MouseEventKind::Drag(MouseButton::Left) if app.log_drag => {
-                    if let Some(Hit::LogLine(n)) = app.hit_at(m.column, m.row) {
-                        app.log_click(n, true);
-                    }
-                }
-                MouseEventKind::Up(MouseButton::Left) => app.log_drag = false,
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if app.click(m.column, m.row, actions) {
-                        return Ok(());
-                    }
-                }
-                MouseEventKind::Down(MouseButton::Right) => {
-                    if let (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) = (app.overlay, app.hit_at(m.column, m.row)) {
-                        app.overlay = Overlay::AppActions { tab, sel: i, at: 0 };
-                    }
-                }
-                MouseEventKind::ScrollUp => app.scroll(true, actions),
-                MouseEventKind::ScrollDown => app.scroll(false, actions),
-                _ => {}
-            },
+            Event::Mouse(m) if app.mouse(m, actions) => return Ok(()),
             _ => {}
         }
     }
@@ -460,6 +444,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
     app.plugins = c.plugins.clone();
+    app.all_plugins = Some(c.all);
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -481,8 +466,11 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui).cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking").long(
-        "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
+    vec![
+        ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui)
+            .cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking")
+            .long(
+                "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
          the arrows seek and change volume; in remote mode the keyboard is the TV's:\n\
          arrows move around its menus, Enter is OK, Esc is back, and what you type\n\
@@ -526,7 +514,8 @@ pub fn actions() -> Vec<ActionDescriptor> {
          what line says so (\"launching Netflix...\") instead of showing each step\n\
          the TV passes through, until the action has arrived and settled.\n\
          --no-settle shows every step as it comes (for debugging).",
-    )]
+            ),
+    ]
 }
 
 impl App {
@@ -555,13 +544,17 @@ impl App {
             save_confirm: None,
             log_top: None,
             log_drag: false,
+            bar_drag: None,
+            bar_rows: Vec::new(),
             opts: None,
             system_watching: false,
             under: None,
             list_seen: None,
             list_watching: false,
             options_plugins: false,
+            options_on_tabs: false,
             plugins: Vec::new(),
+            all_plugins: None,
             prompt: String::new(),
             search_targets: Vec::new(),
             settling: None,
@@ -648,13 +641,8 @@ impl App {
         }
         let snap = self.st.snap.as_ref();
         // home screens on the way: the ones tveee knows, and those on the TV
-        let mut passing: Vec<String> = self
-            .st
-            .apps_list()
-            .iter()
-            .filter(|e| e.section == SECTIONS[0] || apps::passes_through(&e.package))
-            .map(|e| e.package.clone())
-            .collect();
+        let mut passing: Vec<String> =
+            self.st.apps_list().iter().filter(|e| e.section == SECTIONS[0] || apps::passes_through(&e.package)).map(|e| e.package.clone()).collect();
         passing.extend(["android", "com.android.systemui"].map(String::from));
         self.settling = Some(Settling::new(
             label,
@@ -750,7 +738,10 @@ impl App {
                 let _ = actions.send(Action::Visualiser);
             }
             Input::OpenList => self.open_list(actions),
-            Input::OpenOptions => self.overlay = Overlay::Options(0),
+            Input::OpenOptions => {
+                self.options_on_tabs = false;
+                self.overlay = Overlay::Options(0);
+            }
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
                 let standby = self.st.snap.as_ref().is_some_and(|s| s.standby);
@@ -895,6 +886,94 @@ impl App {
         }
     }
 
+    /// A mouse event. Returns true to quit.
+    fn mouse(&mut self, m: ratatui::crossterm::event::MouseEvent, actions: &Handle) -> bool {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        match m.kind {
+            // a scrollbar: grabbed (its thumb) or clicked (the track:
+            // the thumb jumps there), then dragged; the mouse is its
+            // until let go, wherever it goes
+            MouseEventKind::Down(MouseButton::Left) if matches!(self.hit_at(m.column, m.row), Some(Hit::Scrollbar(_))) => {
+                if let Some(Hit::Scrollbar(b)) = self.hit_at(m.column, m.row) {
+                    let cell = m.row.saturating_sub(b.area.y);
+                    let (start, len) = b.thumb();
+                    let grab = if (start..start + len).contains(&cell) { cell - start } else { len / 2 };
+                    self.bar_drag = Some((b, grab));
+                    self.drag_bar(m.row);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.bar_drag.is_some() => self.drag_bar(m.row),
+            MouseEventKind::Up(MouseButton::Left) if self.bar_drag.is_some() => self.bar_drag = None,
+            // the log's lines: shift+click selects to there; a drag selects
+            MouseEventKind::Down(MouseButton::Left)
+                if matches!((self.overlay, self.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) =>
+            {
+                if let Some(Hit::LogLine(n)) = self.hit_at(m.column, m.row) {
+                    self.log_click(n, m.modifiers.contains(KeyModifiers::SHIFT));
+                    self.log_drag = true;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.log_drag => {
+                if let Some(Hit::LogLine(n)) = self.hit_at(m.column, m.row) {
+                    self.log_click(n, true);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => self.log_drag = false,
+            MouseEventKind::Down(MouseButton::Left) => {
+                if self.click(m.column, m.row, actions) {
+                    return true;
+                }
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                if let (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) = (self.overlay, self.hit_at(m.column, m.row)) {
+                    self.overlay = Overlay::AppActions { tab, sel: i, at: 0 };
+                }
+            }
+            MouseEventKind::ScrollUp => self.scroll(true, actions),
+            MouseEventKind::ScrollDown => self.scroll(false, actions),
+            _ => {}
+        }
+        false
+    }
+
+    /// The scrollbar being dragged, with the mouse at row `y`: its pane
+    /// scrolled to match.
+    fn drag_bar(&mut self, y: u16) {
+        let Some((b, grab)) = self.bar_drag else { return };
+        let top = b.top_at(i32::from(y) - i32::from(b.area.y) - i32::from(grab));
+        let room = usize::from(b.area.height);
+        // the row in the middle of what's to be shown: the nearest item to
+        // it (panes that keep their highlight in view scroll by moving it)
+        let middle = |rows: &[Option<usize>]| {
+            let want = (top + room / 2).min(rows.len().saturating_sub(1));
+            (0..rows.len()).filter_map(|r| rows[r].map(|i| (r.abs_diff(want), i))).min().map(|(_, i)| i)
+        };
+        match (b.of, self.overlay) {
+            (drawing::Bar::Help, Overlay::Help(_)) => self.overlay = Overlay::Help(top),
+            (drawing::Bar::Log, Overlay::Logs { at, from }) => {
+                let (first, lines) = tveee_core::log::recent_numbered();
+                let last = (first + lines.len()).saturating_sub(1);
+                let top = first + top;
+                // the highlight kept in what's shown (stops following the newest)
+                let cur = at.unwrap_or(last).clamp(top, (top + room).saturating_sub(1).min(last));
+                self.log_top = Some(top);
+                self.overlay = Overlay::Logs { at: Some(cur), from };
+            }
+            (drawing::Bar::List, Overlay::List { .. }) => {
+                if let Some(i) = middle(&self.bar_rows) {
+                    self.overlay = Overlay::List { sel: i };
+                }
+            }
+            (drawing::Bar::Options, Overlay::Options(_)) => {
+                if let Some(i) = middle(&self.bar_rows) {
+                    self.overlay = Overlay::Options(i);
+                }
+            }
+            // the pane closed under it
+            _ => self.bar_drag = None,
+        }
+    }
+
     fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
         let pos = ratatui::layout::Position { x, y };
         // drawn last = on top
@@ -915,9 +994,7 @@ impl App {
                 self.apply_overlay(next, action, actions);
             }
             (Overlay::Menu(_), Some(Hit::Popup)) => {}
-            (Overlay::Confirm { id, .. }, Some(Hit::ConfirmYes)) => {
-                self.apply_overlay(Overlay::None, Some(run(id)), actions)
-            }
+            (Overlay::Confirm { id, .. }, Some(Hit::ConfirmYes)) => self.apply_overlay(Overlay::None, Some(run(id)), actions),
             (Overlay::Confirm { .. }, Some(Hit::Popup)) => {}
             (Overlay::Apps { tab, .. }, Some(Hit::AppTab(t))) if t != tab => {
                 self.apply_overlay(Overlay::Apps { tab: t, sel: 0 }, None, actions);
@@ -972,7 +1049,16 @@ impl App {
             (Overlay::SaveLog, Some(Hit::Popup)) => {}
             (Overlay::SaveLog, _) => self.overlay = self.log_back.take().unwrap_or(Overlay::None),
             // a click elsewhere closes the pop-up (cancelling a confirmation)
-            (Overlay::Help(_) | Overlay::Menu(_) | Overlay::Confirm { .. } | Overlay::Apps { .. } | Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_), _) => {
+            (
+                Overlay::Help(_)
+                | Overlay::Menu(_)
+                | Overlay::Confirm { .. }
+                | Overlay::Apps { .. }
+                | Overlay::Prompt(_)
+                | Overlay::Search(_)
+                | Overlay::Palette(_),
+                _,
+            ) => {
                 let palette = matches!(self.overlay, Overlay::Palette(_));
                 self.apply_overlay(Overlay::None, None, actions);
                 if palette {
@@ -1007,6 +1093,8 @@ impl App {
             // another light (or any choice in the panel) while picking a colour
             (Overlay::AmbiColour { .. }, Some(Hit::AmbiOption(r, c))) => self.ambi_switch(r, c, actions),
             (Overlay::AmbiColour { .. }, Some(Hit::Popup)) => {}
+            // the panel beside it: not a reason to stop picking
+            (Overlay::AmbiColour { .. }, Some(Hit::Input(Input::AmbilightDialog))) => {}
             (Overlay::AmbiColour { row, col }, _) => self.overlay = Overlay::Ambilight { row, col },
             // the PIN box: a click outside it cancels
             (Overlay::Pin, Some(Hit::Popup)) => {}

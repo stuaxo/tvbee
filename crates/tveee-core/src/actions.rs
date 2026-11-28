@@ -9,11 +9,11 @@
 //!
 //! Plain data, so plugins describe them whether or not the ui is built.
 
+use crate::Ctx;
+use crate::builtin::apps::Front;
 use crate::error::Result;
 use crate::registry::Command;
-use crate::builtin::apps::Front;
 use crate::tv::Tv;
-use crate::Ctx;
 
 /// What an action gets to work with.
 pub struct Cx<'a> {
@@ -99,7 +99,10 @@ impl Run {
 pub enum Params {
     None,
     /// A line of text: `prompt` asks for it, `hint` is an example.
-    Text { prompt: &'static str, hint: &'static str },
+    Text {
+        prompt: &'static str,
+        hint: &'static str,
+    },
 }
 
 /// How the command line reaches an action: `tveee <name> <usage>`.
@@ -143,12 +146,36 @@ pub struct ActionDescriptor {
 
 impl ActionDescriptor {
     pub const fn new(id: &'static str, category: &'static str, title: &'static str, run: Do) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, fronts: None, run: Run::Do(run) }
+        ActionDescriptor {
+            id,
+            category,
+            title,
+            params: Params::None,
+            args: "",
+            cli: None,
+            key: None,
+            confirm: None,
+            media: None,
+            fronts: None,
+            run: Run::Do(run),
+        }
     }
 
     /// A command-line action that prints for itself (see [`Terminal`]).
     pub const fn terminal(id: &'static str, category: &'static str, title: &'static str, run: Terminal) -> Self {
-        ActionDescriptor { id, category, title, params: Params::None, args: "", cli: None, key: None, confirm: None, media: None, fronts: None, run: Run::Terminal(run) }
+        ActionDescriptor {
+            id,
+            category,
+            title,
+            params: Params::None,
+            args: "",
+            cli: None,
+            key: None,
+            confirm: None,
+            media: None,
+            fronts: None,
+            run: Run::Terminal(run),
+        }
     }
 
     /// Reachable as `tveee <name>`, `desc` its one-line help.
@@ -229,11 +256,32 @@ impl ActionDescriptor {
     /// Its command, if the command line has one.
     pub fn command(&self) -> Option<Command> {
         let c = self.cli?;
-        Some(Command { category: self.category, name: c.name, usage: c.usage, desc: c.desc, long: c.long, aliases: c.aliases, fronts: self.fronts, run: self.run })
+        Some(Command {
+            category: self.category,
+            name: c.name,
+            usage: c.usage,
+            desc: c.desc,
+            long: c.long,
+            aliases: c.aliases,
+            fronts: self.fronts,
+            run: self.run,
+        })
     }
 }
 
 /// The action with this id.
+static REGISTRY: crate::plugin::Registry<ActionDescriptor> = crate::plugin::Registry::new();
+
+/// Set the enabled plugins' actions (see [`crate::plugin::install_enabled`]).
+pub fn install(actions: Vec<ActionDescriptor>) {
+    REGISTRY.install(actions);
+}
+
+/// The enabled plugins' actions, as last installed (None: not yet).
+pub fn installed() -> Option<&'static [ActionDescriptor]> {
+    REGISTRY.get()
+}
+
 pub fn find<'a>(actions: &'a [ActionDescriptor], id: &str) -> Option<&'a ActionDescriptor> {
     actions.iter().find(|a| a.id == id)
 }

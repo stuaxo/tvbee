@@ -1,10 +1,10 @@
 //! `open [app] <url>`: hand a link to the app that handles it (Android VIEW intent).
 
 use super::apps;
-use crate::error::{failed, usage, Result};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::tv::Tv;
 
 const VIEW: &str = "android.intent.action.VIEW";
 
@@ -73,11 +73,7 @@ pub fn parse_resolved(out: &str) -> Option<String> {
 
 /// Components listed by `query-activities --brief`.
 pub fn parse_candidates(out: &str) -> Vec<String> {
-    out.lines()
-        .map(str::trim)
-        .filter(|l| l.contains('/') && !l.contains(' ') && !l.contains('='))
-        .map(str::to_string)
-        .collect()
+    out.lines().map(str::trim).filter(|l| l.contains('/') && !l.contains(' ') && !l.contains('=')).map(str::to_string).collect()
 }
 
 fn resolve(tv: &Tv, url: &str, mime: Option<&str>, pkg: Option<&str>) -> Result<Option<String>> {
@@ -111,10 +107,7 @@ fn choose(tv: &Tv, url: &str, mime: Option<&str>, app: Option<&str>) -> Result<S
     if found == CHOOSER {
         // several apps could; Android would ask. Prefer a known player.
         let all = candidates(tv, url, mime)?;
-        let pick = PLAYERS
-            .iter()
-            .find_map(|p| all.iter().find(|c| c.split('/').next() == Some(p)))
-            .or(all.first());
+        let pick = PLAYERS.iter().find_map(|p| all.iter().find(|c| c.split('/').next() == Some(p))).or(all.first());
         return match pick {
             Some(c) => Ok(c.clone()),
             None => failed("open: Android would ask which app to use; name one: tveee open <app> <url>"),
@@ -148,9 +141,11 @@ pub fn open_link(tv: &Tv, line: &str) -> Result<String> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![crate::actions::ActionDescriptor::new("apps.open_link", "apps", "open a link", |cx, a| open_link(cx.tv, &a.join(" ")).map(Into::into))
-        .key('o')
-        .text("Link to open:", "e.g. https://youtu.be/...   or   vlc http://host/film.mkv")]
+    vec![
+        crate::actions::ActionDescriptor::new("apps.open_link", "apps", "open a link", |cx, a| open_link(cx.tv, &a.join(" ")).map(Into::into))
+            .key('o')
+            .text("Link to open:", "e.g. https://youtu.be/...   or   vlc http://host/film.mkv"),
+    ]
 }
 
 pub fn parse_args(args: &[String]) -> Result<(Option<&str>, &str, bool)> {
@@ -188,8 +183,11 @@ fn open(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn command_actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("open.open", "apps", "open a link in the app that handles it", open).cli("open", USAGE, "open a link in the app that handles it").long(
-        "Sends the TV a 'view this link' request. Without an app, Android picks the app\n\
+    vec![
+        ActionDescriptor::terminal("open.open", "apps", "open a link in the app that handles it", open)
+            .cli("open", USAGE, "open a link in the app that handles it")
+            .long(
+                "Sends the TV a 'view this link' request. Without an app, Android picks the app\n\
          that claims the link (YouTube and Netflix links open in their apps). Links\n\
          straight to media files (.mp4, .mkv, .m3u8, ...) go to VLC, then MX Player,\n\
          then Kodi. Links no app claims are refused rather than opened in the\n\
@@ -200,7 +198,8 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
          \x20 tveee open vlc http://example.com/film.mkv\n\
          \x20 tveee open \"$(tveee status | sed -n 's/^url: *//p')\"\n\
          \x20 --dry-run  say which app would open it, without opening",
-    )]
+            ),
+    ]
 }
 
 #[cfg(test)]
@@ -225,16 +224,10 @@ mod tests {
 
     #[test]
     fn parses_lookups() {
-        assert_eq!(
-            parse_resolved("priority=0 preferredOrder=0\norg.videolan.vlc/.StartActivity\n").as_deref(),
-            Some("org.videolan.vlc/.StartActivity")
-        );
+        assert_eq!(parse_resolved("priority=0 preferredOrder=0\norg.videolan.vlc/.StartActivity\n").as_deref(), Some("org.videolan.vlc/.StartActivity"));
         assert_eq!(parse_resolved("No activity found\n"), None);
         let q = "5 activities found:\n  Activity #0:\n    priority=0 preferredOrder=0 match=0x608000\n    org.droidtv.contentexplorer/.player.ExternalMediaPlaybackActivity\n  Activity #1:\n    org.videolan.vlc/.StartActivity\n";
-        assert_eq!(
-            parse_candidates(q),
-            vec!["org.droidtv.contentexplorer/.player.ExternalMediaPlaybackActivity", "org.videolan.vlc/.StartActivity"]
-        );
+        assert_eq!(parse_candidates(q), vec!["org.droidtv.contentexplorer/.player.ExternalMediaPlaybackActivity", "org.videolan.vlc/.StartActivity"]);
     }
 
     #[test]

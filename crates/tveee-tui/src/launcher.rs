@@ -63,12 +63,13 @@ pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Over
     let at = |sel| (Overlay::Apps { tab, sel }, None);
     match code {
         KeyCode::Esc | KeyCode::Backspace => (Overlay::None, None),
-        KeyCode::Tab | KeyCode::Left | KeyCode::Right => (Overlay::Apps { tab: tab.other(), sel: 0 }, None),
+        // (←/→: nothing; the rows have no value to change. See listnav.)
+        KeyCode::Tab | KeyCode::BackTab => (Overlay::Apps { tab: tab.other(), sel: 0 }, None),
         KeyCode::Char(' ') if n > 0 => (Overlay::AppActions { tab, sel, at: 0 }, None),
         c if super::listnav::is_move(c) => {
-                let to = super::listnav::step(sel, n, c).unwrap_or(sel);
-                at(to)
-            }
+            let to = super::listnav::step(sel, n, c).unwrap_or(sel);
+            at(to)
+        }
         KeyCode::Enter => match list.get(sel) {
             Some(e) => (Overlay::None, Some(Action::Launch(e.target.clone()))),
             None => at(sel),
@@ -141,11 +142,7 @@ impl App {
             labels
                 .iter()
                 .flat_map(|(t, l)| {
-                    let st = if *t == tab {
-                        Style::new().fg(Color::Black).bg(Color::Green).bold()
-                    } else {
-                        Style::new().fg(Color::Gray)
-                    };
+                    let st = if *t == tab { Style::new().fg(Color::Black).bg(Color::Green).bold() } else { Style::new().fg(Color::Gray) };
                     [Span::styled(l.clone(), st), Span::raw(" ")]
                 })
                 .collect::<Vec<_>>(),
@@ -183,9 +180,9 @@ impl App {
         let hint_w = usize::from(f.area().width.saturating_sub(4));
         let hints_for = |more: &str| -> Vec<String> {
             [
-                format!("↑/↓ choose  ⏎ open (or to front)  space actions  / search{more}"),
+                format!("⏎ open (or to front)  space actions  / search{more}"),
                 "● running  ⊘ always running: Android won't let it close".to_string(),
-                "letter = jump  tab/←/→ switch  # package names  click / right-click  esc closes   F1 guide  F3 remote".to_string(),
+                "a letter jumps  tab switches  # package names  right-click actions   F1 guide  F3 remote".to_string(),
             ]
             .iter()
             .flat_map(|h| super::drawing::wrap_keep(h, hint_w, 0))
@@ -251,7 +248,8 @@ impl App {
                     (true, false) => "(running)",
                     _ => "(not running)",
                 }
-            )).fg(Color::DarkGray),
+            ))
+            .fg(Color::DarkGray),
             Line::default(),
         ];
         for (i, c) in choices.iter().enumerate() {
@@ -259,7 +257,6 @@ impl App {
             text.push(if i == at { line.reversed() } else { line });
         }
         text.push(Line::default());
-        text.push(Line::from("↑/↓ choose  ⏎ do it  esc back  or click").fg(Color::DarkGray));
         let r = popup(f, &format!(" {} ", e.name), text, Color::Yellow);
         self.hits.push((r, Hit::Popup));
         for i in 0..choices.len() {

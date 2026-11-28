@@ -1,5 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 135
 expression: "screen(&mut a, CORNER)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
@@ -11,10 +12,10 @@ expression: "screen(&mut a, CORNER)"
 │──────────────────────────────────────────────────────────│
 │ ui: show the log (what tveee did lately)                 │
 │                                                          │
-│type to find  ↑/↓ choose  ⏎ run  esc close   …: asks first│
+│type to find   …: asks first                              │
 └──────────────────────────────────────────────────────────┘
 │                                                          │
 │                                                          │
-│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│ space  play   ←     →     tab  remote   ?  help   q  quit│
 │                                                          │
 └──────────────────────────────────────────────────────────┘

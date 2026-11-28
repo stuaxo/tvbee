@@ -203,11 +203,7 @@ impl Map {
             .filter(|d| writable.contains(&d.path))
             .filter_map(|d| {
                 let kl = layouts.get(&d.path)?;
-                let m: HashMap<&str, u16> = kl
-                    .iter()
-                    .filter(|(scan, _)| d.keys.contains(scan))
-                    .map(|(scan, name)| (name.as_str(), *scan))
-                    .collect();
+                let m: HashMap<&str, u16> = kl.iter().filter(|(scan, _)| d.keys.contains(scan)).map(|(scan, name)| (name.as_str(), *scan)).collect();
                 Some((d, m))
             })
             .collect();
@@ -464,7 +460,8 @@ impl Session {
             if self.child.is_none() {
                 self.child = Some(self.tv.shell_session()?);
             }
-            let ok = self.child.as_mut().and_then(|c| c.stdin.as_mut()).is_some_and(|s| s.write_all(format!("{cmd}\n").as_bytes()).and_then(|()| s.flush()).is_ok());
+            let ok =
+                self.child.as_mut().and_then(|c| c.stdin.as_mut()).is_some_and(|s| s.write_all(format!("{cmd}\n").as_bytes()).and_then(|()| s.flush()).is_ok());
             if ok {
                 return Ok(());
             }

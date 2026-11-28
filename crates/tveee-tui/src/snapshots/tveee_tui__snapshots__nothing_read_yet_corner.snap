@@ -1,5 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 111
 expression: "screen(&mut app(TvState::seeded(None)), CORNER)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
@@ -15,6 +16,6 @@ expression: "screen(&mut app(TvState::seeded(None)), CORNER)"
 │                                                          │
 │                                                          │
 │                                                          │
-│ space  play   ←     →     :  cmds   ?  help   q  quit    │
+│ space  play   ←     →     tab  remote   ?  help   q  quit│
 │                                                          │
 └──────────────────────────────────────────────────────────┘

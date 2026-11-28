@@ -1,5 +1,5 @@
-use crate::error::{failed, usage, Result};
 use crate::actions::{ActionDescriptor as A, Cx, Output};
+use crate::error::{Result, failed, usage};
 use crate::tv::Tv;
 
 const CAT: &str = "media";
@@ -159,11 +159,7 @@ pub fn presses(secs: f64, step: f64) -> u32 {
 /// Duration (ms) of the active media session from `dumpsys media_session`, if present.
 pub fn parse_media_duration_ms(dump: &str) -> Option<u64> {
     let after = &dump[dump.find("metadata.DURATION")? + "metadata.DURATION".len()..];
-    let digits: String = after
-        .chars()
-        .skip_while(|c| !c.is_ascii_digit())
-        .take_while(char::is_ascii_digit)
-        .collect();
+    let digits: String = after.chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect();
     digits.parse().ok().filter(|ms| *ms > 0)
 }
 
@@ -245,7 +241,13 @@ pub fn with_audio_players(mut sessions: Vec<MediaInfo>, pkg: &str, uid: Option<u
         return sessions;
     }
     let mine = |state: &str| players.iter().any(|(u, s)| *u == uid && s == state);
-    let state = if mine("started") { 3 } else if mine("paused") { 2 } else { return sessions };
+    let state = if mine("started") {
+        3
+    } else if mine("paused") {
+        2
+    } else {
+        return sessions;
+    };
     sessions.push(MediaInfo { package: pkg.to_string(), state: Some(state), ..Default::default() });
     sessions
 }
@@ -316,11 +318,7 @@ fn parse_skip_args(name: &str, args: &[String]) -> Result<(Amount, f64)> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if a == "--step" {
-            step = it
-                .next()
-                .and_then(|v| parse_duration(v))
-                .filter(|s| *s > 0.0)
-                .map_or_else(|| usage(format!("{name}: --step needs a duration")), Ok)?;
+            step = it.next().and_then(|v| parse_duration(v)).filter(|s| *s > 0.0).map_or_else(|| usage(format!("{name}: --step needs a duration")), Ok)?;
         } else if amount.is_none() {
             amount = Some(a.as_str());
         } else {
@@ -427,8 +425,6 @@ fn seek(c: &Cx, args: &[String]) -> Result<Output> {
     }
     Ok(format!("{from}\n{}", skip_by(c, delta, step)?).into())
 }
-
-
 
 /// Show or hide the music visualiser of the app in front (`want`: on, off,
 /// or None to switch). Says what it did.
@@ -556,10 +552,7 @@ Audio playback (lastly played comes first)
 
     #[test]
     fn descriptions_keep_commas_in_titles() {
-        assert_eq!(
-            split_description("Rock, Paper, Scissors, Some Channel, null"),
-            (Some("Rock, Paper, Scissors".into()), Some("Some Channel".into()))
-        );
+        assert_eq!(split_description("Rock, Paper, Scissors, Some Channel, null"), (Some("Rock, Paper, Scissors".into()), Some("Some Channel".into())));
         assert_eq!(split_description("null"), (None, None));
     }
 

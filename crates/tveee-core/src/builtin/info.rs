@@ -1,8 +1,8 @@
-use crate::error::{failed, usage, Result};
-use crate::nowplaying::{self, clock, Activity};
-use crate::tv::Tv;
-use crate::actions::ActionDescriptor;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::nowplaying::{self, Activity, clock};
+use crate::tv::Tv;
 
 const CAT: &str = "info";
 
@@ -70,13 +70,7 @@ pub fn parse_meminfo(meminfo: &str) -> Option<Mem> {
 pub fn ram_summary(meminfo: &str) -> Option<String> {
     let m = parse_meminfo(meminfo)?;
     let mb = |k: u64| k / 1024;
-    Some(format!(
-        "{} MB free, {} MB available of {} MB; swap used {} MB",
-        mb(m.free),
-        mb(m.available),
-        mb(m.total),
-        mb(m.swap_used())
-    ))
+    Some(format!("{} MB free, {} MB available of {} MB; swap used {} MB", mb(m.free), mb(m.available), mb(m.total), mb(m.swap_used())))
 }
 
 /// One filesystem from `df -k`.
@@ -99,12 +93,7 @@ pub fn parse_df(df: &str) -> Vec<Disk> {
             if n < 6 {
                 return None;
             }
-            Some(Disk {
-                mount: f[n - 1].to_string(),
-                total_kb: f[n - 5].parse().ok()?,
-                used_kb: f[n - 4].parse().ok()?,
-                avail_kb: f[n - 3].parse().ok()?,
-            })
+            Some(Disk { mount: f[n - 1].to_string(), total_kb: f[n - 5].parse().ok()?, used_kb: f[n - 4].parse().ok()?, avail_kb: f[n - 3].parse().ok()? })
         })
         .collect()
 }
@@ -173,22 +162,13 @@ pub fn read_system(tv: &crate::tv::Tv) -> Result<System> {
 
 /// kB as "78 MB" or "3.6 GB".
 pub fn size(kb: u64) -> String {
-    if kb >= 1024 * 1024 {
-        format!("{:.1} GB", kb as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{} MB", kb / 1024)
-    }
+    if kb >= 1024 * 1024 { format!("{:.1} GB", kb as f64 / (1024.0 * 1024.0)) } else { format!("{} MB", kb / 1024) }
 }
 
 /// `internal 3.5/3.6 GB (98%, 78 MB free)`
 pub fn disk_summary(label: &str, d: &Disk) -> String {
     let pct = (d.used_kb * 100).checked_div(d.total_kb).unwrap_or(0);
-    format!(
-        "{label} {}/{} ({pct}%, {} free)",
-        size(d.used_kb).trim_end_matches(" GB").trim_end_matches(" MB"),
-        size(d.total_kb),
-        size(d.avail_kb)
-    )
+    format!("{label} {}/{} ({pct}%, {} free)", size(d.used_kb).trim_end_matches(" GB").trim_end_matches(" MB"), size(d.total_kb), size(d.avail_kb))
 }
 
 pub fn read_ram(tv: &crate::tv::Tv) -> Result<Option<String>> {
@@ -240,9 +220,7 @@ fn run_report(c: &Ctx, name: &'static str, args: &[String], report: fn(&Tv) -> R
         }
         Some(every) => {
             let tv = Tv { ip: c.tv.ip.clone() };
-            crate::watch::run(name, every, move || {
-                report(&tv)
-            })
+            crate::watch::run(name, every, move || report(&tv))
         }
     }
 }
@@ -264,9 +242,7 @@ fn join2<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B +
 /// `audio`: `dumpsys audio`, for apps that play without a media session.
 fn activity_from(tv: &Tv, wake: Option<&str>, window: &str, media: &str, audio: &str) -> Option<Activity> {
     match (wake, focus_package(window)) {
-        (Some(w), _) if w != "Awake" => {
-            Some(Activity::just("In standby"))
-        }
+        (Some(w), _) if w != "Awake" => Some(Activity::just("In standby")),
         (_, Some(pkg)) => {
             let sessions = super::media::parse_media_sessions(media);
             let players = super::media::parse_audio_players(audio);
@@ -331,13 +307,7 @@ fn status_text(tv: &Tv) -> Result<String> {
     push_line(&mut out, "muted", &muted);
     if let Some(m) = system.mem {
         let mb = |k: u64| k / 1024;
-        let ram = format!(
-            "{} MB free, {} MB available of {} MB; swap used {} MB",
-            mb(m.free),
-            mb(m.available),
-            mb(m.total),
-            mb(m.swap_used())
-        );
+        let ram = format!("{} MB free, {} MB available of {} MB; swap used {} MB", mb(m.free), mb(m.available), mb(m.total), mb(m.swap_used()));
         push_line(&mut out, "ram", &ram);
     }
     let disks: Vec<String> = interesting_disks(&system.disks).iter().map(|(l, d)| disk_summary(l, d)).collect();
@@ -439,9 +409,7 @@ fn onoff(v: Option<bool>) -> &'static str {
 /// from `date`; where there's no `date` (Windows) they're empty and only the
 /// clock difference is shown.
 fn pc_clock() -> Result<(f64, String, String)> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64());
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
     let Ok(out) = std::process::Command::new("date").arg("+%z|%F %T %Z").output() else {
         return Ok((now, String::new(), String::new()));
     };
@@ -597,7 +565,13 @@ pub fn list_lines(l: &crate::provider::ContextList, app: &str) -> Vec<String> {
         }
         part.clone_from(&i.section);
         // the same marks in every list: ▶ playing now, › the app's highlight
-        let mark = if l.playing == Some(n) { "▶" } else if l.at == Some(n) { "›" } else { " " };
+        let mark = if l.playing == Some(n) {
+            "▶"
+        } else if l.at == Some(n) {
+            "›"
+        } else {
+            " "
+        };
         let name = format!("{}{}", i.label, if i.folder { "/" } else { "" });
         let meta = i.meta.as_deref().map(|m| format!("  {m}")).unwrap_or_default();
         out.push(format!("{mark} {:>3}  {name:<w$}{meta}", n + 1).trim_end().to_string());
@@ -658,9 +632,7 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
     let tv = &c.tv;
     // `goto <app> ...` names an app; otherwise it's the app in front
     let named = args.first().and_then(|a| {
-        super::apps::all()
-            .iter()
-            .find(|x| x.alias == Some(a.as_str()) && crate::provider::for_package(x.package()).is_some_and(|p| !p.places().is_empty()))
+        super::apps::all().iter().find(|x| x.alias == Some(a.as_str()) && crate::provider::for_package(x.package()).is_some_and(|p| !p.places().is_empty()))
     });
     let (pkg, app, url, rest) = match named {
         Some(a) => (a.package().to_string(), Some(a), None, &args[1..]),
@@ -714,11 +686,8 @@ fn goto_cmd(c: &Ctx, args: &[String]) -> Result<()> {
             let n: usize = n.parse().unwrap_or(0);
             let chapter = rest.first().is_some_and(|w| w == "chapter");
             let ls = links();
-            let pick = if chapter {
-                ls.iter().filter(|l| matches!(l.go, crate::more::Go::Seek(_))).nth(n.saturating_sub(1))
-            } else {
-                ls.get(n.saturating_sub(1))
-            };
+            let pick =
+                if chapter { ls.iter().filter(|l| matches!(l.go, crate::more::Go::Seek(_))).nth(n.saturating_sub(1)) } else { ls.get(n.saturating_sub(1)) };
             match pick {
                 Some(l) => {
                     println!("{}", go(tv, &pkg, &l.go)?);
@@ -801,8 +770,29 @@ mod tests {
     #[test]
     fn list_printed() {
         use crate::provider::{ContextList, ListItem};
-        let item = |label: &str, folder, meta: Option<&str>| ListItem { section: None, id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
-        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], playing: None, at: Some(1), up: None, reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None, browsed: false };
+        let item = |label: &str, folder, meta: Option<&str>| ListItem {
+            section: None,
+            id: String::new(),
+            label: label.into(),
+            meta: meta.map(str::to_string),
+            folder,
+            go: crate::more::Go::Link(String::new()),
+        };
+        let l = ContextList {
+            title: "Artists".into(),
+            kind: "folder",
+            key: String::new(),
+            items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)],
+            playing: None,
+            at: Some(1),
+            up: None,
+            reopen: None,
+            crumbs: Vec::new(),
+            crumbs_whole: false,
+            location: None,
+            open_location: None,
+            browsed: false,
+        };
         let lines = list_lines(&l, "Kodi");
         assert_eq!(lines[0], "Artists (Kodi, 3 items)");
         assert_eq!(lines[1], "    1  Portishead/");
@@ -826,10 +816,7 @@ mod tests {
 
     #[test]
     fn parses_focus() {
-        assert_eq!(
-            focus_window(DUMP).unwrap(),
-            "org.droidtv.nettvbrowser/org.droidtv.nettvbrowser.BrowserNetTvActivity"
-        );
+        assert_eq!(focus_window(DUMP).unwrap(), "org.droidtv.nettvbrowser/org.droidtv.nettvbrowser.BrowserNetTvActivity");
         assert_eq!(focus_package(DUMP).unwrap(), "org.droidtv.nettvbrowser");
         assert_eq!(focus_package("no focus here"), None);
     }
@@ -879,7 +866,9 @@ tmpfs                                                     687516      516    687
         assert_eq!(human_uptime(4_000.0), "1h 6m");
         assert_eq!(human_uptime(90.0), "1m");
         assert_eq!(disk_summary("internal", &disks[1]), "internal 3.5/3.6 GB (97%, 77 MB free)");
-        let sys = parse_system("MemTotal: 100 kB\nMemFree: 10 kB\n@@\n1.5 2 3 1/2 3\n@@\n60.5 1\n@@\nFilesystem 1K-blocks Used Available Use% Mounted on\n/dev/x 10 5 5 50% /data\n@@\n4\n");
+        let sys = parse_system(
+            "MemTotal: 100 kB\nMemFree: 10 kB\n@@\n1.5 2 3 1/2 3\n@@\n60.5 1\n@@\nFilesystem 1K-blocks Used Available Use% Mounted on\n/dev/x 10 5 5 50% /data\n@@\n4\n",
+        );
         assert_eq!(sys.mem.unwrap().total, 100);
         assert_eq!(sys.load, Some((1.5, 2.0, 3.0)));
         assert_eq!(sys.uptime_secs, Some(60.5));
@@ -889,11 +878,9 @@ tmpfs                                                     687516      516    687
 
     #[test]
     fn summarises_ram() {
-        let m = "MemTotal:        1374000 kB\nMemFree:           41000 kB\nMemAvailable:     210000 kB\nSwapTotal:        430000 kB\nSwapFree:         205000 kB\n";
-        assert_eq!(
-            ram_summary(m).unwrap(),
-            "40 MB free, 205 MB available of 1341 MB; swap used 219 MB"
-        );
+        let m =
+            "MemTotal:        1374000 kB\nMemFree:           41000 kB\nMemAvailable:     210000 kB\nSwapTotal:        430000 kB\nSwapFree:         205000 kB\n";
+        assert_eq!(ram_summary(m).unwrap(), "40 MB free, 205 MB available of 1341 MB; swap used 219 MB");
         assert_eq!(ram_summary("nothing"), None);
     }
 }

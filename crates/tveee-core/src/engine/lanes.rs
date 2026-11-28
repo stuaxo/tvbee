@@ -1,8 +1,8 @@
 //! The worker lanes: actions are routed to keys, act, read or idle lanes,
 //! and the refresh reads the TV's state; they share [`Shared`].
 
-use crate::readings::{Power, Window};
 use super::*;
+use crate::readings::{Power, Window};
 
 /// A thread with a name (shown in the debug log, `TVEEE_LOG`).
 pub fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
@@ -25,7 +25,13 @@ pub enum Lane {
 pub fn lane(a: &Action) -> Lane {
     match a {
         Action::Key(_) | Action::Text(_) => Lane::Keys,
-        Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => Lane::Read,
+        Action::LoadGuide
+        | Action::LoadList
+        | Action::CheckRunning
+        | Action::WatchPanel(..)
+        | Action::PreviewPanel(_)
+        | Action::WatchSystem(_)
+        | Action::WatchList(_) => Lane::Read,
         Action::PrefetchInfo => Lane::Idle,
         _ => Lane::Act,
     }
@@ -522,7 +528,9 @@ impl Refresher {
         };
         // where the list is, while the ui shows it (one small read)
         let list_place = match (pkg.as_deref(), awake && self.shared.list_watch.load(Ordering::Relaxed)) {
-            (Some(p), true) => crate::provider::for_package(p).and_then(|pr| pr.player()).filter(|pl| pl.has_list()).and_then(|pl| pl.list_place(&self.tv).handled().flatten()),
+            (Some(p), true) => {
+                crate::provider::for_package(p).and_then(|pr| pr.player()).filter(|pl| pl.has_list()).and_then(|pl| pl.list_place(&self.tv).handled().flatten())
+            }
             _ => None,
         };
         let activity = activity.map(|a| nowplaying::keep_title(self.last_activity.as_ref(), a));
@@ -661,7 +669,9 @@ impl Actor {
                 }
                 None => "jumping needs a video tveee can read (currently YouTube)".into(),
             },
-            Action::Run { id, args } => match crate::actions::find(&self.actions, id) {
+            // the enabled plugins' actions as installed now (a plugin turned
+            // on or off since the start), else the ones it started with
+            Action::Run { id, args } => match crate::actions::find(crate::actions::installed().unwrap_or(&self.actions), id) {
                 Some(a) if args.is_empty() && matches!(a.params, Params::Text { .. }) => "that needs some text".into(),
                 // one line, for a status line
                 Some(a) => a.run(&self.tv, &args)?.text.replace('\n', "; "),
@@ -740,6 +750,13 @@ impl Actor {
                 let _ = tx.send(Msg::List(l));
                 shown.unwrap_or_default()
             }
+            Action::Replugged => {
+                // the panels the plugins on now offer; what's in front and
+                // what it's playing are read again after any action
+                let panels = crate::panel::all().iter().filter(|p| (p.available)(&self.tv)).map(|p| p.id).collect();
+                let _ = tx.send(Msg::Panels(panels));
+                String::new()
+            }
             Action::Refresh => "refreshed".into(),
             // the refresh is woken after every action: nothing more to do
             Action::Wake => String::new(),
@@ -759,7 +776,16 @@ impl Actor {
                 crate::pairing::save(id, &self.tv.ip, &saved)?;
                 "paired with the TV".into()
             }
-            Action::Key(_) | Action::Text(_) | Action::LoadGuide | Action::LoadList | Action::CheckRunning | Action::PrefetchInfo | Action::WatchPanel(..) | Action::PreviewPanel(_) | Action::WatchSystem(_) | Action::WatchList(_) => String::new(),
+            Action::Key(_)
+            | Action::Text(_)
+            | Action::LoadGuide
+            | Action::LoadList
+            | Action::CheckRunning
+            | Action::PrefetchInfo
+            | Action::WatchPanel(..)
+            | Action::PreviewPanel(_)
+            | Action::WatchSystem(_)
+            | Action::WatchList(_) => String::new(),
         })
     }
 }
@@ -937,7 +963,6 @@ mod tests {
         // and what the refresh reads is set
         assert!(!shared.list_watch.load(Ordering::Relaxed) && shared.system_watch.load(Ordering::Relaxed));
     }
-
 
     #[test]
     fn low_bandwidth_waits() {

@@ -220,11 +220,8 @@ pub fn save_descriptions(c: &mut SqliteConnection, tv: &str, source: &str, list:
 
 /// `source`'s descriptions for TV `tv`, by (channel, start).
 pub fn load_descriptions(c: &mut SqliteConnection, tv: &str, source: &str) -> Result<HashMap<(u32, i64), String>> {
-    let rows: Vec<DescriptionRow> = descriptions::table
-        .filter(descriptions::tv.eq(tv).and(descriptions::source.eq(source)))
-        .select(DescriptionRow::as_select())
-        .load(c)
-        .map_err(db_err)?;
+    let rows: Vec<DescriptionRow> =
+        descriptions::table.filter(descriptions::tv.eq(tv).and(descriptions::source.eq(source))).select(DescriptionRow::as_select()).load(c).map_err(db_err)?;
     Ok(rows.into_iter().map(|r| ((r.channel as u32, r.start), r.info)).collect())
 }
 

@@ -72,8 +72,6 @@ pub fn actions() -> Vec<A> {
         A::new("power.off", CAT, "power off", power_off)
             .cli("shutdown", "", "power off completely (not standby)")
             .key('X')
-            .confirm(
-                "Power off the TV? It can't be woken over the network afterwards;\nyou'll need the remote or the TV's power button.",
-            ),
+            .confirm("Power off the TV? It can't be woken over the network afterwards;\nyou'll need the remote or the TV's power button."),
     ]
 }

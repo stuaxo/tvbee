@@ -1,21 +1,12 @@
-//! The list Kodi is showing (Music > Artists, a folder of videos, an
-//! add-on's listing), read through its API to be chosen from elsewhere:
-//! `tveee list`, later the ui's list pane.
-//!
-//! Read as Kodi shows it (its rows' labels, in its order and sort), not by
-//! listing the folder again: for an add-on's listing that would run the
-//! add-on once more. Reading never changes what's on the screen; choosing
-//! does (a folder opens in the same window, a file plays).
+//! Where Kodi's screen is (its window, the folder shown, what's
+//! highlighted, what's playing), read through its API without changing it:
+//! where browsing starts ([`super::library`]), and the ▶ mark. Also what
+//! a folder's path can say of where it is (the breadcrumbs).
 
-use super::{call, Result, Tv};
+use super::{Result, Tv, call};
 use serde_json::Value;
 use tveee_core::more::Go;
-use tveee_core::provider::{ContextList, ListCrumb, ListItem, ListPlace};
-
-/// Most rows read (a library of thousands: the first ones).
-const MAX: usize = 500;
-/// Rows asked for in one call.
-const BATCH: usize = 100;
+use tveee_core::provider::{ListCrumb, ListPlace};
 
 /// Where Kodi's screen is: its window, the folder shown and how many rows.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,10 +37,6 @@ fn labels(tv: &Tv, names: &[String]) -> Result<Value> {
     call(tv, "XBMC.GetInfoLabels", &serde_json::json!({ "labels": names }).to_string())
 }
 
-fn booleans(tv: &Tv, names: &[String]) -> Result<Value> {
-    call(tv, "XBMC.GetInfoBooleans", &serde_json::json!({ "booleans": names }).to_string())
-}
-
 fn text(v: &Value, k: &str) -> String {
     v.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string()
 }
@@ -73,112 +60,17 @@ pub fn place_of(window: u64, l: &Value) -> Option<Place> {
 pub fn place(tv: &Tv) -> Result<Option<Place>> {
     let w = call(tv, "GUI.GetProperties", r#"{"properties":["currentwindow"]}"#)?;
     let window = w.pointer("/currentwindow/id").and_then(Value::as_u64).unwrap_or(0);
-    let names: Vec<String> = ["Container.FolderPath", "Container.FolderName", "Container.NumItems", "ListItem.Label", "ListItem.FileNameAndPath"].iter().map(|s| s.to_string()).collect();
+    let names: Vec<String> = ["Container.FolderPath", "Container.FolderName", "Container.NumItems", "ListItem.Label", "ListItem.FileNameAndPath"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     Ok(place_of(window, &labels(tv, &names)?))
-}
-
-/// One row as Kodi shows it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Row {
-    pub label: String,
-    pub label2: String,
-    pub folder: bool,
-    /// A folder's path, or a file's.
-    pub path: String,
-}
-
-fn row_names(i: usize) -> [String; 5] {
-    let p = format!("Container.ListItemAbsolute({i})");
-    [format!("{p}.Label"), format!("{p}.Label2"), format!("{p}.FolderPath"), format!("{p}.FileNameAndPath"), format!("{p}.Path")]
 }
 
 /// A path without what Kodi adds after `?` (`?albumid=224&discid=1`):
 /// the same folder, however Kodi got there.
 pub fn bare(path: &str) -> &str {
     path.split('?').next().unwrap_or(path)
-}
-
-/// Going up a folder, as Kodi's ".." does (its parentdir action).
-pub const UP: &str = "kodi-parentdir";
-
-/// Rows `range` from Kodi's labels and booleans for them; empty rows (past
-/// the end) left out. The parent row ("..") is kept: [`list_of`] makes it
-/// the list's way up.
-pub fn rows_of(range: std::ops::Range<usize>, l: &Value, b: &Value) -> Vec<Row> {
-    range
-        .filter_map(|i| {
-            let [label, label2, folder_path, file, parent] = row_names(i);
-            let label = text(l, &label);
-            if label.is_empty() {
-                return None;
-            }
-            let folder = label == ".." || b.get(format!("Container.ListItemAbsolute({i}).IsFolder")).and_then(Value::as_bool).unwrap_or(false);
-            // ".." says its folder is this one; where it leads is its Path
-            let path = if label == ".." { text(l, &parent) } else if folder { text(l, &folder_path) } else { text(l, &file) };
-            Some(Row { label, label2: text(l, &label2), folder, path })
-        })
-        .collect()
-}
-
-/// The rows Kodi shows (up to [`MAX`]), in its order.
-pub fn rows(tv: &Tv, p: &Place) -> Result<Vec<Row>> {
-    // a row more than it counts: the parent row may come first
-    let end = (p.rows + 1).min(MAX);
-    let mut out = Vec::new();
-    let mut start = 0;
-    while start <= end {
-        let range = start..(start + BATCH).min(end + 1);
-        let names: Vec<String> = range.clone().flat_map(row_names).collect();
-        let bools: Vec<String> = range.clone().map(|i| format!("Container.ListItemAbsolute({i}).IsFolder")).collect();
-        out.extend(rows_of(range.clone(), &labels(tv, &names)?, &booleans(tv, &bools)?));
-        start = range.end;
-    }
-    Ok(out)
-}
-
-/// What choosing `row` does: a folder opens in the same window, anything
-/// else plays (both as links Kodi's provider opens: [`super::window_params`]
-/// for `kodi-window:`, `Player.Open` for a file).
-pub fn go_for(row: &Row, window: u64) -> Go {
-    match (row.folder, window_name(window)) {
-        // the window's top (no path): the window itself
-        (true, Some(w)) if row.path.is_empty() => Go::Link(format!("kodi-window:{w}")),
-        (true, Some(w)) => Go::Link(format!("kodi-window:{w}|{}", row.path)),
-        _ => Go::Link(row.path.clone()),
-    }
-}
-
-/// The list from where Kodi is and its rows.
-pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
-    // ".." is the way up (Kodi's own parentdir), not an item
-    let up = rows.iter().find(|r| r.label == "..").map(|r| (format!("{}|{}", p.window, bare(&r.path)), Go::Link(UP.into())));
-    let reopen = go_for(&Row { label: String::new(), label2: String::new(), folder: true, path: p.path.clone() }, p.window);
-    let items = rows
-        .iter()
-        .filter(|r| r.label != "..")
-        .map(|r| ListItem { section: None, id: r.path.clone(), label: r.label.clone(), meta: Some(r.label2.clone()).filter(|m| !m.is_empty()), folder: r.folder, go: go_for(r, p.window) })
-        .collect();
-    let title = if p.name.is_empty() { p.path.clone() } else { p.name.clone() };
-    let (crumbs, crumbs_whole) = path_crumbs(p.window, &p.path);
-    let w = window_name(p.window).unwrap_or("videos");
-    let mut l = ContextList {
-        title,
-        kind: "folder",
-        key: key_of(p),
-        items,
-        playing: None,
-        at: None,
-        up,
-        reopen: Some(reopen),
-        crumbs,
-        crumbs_whole,
-        location: Some(p.path.clone()),
-        open_location: Some(format!("kodi-window:{w}|{{}}")),
-        browsed: false,
-    };
-    // the highlighted row: by its path, else its label
-    l.at = l.find(&list_place(p));
-    l
 }
 
 /// `%20` and friends in a path, back to what they stand for.
@@ -228,7 +120,11 @@ pub fn path_crumbs(window: u64, path: &str) -> (Vec<ListCrumb>, bool) {
         let mut c = w.chars();
         c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect::<String>())
     };
-    let crumb = |title: String, p: &str| ListCrumb { title, key: format!("{window}|{}", bare(p)), go: Some(Go::Link(if p.is_empty() { format!("kodi-window:{w}") } else { format!("kodi-window:{w}|{p}") })) };
+    let crumb = |title: String, p: &str| ListCrumb {
+        title,
+        key: format!("{window}|{}", bare(p)),
+        go: Some(Go::Link(if p.is_empty() { format!("kodi-window:{w}") } else { format!("kodi-window:{w}|{p}") })),
+    };
     let mut out = vec![crumb(top_title, "")];
     let path = bare(path);
     if path.is_empty() {
@@ -288,15 +184,6 @@ pub fn place_now(tv: &Tv) -> Result<Option<ListPlace>> {
     Ok(Some(l))
 }
 
-/// The list Kodi is showing, if it's showing one.
-pub fn list(tv: &Tv) -> Result<Option<ContextList>> {
-    let Some(p) = place(tv)? else { return Ok(None) };
-    let mut l = list_of(&p, &rows(tv, &p)?);
-    // the song (or video) playing, if it's one of these
-    l.playing = playing_file(tv).and_then(|f| l.find_playing(&f));
-    Ok(Some(l))
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -339,41 +226,8 @@ mod tests {
         assert!(place_of(10000, &place_labels()).is_none());
         assert!(place_of(10502, &json!({ "Container.FolderPath": "", "Container.NumItems": "0" })).is_none());
         // the top of Music (Genres, Artists, Albums...): a list, no path, named after it
-        let top = place_of(10502, &json!({ "Container.FolderPath": "", "Container.FolderName": "", "Container.NumItems": "15", "ListItem.Label": "Genres" })).expect("a list");
+        let top = place_of(10502, &json!({ "Container.FolderPath": "", "Container.FolderName": "", "Container.NumItems": "15", "ListItem.Label": "Genres" }))
+            .expect("a list");
         assert_eq!((top.name.as_str(), top.path.as_str(), top.rows), ("Music", "", 15));
-    }
-
-    #[test]
-    fn rows_and_choosing() {
-        let l = json!({
-            "Container.ListItemAbsolute(0).Label": "..",
-            "Container.ListItemAbsolute(1).Label": "Portishead",
-            "Container.ListItemAbsolute(1).FolderPath": "musicdb://artists/7/",
-            "Container.ListItemAbsolute(2).Label": "Radiohead",
-            "Container.ListItemAbsolute(2).Label2": "9 albums",
-            "Container.ListItemAbsolute(2).FolderPath": "musicdb://artists/9/",
-            "Container.ListItemAbsolute(3).Label": "Exit Music.flac",
-            "Container.ListItemAbsolute(3).FileNameAndPath": "smb://nas/music/exit.flac",
-        });
-        let b = json!({
-            "Container.ListItemAbsolute(1).IsFolder": true,
-            "Container.ListItemAbsolute(2).IsFolder": true,
-            "Container.ListItemAbsolute(3).IsFolder": false,
-        });
-        let rows = rows_of(0..5, &l, &b);
-        // the empty rows past the end are left out; the parent row is kept
-        assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), vec!["..", "Portishead", "Radiohead", "Exit Music.flac"]);
-        let list = list_of(&place_of(10502, &place_labels()).unwrap(), &rows);
-        // ".." as the way up (Kodi's parentdir), not an item; and how to come back here
-        assert_eq!(list.up, Some(("10502|".to_string(), Go::Link(UP.into()))));
-        assert_eq!(list.reopen, Some(Go::Link("kodi-window:music|musicdb://artists/".into())));
-        assert_eq!(bare("musicdb://albums/224/?albumid=224&discid=1"), "musicdb://albums/224/");
-        assert_eq!((list.title.as_str(), list.kind, list.at), ("Artists", "folder", Some(1)));
-        assert_eq!(list.key, "10502|musicdb://artists/");
-        assert_eq!(list.items[1].meta.as_deref(), Some("9 albums"));
-        // a folder opens in the same window; a file plays
-        assert_eq!(list.items[0].go, Go::Link("kodi-window:music|musicdb://artists/7/".into()));
-        assert_eq!(list.items[2].go, Go::Link("smb://nas/music/exit.flac".into()));
-        assert!(list.items[0].folder && !list.items[2].folder);
     }
 }

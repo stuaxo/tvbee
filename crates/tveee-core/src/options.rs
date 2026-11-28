@@ -3,9 +3,9 @@
 //! vendor plugin (`plugin.kodi=on|off`; none: decided by checking the TV).
 //! Set from the UI's options dialog (`,`) or `tveee options`.
 
-use crate::error::{failed, usage, Result};
-use crate::actions::ActionDescriptor;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
 use std::sync::Mutex;
 
 pub struct Opt {
@@ -13,6 +13,8 @@ pub struct Opt {
     pub label: &'static str,
     pub help: &'static str,
     pub default: bool,
+    /// Shown as a choice between two (off, on) rather than a tick.
+    pub choices: Option<[&'static str; 2]>,
 }
 
 pub const SCROLL_ANIMATION: &str = "scroll-animation";
@@ -29,42 +31,49 @@ pub const OPTIONS: &[Opt] = &[
         label: "scroll animations",
         help: "the UI's guide slides smoothly when moving through time (else it jumps)",
         default: true,
+        choices: None,
     },
     Opt {
         name: FAST_KEYS,
         label: "fast keys",
         help: "keys go straight to the TV's input devices (off: Android's slower 'input' command)",
         default: true,
+        choices: None,
     },
     Opt {
         name: SHOW_PACKAGES,
         label: "package names",
         help: "the UI's launcher shows each app's package (com.example.app) too; # there toggles it",
         default: false,
+        choices: None,
     },
     Opt {
         name: LOW_BANDWIDTH,
-        label: "low bandwidth",
-        help: "the UI reads the TV every 4s, not every second (what you do still shows at once)",
+        label: "update frequency",
+        help: "how often the UI reads the TV: every second, or every 4s to save bandwidth (what you do still shows at once)",
         default: false,
+        choices: Some(["responsive", "low bandwidth"]),
     },
     Opt {
         name: PREDICT_POSITION,
         label: "predict position",
         help: "the UI moves the progress bar between reads, as fast as it's playing (still while you pause or seek)",
         default: true,
+        choices: None,
     },
     Opt {
         name: LIST_SYNC,
         label: "sync folder",
         help: "browsing Kodi in the UI's list (t) opens each folder on the TV too (off: only what you play); ^S there toggles it",
         default: false,
+        choices: None,
     },
     Opt {
         name: SHOW_LOAD,
         label: "load & memory",
         help: "the UI's top line shows the TV's load and free memory (off: not read, unless the system panel is open)",
         default: true,
+        choices: None,
     },
 ];
 
@@ -177,7 +186,12 @@ fn options(c: &Ctx, args: &[String]) -> Result<()> {
     match args {
         [] => {
             for o in OPTIONS {
-                println!("{:<18} {:<4} {}", o.name, if get(o.name) { "on" } else { "off" }, o.help);
+                let on = get(o.name);
+                let value = match o.choices {
+                    Some(c) => format!("{} ({})", if on { "on" } else { "off" }, c[usize::from(on)]),
+                    None => (if on { "on" } else { "off" }).to_string(),
+                };
+                println!("{:<18} {:<4} {}", o.name, value, o.help);
             }
             println!("\nvendor plugins (tveee options plugin <name> on|off|auto; from the next start):");
             for p in c.plugins.iter().filter(|p| p.source != crate::plugin::Source::Builtin) {
@@ -217,13 +231,17 @@ fn options(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![ActionDescriptor::terminal("options.options", "options", "tveee's own settings: list them, or set one", options).cli("options", "[<name> on|off | plugin <name> on|off|auto]", "tveee's own settings: list them, or set one").long(
-        "Saved in ~/.config/tveee/options.txt. In the ui, ',' opens the same options.\n\
+    vec![
+        ActionDescriptor::terminal("options.options", "options", "tveee's own settings: list them, or set one", options)
+            .cli("options", "[<name> on|off | plugin <name> on|off|auto]", "tveee's own settings: list them, or set one")
+            .long(
+                "Saved in ~/.config/tveee/options.txt. In the ui, ',' opens the same options.\n\
          \n\
          Vendor plugins (philips, kodi, youtube) are on when checking the TV finds\n\
          what they're for ('auto'); 'on' or 'off' fixes that, from tveee's next start.\n\
          TVEEE_PLUGINS outweighs it. Built-in plugins are always on.",
-    )]
+            ),
+    ]
 }
 
 #[cfg(test)]

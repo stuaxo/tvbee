@@ -67,7 +67,6 @@ pub fn load_guide(tv: &Tv) -> Result<Guide> {
     Ok(Guide { provider: p.name(), place, lineup, rows, current, pending, news })
 }
 
-
 /// The time `later` steps ahead of `now`: now itself, then on the hour and
 /// half hour (19:30, 20:00, ...).
 pub fn guide_time_at(now: i64, later: i64) -> i64 {
@@ -163,4 +162,3 @@ pub fn guide_matches(r: &GuideRow, filter: &str, t: i64) -> bool {
 pub fn guide_shown<'a>(rows: &'a [GuideRow], tab: GuideTab, filter: &str, t: i64) -> Vec<&'a GuideRow> {
     rows.iter().filter(|r| tab.holds(&r.channel) && guide_matches(r, filter, t)).collect()
 }
-

@@ -2,7 +2,7 @@
 //! `TcpStream`: devtools pages, and anything else that pushes JSON.
 //! Also a reader for a raw TCP stream of JSON objects (Kodi's port 9090).
 
-use crate::error::{failed, Result};
+use crate::error::{Result, failed};
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;

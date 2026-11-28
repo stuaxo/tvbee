@@ -2,7 +2,7 @@
 //! self-signed certificate and digest authentication (Philips JointSpace).
 //! tveee has no TLS library; curl is on Linux and Windows 10+ already.
 
-use crate::error::{failed, Error, Result};
+use crate::error::{Error, Result, failed};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -152,7 +152,14 @@ mod tests {
 
     #[test]
     fn builds_curl_calls() {
-        let r = Request { url: "https://tv:1926/6/pair/grant", body: Some(r#"{"a":"b\"c"}"#), digest: Some(("dev", "k\"ey")), basic: None, retry: None, timeout_secs: 10 };
+        let r = Request {
+            url: "https://tv:1926/6/pair/grant",
+            body: Some(r#"{"a":"b\"c"}"#),
+            digest: Some(("dev", "k\"ey")),
+            basic: None,
+            retry: None,
+            timeout_secs: 10,
+        };
         let args = curl_args(&r);
         assert!(args.contains(&"--insecure".to_string()) && args.last().unwrap() == "https://tv:1926/6/pair/grant");
         // the password and body never appear as arguments

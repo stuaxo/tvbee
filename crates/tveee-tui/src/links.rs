@@ -82,11 +82,7 @@ pub fn copy(url: &str) -> String {
     let _ = out.write_all(osc52(&url).as_bytes());
     let _ = out.flush();
     let tools: &[&[&str]] = &[&["wl-copy"], &["xclip", "-selection", "clipboard"], &["xsel", "-b", "-i"], &["pbcopy"], &["clip.exe"]];
-    if desktop() && tools.iter().any(|t| pipe(t, &url)) {
-        "copied the link".into()
-    } else {
-        "copied the link (through the terminal: if it allows that)".into()
-    }
+    if desktop() && tools.iter().any(|t| pipe(t, &url)) { "copied the link".into() } else { "copied the link (through the terminal: if it allows that)".into() }
 }
 
 /// Copy `text` (lines: their breaks kept, anything else that could start

@@ -65,7 +65,10 @@ fn guide_filters_and_moves() {
     // later in the day: what's on then, and after it
     let ev = |title: &str, start, end| tveee_core::provider::Event { channel: 1, title: title.into(), start, end, genre: None, info: None };
     let day = GuideRow { channel: rows[0].channel.clone(), events: vec![ev("Apple", 0, 100), ev("Banana", 100, 200), ev("Cherry", 250, 300)] };
-    let titles = |t| { let (a, b) = day.at(t); (a.map(|e| e.title.clone()), b.map(|e| e.title.clone())) };
+    let titles = |t| {
+        let (a, b) = day.at(t);
+        (a.map(|e| e.title.clone()), b.map(|e| e.title.clone()))
+    };
     assert_eq!(titles(50), (Some("Apple".into()), Some("Banana".into())));
     assert_eq!(titles(150), (Some("Banana".into()), Some("Cherry".into())));
     assert_eq!(titles(220), (None, Some("Cherry".into()))); // a gap
@@ -106,7 +109,10 @@ fn guide_filters_and_moves() {
     e.info = Some("The team restore a classic car for a family.\nNew series.".into());
     let info = e.info.clone();
     let lines: Vec<String> = details_text(&e, &rows[3].channel, Some(info.as_deref()), 30, 0).into_iter().map(|(l, _)| l).collect();
-    assert_eq!(lines, ["Garage Squad", "Thu 00:00–01:00 (1h00) · 18 More 4 · documentary", "", "The team restore a classic car", "for a family.", "New series."]);
+    assert_eq!(
+        lines,
+        ["Garage Squad", "Thu 00:00–01:00 (1h00) · 18 More 4 · documentary", "", "The team restore a classic car", "for a family.", "New series."]
+    );
     // still loading: no body yet (the panel keeps its size with blank lines)
     let loading: Vec<String> = details_text(&e, &rows[3].channel, None, 30, 0).into_iter().map(|(l, _)| l).collect();
     assert_eq!(loading.len(), 3);
@@ -132,7 +138,6 @@ fn guide_filters_and_moves() {
     assert_eq!(input_for(KeyCode::Char('g'), KeyModifiers::NONE, Mode::Player), Input::OpenGuide);
     assert_eq!(input_for(KeyCode::Char('z'), KeyModifiers::NONE, Mode::Player), Input::ToggleVisualiser);
 }
-
 
 #[test]
 fn settling_waits_out_the_steps_on_the_way() {
@@ -192,8 +197,8 @@ fn settling_waits_out_the_steps_on_the_way() {
 }
 
 use super::*;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[test]
 fn keys_by_mode() {
@@ -316,10 +321,7 @@ fn list_names() {
 }
 
 fn searchables() -> Vec<search::Searchable> {
-    search::parse_searchable(
-        "    org.xbmc.kodi/.XBMCSearchableActivity\n@@\n@@\n",
-        Some("package:com.google.android.youtube.tv\n"),
-    )
+    search::parse_searchable("    org.xbmc.kodi/.XBMCSearchableActivity\n@@\n@@\n", Some("package:com.google.android.youtube.tv\n"))
 }
 
 #[test]
@@ -377,7 +379,10 @@ fn typing_a_link() {
     // Enter on nothing stays put; with text it runs the item
     assert_eq!(prompt_key("apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::Prompt("apps.open_link"), None));
     t.push_str("  vlc http://h/f.mkv ");
-    assert_eq!(prompt_key("apps.open_link", KeyCode::Enter, none, &mut t), (Overlay::None, Some(Action::Run { id: "apps.open_link", args: vec!["vlc http://h/f.mkv".into()] })));
+    assert_eq!(
+        prompt_key("apps.open_link", KeyCode::Enter, none, &mut t),
+        (Overlay::None, Some(Action::Run { id: "apps.open_link", args: vec!["vlc http://h/f.mkv".into()] }))
+    );
     assert_eq!(prompt_key("apps.open_link", KeyCode::Esc, none, &mut t), (Overlay::None, None));
     assert_eq!(paste_text("https://youtu.be/x\r\n"), "https://youtu.be/x");
     assert_eq!(paste_text("vlc\thttp://h/f.mkv"), "vlc http://h/f.mkv");
@@ -413,8 +418,12 @@ fn launcher_keys() {
     assert_eq!(k(1, KeyCode::Esc), (Overlay::None, None));
     assert_eq!(k(1, KeyCode::Backspace), (Overlay::None, None));
     // switching tabs starts at the top of the other one
-    for key in [KeyCode::Tab, KeyCode::Left, KeyCode::Right] {
+    for key in [KeyCode::Tab, KeyCode::BackTab] {
         assert_eq!(k(2, key), (Overlay::Apps { tab: AppTab::Other, sel: 0 }, None));
+    }
+    // ←/→: nothing (the rows have no value to change)
+    for key in [KeyCode::Left, KeyCode::Right] {
+        assert_eq!(k(2, key), (at(2), None));
     }
     assert_eq!(apps_key(AppTab::Other, 0, KeyCode::Tab, &[]), (at(0), None));
     // letters jump, even the ones that mean something on the main screen
@@ -435,17 +444,11 @@ fn app_actions() {
     let vlc = all.iter().find(|e| e.target == "vlc").unwrap();
     assert_eq!(app_choices(home, true, false), vec![AppChoice::Front, AppChoice::Cancel]);
     assert_eq!(app_choices(vlc, false, false), vec![AppChoice::Open, AppChoice::Search, AppChoice::Cancel]);
-    assert_eq!(
-        app_choices(vlc, true, false),
-        vec![AppChoice::Front, AppChoice::Restart, AppChoice::Close, AppChoice::Search, AppChoice::Cancel]
-    );
+    assert_eq!(app_choices(vlc, true, false), vec![AppChoice::Front, AppChoice::Restart, AppChoice::Close, AppChoice::Search, AppChoice::Cancel]);
     // persistent (live TV): no closing or restarting
     assert_eq!(app_choices(vlc, true, true), vec![AppChoice::Front, AppChoice::Search, AppChoice::Cancel]);
     assert_eq!(choice_action(AppChoice::Close, vlc), (Some(Action::Close("org.videolan.vlc".into())), false));
-    assert_eq!(
-        choice_action(AppChoice::Restart, vlc),
-        (Some(Action::Restart { pkg: "org.videolan.vlc".into(), target: "vlc".into() }), false)
-    );
+    assert_eq!(choice_action(AppChoice::Restart, vlc), (Some(Action::Restart { pkg: "org.videolan.vlc".into(), target: "vlc".into() }), false));
     assert_eq!(choice_action(AppChoice::Search, vlc), (None, true));
     // space on a row opens its actions
     let list = tab_list(&all, AppTab::Known);
@@ -483,13 +486,8 @@ fn launcher_lists_other_tv_apps() {
         g("org.droidtv.nettvbrowser", apps::Kind::Other, Some("org.droidtv.nettvbrowser/.Main")),
     ];
     let all = rows("package:org.videolan.vlc\n", &guessed);
-    let shown = |tab| {
-        tab_list(&all, tab).iter().map(|e| (e.section, e.name.clone(), e.alias.or(e.tag))).collect::<Vec<_>>()
-    };
-    assert_eq!(
-        shown(AppTab::Known),
-        vec![("Other home apps", "Home screen".to_string(), Some("home")), ("Players", "VLC".into(), Some("vlc"))]
-    );
+    let shown = |tab| tab_list(&all, tab).iter().map(|e| (e.section, e.name.clone(), e.alias.or(e.tag))).collect::<Vec<_>>();
+    assert_eq!(shown(AppTab::Known), vec![("Other home apps", "Home screen".to_string(), Some("home")), ("Players", "VLC".into(), Some("vlc"))]);
     // by section, then name
     assert_eq!(
         shown(AppTab::Other),
@@ -505,19 +503,13 @@ fn launcher_lists_other_tv_apps() {
     // other apps launch by their TV-launcher activity, and jump by name
     let other = tab_list(&all, AppTab::Other);
     assert_eq!(apps_key(AppTab::Other, 0, KeyCode::Char('n'), &other), (Overlay::Apps { tab: AppTab::Other, sel: 2 }, None));
-    assert_eq!(
-        apps_key(AppTab::Other, 2, KeyCode::Enter, &other),
-        (Overlay::None, Some(Action::Launch("nextapp.fx/.ui.Launcher".into())))
-    );
+    assert_eq!(apps_key(AppTab::Other, 2, KeyCode::Enter, &other), (Overlay::None, Some(Action::Launch("nextapp.fx/.ui.Launcher".into()))));
 }
 
 #[test]
 fn batches_keys_in_order() {
     use Action::*;
-    assert_eq!(
-        batches(vec![Key(20), Key(20), Key(23), PlayPause, Key(4)]),
-        vec![Batch::Keys(vec![20, 20, 23]), Batch::One(PlayPause), Batch::Keys(vec![4])]
-    );
+    assert_eq!(batches(vec![Key(20), Key(20), Key(23), PlayPause, Key(4)]), vec![Batch::Keys(vec![20, 20, 23]), Batch::One(PlayPause), Batch::Keys(vec![4])]);
     assert_eq!(key_name(4), "back");
     assert_eq!(key_name(20), "down");
 }

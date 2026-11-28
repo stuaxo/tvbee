@@ -3,8 +3,8 @@
 //! `insta` (`cargo insta review` to look at a change).
 
 use super::*;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::sync::Mutex;
 use tveee_core::devtools::Progress;
 use tveee_core::nowplaying::{Field, Place};
@@ -51,10 +51,7 @@ fn screen(app: &mut App, (w, h): (u16, u16)) -> String {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("a test terminal");
     term.draw(|f| app.draw(f)).expect("drawn");
     let buf = term.backend().buffer();
-    (0..h)
-        .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
+    (0..h).map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string()).collect::<Vec<_>>().join("\n")
 }
 
 /// Kodi, paused part way through an episode (paused: the bar doesn't move
@@ -206,9 +203,9 @@ fn help_fits_the_corner() {
     a.overlay = Overlay::Help(0);
     let s = screen(&mut a, CORNER);
     insta::assert_snapshot!(s);
-    // nothing runs past the box, and it says it scrolls
+    // nothing runs past the box, and it says how far down it is
     assert!(s.lines().all(|l| l.chars().count() <= usize::from(CORNER.0)));
-    assert!(s.contains("↑/↓ scroll"));
+    assert!(s.contains("1-14 of"), "{s}");
     // scrolled to the end: the last of it shows, and ↑ moves straight away
     a.overlay = Overlay::Help(999);
     let end = screen(&mut a, CORNER);
@@ -537,7 +534,10 @@ fn log_select_and_save() {
     assert!(s.contains("3 lines selected"), "{s}");
     let (first, lines) = tveee_core::log::recent_numbered();
     let picked = super::logview::lines_between(first, &lines, n0, n0 + 2);
-    assert!(picked.contains(&format!("{mark} line 0")) && picked.contains(&format!("{mark} line 2")) && !picked.contains(&format!("{mark} line 3")), "{picked}");
+    assert!(
+        picked.contains(&format!("{mark} line 0")) && picked.contains(&format!("{mark} line 2")) && !picked.contains(&format!("{mark} line 3")),
+        "{picked}"
+    );
     // esc lets go of the selection, then closes
     a.logs_key(Some(n0 + 2), Some(n0), KeyCode::Esc, KeyModifiers::NONE);
     assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: None });
@@ -633,13 +633,24 @@ fn kodi_artists() -> TvState {
             item("musicdb://artists/9/", "Radiohead", true, Some("9 albums")),
             item("smb://nas/music/exit.flac", "Exit Music.flac", false, Some("4:24")),
         ],
-        playing: None, at: Some(2),
+        playing: None,
+        at: Some(2),
         up: None,
-        reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None, browsed: false,
+        reopen: None,
+        crumbs: Vec::new(),
+        crumbs_whole: false,
+        location: None,
+        open_location: None,
+        browsed: false,
     };
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
-        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into(), playing_id: String::new() });
+        s.list_place = Some(ListPlace {
+            key: "10502|musicdb://artists/".into(),
+            focus_label: "Radiohead".into(),
+            focus_id: "musicdb://artists/9/".into(),
+            playing_id: String::new(),
+        });
     }
     st
 }
@@ -723,7 +734,12 @@ fn list_pane_follows_kodi() {
     a.list_sync(Change::Snapshot);
     // Kodi's highlight moves to Portishead: the pane follows
     let mut moved = st.clone();
-    moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Portishead".into(), focus_id: "musicdb://artists/7/".into(), playing_id: String::new() });
+    moved.snap.as_mut().unwrap().list_place = Some(ListPlace {
+        key: "10502|musicdb://artists/".into(),
+        focus_label: "Portishead".into(),
+        focus_id: "musicdb://artists/7/".into(),
+        playing_id: String::new(),
+    });
     *held.lock().unwrap() = Arc::new(moved);
     a.st = h.state();
     a.list_sync(Change::Snapshot);
@@ -732,7 +748,8 @@ fn list_pane_follows_kodi() {
     assert!(rx.try_iter().next().is_none());
     // Kodi opens another folder: its items are read (once)
     let mut other = st;
-    other.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new(), playing_id: String::new() });
+    other.snap.as_mut().unwrap().list_place =
+        Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new(), playing_id: String::new() });
     *held.lock().unwrap() = Arc::new(other);
     a.st = h.state();
     a.list_sync(Change::Snapshot);
@@ -776,7 +793,11 @@ fn with_ambilight() -> TvState {
         colour: Some(rgb),
         run: Run::Ask { prompt: format!("Colour for {side} {n}:"), hint: "red, warm, #ff8800", id: ID, args: vec!["one".into(), side.into(), n.to_string()] },
     };
-    let mut lights = vec![Choice { label: "all".into(), colour: None, run: Run::Ask { prompt: "Colour for every light:".into(), hint: "red", id: ID, args: vec!["all".into()] } }];
+    let mut lights = vec![Choice {
+        label: "all".into(),
+        colour: None,
+        run: Run::Ask { prompt: "Colour for every light:".into(), hint: "red", id: ID, args: vec!["all".into()] },
+    }];
     for n in 0..3 {
         lights.push(light("left", n, (255, 120 - n as u8 * 40, 0)));
     }
@@ -784,18 +805,45 @@ fn with_ambilight() -> TvState {
         lights.push(light("right", n, (0, 80 + n as u8 * 60, 255)));
     }
     let shown = Shown {
-        info: vec![("power".into(), "on".into()), ("control".into(), "the TV".into()), ("style".into(), "follow video, standard".into()), ("hue".into(), "on (Ambilight+Hue)".into())],
+        info: vec![
+            ("power".into(), "on".into()),
+            ("control".into(), "the TV".into()),
+            ("style".into(), "follow video, standard".into()),
+            ("hue".into(), "on (Ambilight+Hue)".into()),
+        ],
         swatches: Vec::new(),
         rows: vec![
-            Row { name: "power", options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])], current: Some(0), help: None },
-            Row { name: "style", options: vec![Choice::act("video", ID, &["style", "FOLLOW_VIDEO"]), Choice::act("sound", ID, &["style", "FOLLOW_AUDIO"]), Choice::act("colour", ID, &["style", "FOLLOW_COLOR"])], current: Some(0), help: None },
             Row {
-                name: "setting",
-                options: ["standard", "natural", "vivid", "game", "comfort", "relax"].iter().map(|s| Choice::act(*s, ID, &["style", "FOLLOW_VIDEO", s])).collect(),
+                name: "power",
+                options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])],
                 current: Some(0),
                 help: None,
             },
-            Row { name: "ambi+hue", options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])], current: Some(0), help: Some("sync Hue bulbs with the TV") },
+            Row {
+                name: "style",
+                options: vec![
+                    Choice::act("video", ID, &["style", "FOLLOW_VIDEO"]),
+                    Choice::act("sound", ID, &["style", "FOLLOW_AUDIO"]),
+                    Choice::act("colour", ID, &["style", "FOLLOW_COLOR"]),
+                ],
+                current: Some(0),
+                help: None,
+            },
+            Row {
+                name: "setting",
+                options: ["standard", "natural", "vivid", "game", "comfort", "relax"]
+                    .iter()
+                    .map(|s| Choice::act(*s, ID, &["style", "FOLLOW_VIDEO", s]))
+                    .collect(),
+                current: Some(0),
+                help: None,
+            },
+            Row {
+                name: "ambi+hue",
+                options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])],
+                current: Some(0),
+                help: Some("sync Hue bulbs with the TV"),
+            },
             Row { name: "lights", options: lights, current: None, help: None },
         ],
     };
@@ -841,7 +889,25 @@ fn ambilight_panel_edits_in_place() {
     a.ambi_ask_key(4, 2, KeyCode::Enter, KeyModifiers::NONE, &h);
     let want = super::ambi::hex(super::ambi::pick_colour(2, 1));
     assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["one", "left", "1", want.as_str()])), "{want}");
+    // the picker stays, to try another; Esc back to the panel
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 2 });
+    a.ambi_ask_key(4, 2, KeyCode::Right, KeyModifiers::NONE, &h);
+    a.ambi_ask_key(4, 2, KeyCode::Enter, KeyModifiers::NONE, &h);
+    let next = super::ambi::hex(super::ambi::pick_colour(3, 1));
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["one", "left", "1", next.as_str()])), "{next}");
+    a.ambi_ask_key(4, 2, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::Ambilight { row: 4, col: 2 });
+    // a click on the panel beside the picker doesn't close it
+    a.overlay = Overlay::AmbiColour { row: 4, col: 2 };
+    let _ = screen(&mut a, DESKTOP);
+    let panel = a.hits.iter().find(|(_, hit)| *hit == Hit::Input(Input::AmbilightDialog)).map(|(r, _)| *r).expect("the panel");
+    let spot = (panel.x..panel.right())
+        .flat_map(|x| (panel.y..panel.bottom()).map(move |y| (x, y)))
+        .find(|&(x, y)| a.hit_at(x, y) == Some(Hit::Input(Input::AmbilightDialog)));
+    if let Some((x, y)) = spot {
+        a.click(x, y, &h);
+        assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 2 });
+    }
     // typed instead: what's typed is set
     a.overlay = Overlay::AmbiColour { row: 4, col: 0 };
     for c in "warm".chars() {
@@ -934,7 +1000,7 @@ fn links_under_a_pop_up_stay_under_it() {
 
 #[test]
 fn list_trail_and_going_up() {
-    use super::ctxlist::{next_trail, Crumb};
+    use super::ctxlist::{Crumb, next_trail};
     use tveee_core::more::Go;
     use tveee_core::provider::ContextList;
     let list = |title: &str, key: &str, up: Option<(&str, &str)>| ContextList {
@@ -942,13 +1008,15 @@ fn list_trail_and_going_up() {
         kind: "folder",
         key: key.into(),
         items: Vec::new(),
-        playing: None, at: None,
+        playing: None,
+        at: None,
         up: up.map(|(k, g)| (k.to_string(), Go::Link(g.into()))),
         reopen: Some(Go::Link(format!("open:{key}"))),
         crumbs: Vec::new(),
         crumbs_whole: false,
         location: None,
-        open_location: None, browsed: false,
+        open_location: None,
+        browsed: false,
     };
     let music = list("Music", "10502|", None);
     let albums = list("Albums", "10502|musicdb://albums/", Some(("10502|", "kodi-window:music")));
@@ -966,7 +1034,10 @@ fn list_trail_and_going_up() {
     assert_eq!(back.len(), 2);
     // a list not on it (opened in Kodi straight away): "‹ up", then it
     let fresh = next_trail(&[], &album);
-    assert_eq!(fresh[0], Crumb { title: "‹ up".into(), key: "10502|musicdb://albums/".into(), go: Some(Go::Link("kodi-window:music|musicdb://albums/".into())) });
+    assert_eq!(
+        fresh[0],
+        Crumb { title: "‹ up".into(), key: "10502|musicdb://albums/".into(), go: Some(Go::Link("kodi-window:music|musicdb://albums/".into())) }
+    );
 
     // in the pane: the crumbs drawn, ⌫ goes up, a crumb click goes back to it
     let mut st = kodi_artists();
@@ -975,7 +1046,10 @@ fn list_trail_and_going_up() {
         st.list = Some(Arc::new(Ok(Some(l))));
     }
     let (mut a, rx, h) = app_seeing(st);
-    a.crumbs = vec![Crumb { title: "Music".into(), key: "10502|".into(), go: Some(Go::Link("kodi-window:music".into())) }, Crumb { title: "Artists".into(), key: "10502|musicdb://artists/".into(), go: None }];
+    a.crumbs = vec![
+        Crumb { title: "Music".into(), key: "10502|".into(), go: Some(Go::Link("kodi-window:music".into())) },
+        Crumb { title: "Artists".into(), key: "10502|musicdb://artists/".into(), go: None },
+    ];
     a.overlay = Overlay::List { sel: 0 };
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
@@ -998,7 +1072,12 @@ fn playing_marked_apart_from_the_highlight() {
     // Kodi's highlight on Radiohead (›), the file playing is another item (▶)
     let mut st = kodi_artists();
     if let Some(s) = st.snap.as_mut() {
-        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into(), playing_id: "smb://nas/music/exit.flac".into() });
+        s.list_place = Some(ListPlace {
+            key: "10502|musicdb://artists/".into(),
+            focus_label: "Radiohead".into(),
+            focus_id: "musicdb://artists/9/".into(),
+            playing_id: "smb://nas/music/exit.flac".into(),
+        });
     }
     let (mut a, _rx, _h) = app_seeing(st.clone());
     a.overlay = Overlay::List { sel: 0 };
@@ -1010,7 +1089,8 @@ fn playing_marked_apart_from_the_highlight() {
     let (mut b, _rx, hb, held) = app_holding(st.clone());
     let playing = |id: &str| {
         let mut moved = st.clone();
-        moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: String::new(), focus_id: String::new(), playing_id: id.into() });
+        moved.snap.as_mut().unwrap().list_place =
+            Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: String::new(), focus_id: String::new(), playing_id: id.into() });
         *held.lock().unwrap() = Arc::new(moved);
     };
     b.overlay = Overlay::List { sel: 0 };
@@ -1026,7 +1106,7 @@ fn playing_marked_apart_from_the_highlight() {
 
 #[test]
 fn breadcrumbs_from_the_path_and_a_typed_location() {
-    use super::ctxlist::{breadcrumbs, Crumb};
+    use super::ctxlist::{Crumb, breadcrumbs};
     use tveee_core::more::Go;
     use tveee_core::provider::ContextList;
     let crumb = |t: &str, k: &str| Crumb { title: t.into(), key: k.into(), go: Some(Go::Link(format!("open:{k}"))) };
@@ -1047,7 +1127,17 @@ fn breadcrumbs_from_the_path_and_a_typed_location() {
     };
     let titles = |c: &[Crumb]| c.iter().map(|x| x.title.clone()).collect::<Vec<_>>();
     // a share: every step from the path, straight away
-    let album = list("Selected Ambient Works", "10502|smb://nas/music/Aphex Twin/Selected Ambient Works/", vec![crumb("Music", "10502|"), crumb("nas", "10502|smb://nas/"), crumb("music", "10502|smb://nas/music/"), crumb("Aphex Twin", "10502|smb://nas/music/Aphex Twin/")], true);
+    let album = list(
+        "Selected Ambient Works",
+        "10502|smb://nas/music/Aphex Twin/Selected Ambient Works/",
+        vec![
+            crumb("Music", "10502|"),
+            crumb("nas", "10502|smb://nas/"),
+            crumb("music", "10502|smb://nas/music/"),
+            crumb("Aphex Twin", "10502|smb://nas/music/Aphex Twin/"),
+        ],
+        true,
+    );
     assert_eq!(titles(&breadcrumbs(&[], &album)), ["Music", "nas", "music", "Aphex Twin", "Selected Ambient Works"]);
     // the library, opened straight into an album: its section, then …
     let named = vec![crumb("Music", "10502|"), crumb("Albums", "10502|musicdb://albums/")];
@@ -1107,7 +1197,7 @@ fn tab_to_the_breadcrumbs() {
     assert_eq!(a.crumb_at, Some(1));
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
-    assert!(s.contains("←→ choose a step"), "{s}");
+    assert!(s.contains("tab back to the list"), "{s}");
     // ← to Music, ⏎ goes there; the keys are back on the list
     a.list_key(0, KeyCode::Left, KeyModifiers::NONE, &h);
     assert_eq!(a.crumb_at, Some(0));
@@ -1176,7 +1266,12 @@ fn kodi_albums_browsed() -> TvState {
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
         // Kodi's screen is somewhere else entirely
-        s.list_place = Some(ListPlace { key: "10025|videodb://movies/".into(), focus_label: "Alien".into(), focus_id: "videodb://movies/1/".into(), playing_id: String::new() });
+        s.list_place = Some(ListPlace {
+            key: "10025|videodb://movies/".into(),
+            focus_label: "Alien".into(),
+            focus_id: "videodb://movies/1/".into(),
+            playing_id: String::new(),
+        });
     }
     st
 }
@@ -1203,8 +1298,11 @@ fn browsing_kodi_here() {
     // ^S: sync folder on, folders open on the TV too
     a.list_key(1, KeyCode::Char('s'), KeyModifiers::CONTROL, &h);
     assert!(a.opt(tveee_core::options::LIST_SYNC));
+    // said in the title too
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("Albums (Kodi) ⇄ TV"), "{s}");
     a.list_up(&h);
-    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListOpen { at: "music||".into(), show: true }]);
+    assert_eq!(rx.try_iter().filter(|x| matches!(x, Action::ListOpen { .. })).collect::<Vec<_>>(), vec![Action::ListOpen { at: "music||".into(), show: true }]);
     // the album, read: then back up, landing on it
     let mut inside = st.clone();
     if let Some(Ok(Some(l))) = inside.list.as_deref().cloned() {
@@ -1250,4 +1348,235 @@ fn a_failed_read_keeps_the_list() {
     let s = screen(&mut a, DESKTOP);
     assert!(s.contains("couldn't read it again (timed out): showing it as it was"), "{s}");
     assert!(s.contains("A Polished Solid"), "{s}");
+}
+
+#[test]
+fn long_lists_have_a_scrollbar() {
+    use tveee_core::more::Go;
+    use tveee_core::provider::ListItem;
+    let mut st = kodi_albums_browsed();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        l.items = (0..60)
+            .map(|n| ListItem {
+                section: None,
+                id: format!("musicdb://albums/{n}/"),
+                label: format!("Album {n}"),
+                meta: None,
+                folder: true,
+                go: Go::Link(format!("music||musicdb://albums/{n}/")),
+            })
+            .collect();
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, _rx, h) = app_seeing(st);
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    let s = screen(&mut a, CORNER);
+    assert!(s.contains('┃'), "a thumb beside the rows: {s}");
+    // at the top: the thumb starts at the first row
+    let first_row = s.lines().position(|l| l.contains("Album 0/")).expect("the first album");
+    assert!(s.lines().nth(first_row).is_some_and(|l| l.contains('┃')), "{s}");
+    // a short list: none
+    let (mut b, _rx, h) = app_seeing(kodi_albums_browsed());
+    b.opts = Some(Vec::new());
+    b.open_list(&h);
+    let s = screen(&mut b, DESKTOP);
+    assert!(s.lines().filter(|l| l.contains("Dummy/") || l.contains("Mezzanine/")).all(|l| !l.contains('┃')), "{s}");
+}
+
+#[test]
+fn options_scroll_when_short() {
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let last = tveee_core::options::OPTIONS.len() - 1;
+    let label = tveee_core::options::OPTIONS[last].label;
+    a.overlay = Overlay::Options(last);
+    let s = screen(&mut a, (100, 11));
+    // the chosen one in view, the tabs and keys still there, a bar beside the rows
+    assert!(s.contains(label) && s.contains("Options") && s.contains("tab: plugins"), "{s}");
+    assert!(!s.contains(tveee_core::options::OPTIONS[0].label), "the first scrolled out: {s}");
+    assert!(s.contains('┃'), "{s}");
+    // clicked where it's drawn: that one
+    let y = u16::try_from(s.lines().position(|l| l.contains(label)).unwrap()).unwrap();
+    assert!(a.hits.iter().any(|(r, h)| *h == Hit::OptionItem(last) && r.y == y), "{:?}", a.hits);
+}
+
+fn mouse_at(kind: ratatui::crossterm::event::MouseEventKind, x: u16, y: u16) -> ratatui::crossterm::event::MouseEvent {
+    ratatui::crossterm::event::MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE }
+}
+
+fn the_bar(a: &App) -> super::drawing::BarAt {
+    a.hits.iter().rev().find_map(|(_, h)| if let Hit::Scrollbar(b) = h { Some(*b) } else { None }).expect("a scrollbar")
+}
+
+#[test]
+fn scrollbars_drag_with_the_mouse() {
+    use ratatui::crossterm::event::{MouseButton, MouseEventKind::*};
+    let (mut a, rx, h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    a.overlay = Overlay::Help(0);
+    let _ = screen(&mut a, CORNER);
+    let b = the_bar(&a);
+    let (start, len) = b.thumb();
+    assert_eq!(start, 0);
+    // grab the thumb, drag it to the bottom (wandering off the bar on the way)
+    assert!(!a.mouse(mouse_at(Down(MouseButton::Left), b.area.x, b.area.y), &h));
+    a.mouse(mouse_at(Drag(MouseButton::Left), 2, b.area.y + 3), &h);
+    a.mouse(mouse_at(Drag(MouseButton::Left), 0, b.area.bottom() + 5), &h);
+    assert_eq!(a.overlay, Overlay::Help(b.max_top()), "at the end");
+    a.mouse(mouse_at(Up(MouseButton::Left), 0, b.area.bottom() + 5), &h);
+    // let go: dragging no longer scrolls
+    a.mouse(mouse_at(Drag(MouseButton::Left), b.area.x, b.area.y), &h);
+    assert_eq!(a.overlay, Overlay::Help(b.max_top()));
+    // a click on the track (above the thumb, now at the bottom): the thumb jumps there
+    let _ = screen(&mut a, CORNER);
+    let b = the_bar(&a);
+    a.mouse(mouse_at(Down(MouseButton::Left), b.area.x, b.area.y), &h);
+    a.mouse(mouse_at(Up(MouseButton::Left), b.area.x, b.area.y), &h);
+    assert_eq!(a.overlay, Overlay::Help(0), "{len}");
+
+    // the list pane: dragged, the highlight moves so the rows dragged to show
+    let mut st = kodi_albums_browsed();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        use tveee_core::more::Go;
+        use tveee_core::provider::ListItem;
+        l.items = (0..60)
+            .map(|n| ListItem {
+                section: None,
+                id: format!("musicdb://albums/{n}/"),
+                label: format!("Album {n}"),
+                meta: None,
+                folder: true,
+                go: Go::Link(format!("music||musicdb://albums/{n}/")),
+            })
+            .collect();
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, rx2, h) = app_seeing(st);
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    let _ = screen(&mut a, CORNER);
+    let b = the_bar(&a);
+    a.mouse(mouse_at(Down(MouseButton::Left), b.area.x, b.area.y), &h);
+    a.mouse(mouse_at(Drag(MouseButton::Left), b.area.x, b.area.bottom()), &h);
+    // let go over a row: nothing chosen
+    a.mouse(mouse_at(Up(MouseButton::Left), b.area.x - 10, b.area.y + 1), &h);
+    assert!(matches!(a.overlay, Overlay::List { sel } if sel > 50), "{:?}", a.overlay);
+    let s = screen(&mut a, CORNER);
+    assert!(s.contains("Album 59/"), "the end in view: {s}");
+    assert!(!rx2.try_iter().any(|x| matches!(x, Action::ListOpen { .. } | Action::ListGo(_))));
+    let _ = rx.try_iter().count();
+}
+
+#[test]
+fn update_frequency_is_a_choice() {
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let row = tveee_core::options::OPTIONS.iter().position(|o| o.name == tveee_core::options::LOW_BANDWIDTH).expect("the option");
+    a.overlay = Overlay::Options(row);
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("update frequency") && s.contains("‹responsive›") && s.contains(" low bandwidth "), "{s}");
+    a.toggle_option(row);
+    assert_eq!(a.note, "update frequency: low bandwidth");
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("‹low bandwidth›"), "{s}");
+}
+
+#[test]
+fn help_has_colour() {
+    use super::overlays::help_line;
+    use ratatui::style::Color;
+    let parts = |l: &str| help_line(l).spans.iter().map(|s| (s.content.to_string(), s.style.fg)).collect::<Vec<_>>();
+    // a heading
+    assert_eq!(parts(" player mode"), vec![(" player mode".to_string(), Some(Color::Cyan))]);
+    // both columns' keys
+    let p = parts("   space p  play/pause       ⌫      back");
+    assert!(p.contains(&("space p".to_string(), Some(Color::Yellow))), "{p:?}");
+    assert!(p.contains(&("⌫".to_string(), Some(Color::Yellow))), "{p:?}");
+    assert!(p.iter().any(|(t, c)| t.contains("play/pause") && c.is_none()), "{p:?}");
+    // an aside, dim; a key after it still a key
+    let p = parts("   F        free memory (force-stop idle apps)   S  sleep   R  restart the app");
+    assert!(p.contains(&("(force-stop idle apps)".to_string(), Some(Color::DarkGray))), "{p:?}");
+    assert!(p.contains(&("S".to_string(), Some(Color::Yellow))) && p.contains(&("R".to_string(), Some(Color::Yellow))), "{p:?}");
+    // not keys: a sentence, and a continuation line
+    assert!(parts("   click the buttons, the progress bar (jump) or volume bar (set)").iter().all(|(_, c)| *c != Some(Color::Yellow)));
+    assert!(parts("            in front, coming back where it was (YouTube, Kodi)").iter().all(|(_, c)| *c != Some(Color::Yellow)));
+    // the text itself unchanged
+    let line = "   home     the TV's home screen    pgup pgdn  page up/down";
+    assert_eq!(help_line(line).spans.iter().map(|s| s.content.as_ref()).collect::<String>(), line);
+    assert!(parts(line).contains(&("pgup pgdn".to_string(), Some(Color::Yellow))));
+    // an aside that wraps: dim on the next line too, up to its bracket
+    let both =
+        super::overlays::help_styled(&["   u        the link (click it: the same;".to_string(), "            its buttons copy it) and more".to_string()]);
+    let second: Vec<_> = both[1].spans.iter().map(|s| (s.content.to_string(), s.style.fg)).collect();
+    assert!(second.iter().any(|(t, c)| t.contains("its buttons copy it)") && *c == Some(Color::DarkGray)), "{second:?}");
+    assert!(second.iter().any(|(t, c)| t.contains("and more") && c.is_none()), "{second:?}");
+}
+
+#[test]
+fn options_left_right_set_the_row() {
+    use tveee_core::options::{LOW_BANDWIDTH, OPTIONS};
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let row = OPTIONS.iter().position(|o| o.name == LOW_BANDWIDTH).expect("update frequency");
+    a.overlay = Overlay::Options(row);
+    // → the second choice (low bandwidth), ← back; the tab doesn't change
+    a.options_key(row, KeyCode::Right);
+    assert!(a.opt(LOW_BANDWIDTH) && !a.options_plugins);
+    a.options_key(row, KeyCode::Right);
+    assert!(a.opt(LOW_BANDWIDTH), "→ again: still the second");
+    a.options_key(row, KeyCode::Left);
+    assert!(!a.opt(LOW_BANDWIDTH) && !a.options_plugins);
+    assert_eq!(a.overlay, Overlay::Options(row), "still open, on it");
+    // ↑ from the first row: the tab bar, where ←/→ switch tabs
+    a.overlay = Overlay::Options(0);
+    a.options_key(0, KeyCode::Up);
+    assert!(a.options_on_tabs);
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("←→ switch"), "{s}");
+    a.options_key(0, KeyCode::Right);
+    assert!(a.options_plugins && a.options_on_tabs);
+    // ↓ back to the rows; Tab still switches from there
+    a.options_key(0, KeyCode::Down);
+    assert!(!a.options_on_tabs);
+    a.options_key(0, KeyCode::Tab);
+    assert!(!a.options_plugins);
+    // Esc on the tab bar leaves it; Esc again closes
+    a.options_key(0, KeyCode::Up);
+    a.options_key(0, KeyCode::Esc);
+    assert!(!a.options_on_tabs && matches!(a.overlay, Overlay::Options(_)));
+    a.options_key(0, KeyCode::Esc);
+    assert_eq!(a.overlay, Overlay::None);
+}
+
+#[test]
+fn a_plugin_turned_off_goes_at_once() {
+    use tveee_core::plugin::{PluginState, Source};
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    a.plugins = vec![PluginState { name: "kodi", desc: "Kodi", enabled: true, source: Source::Cache }];
+    a.options_plugins = true;
+    a.overlay = Overlay::Options(0);
+    // ← turns it off: now, not at the next start
+    a.options_key(0, KeyCode::Left);
+    assert!(!a.plugins[0].enabled && a.plugins[0].source == Source::Override);
+    assert_eq!(a.note, "plugin kodi: off");
+    assert_eq!(a.plugin_opt("kodi"), Some(false));
+    let s = screen(&mut a, DESKTOP);
+    assert!(!s.contains("(from the next start)"), "{s}");
+    a.options_key(0, KeyCode::Right);
+    assert!(a.plugins[0].enabled);
+}
+
+#[test]
+fn remote_mode_findable_when_narrow() {
+    let (mut a, _rx, h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let s = screen(&mut a, CORNER);
+    assert!(s.contains("tab  remote") || s.contains("tab remote"), "{s}");
+    // the tag top right switches mode when clicked
+    let first = s.lines().next().unwrap_or_default();
+    let x = first.chars().count() - " player ".len() + 1;
+    assert!(!a.click(u16::try_from(x).unwrap(), 0, &h));
+    assert_eq!(a.mode, Mode::Remote);
 }

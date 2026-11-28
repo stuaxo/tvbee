@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 1076
+assertion_line: 1080
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -16,14 +16,14 @@ expression: s
 │                                                                       │load     4.82 3.10 2.40                      ││
 │                                                                       └─────────────────────────────────────────────┘│
 │       ┌ Artists (Kodi) ────────────────────────────────────────────────────────────────────────────── 1 of 4 ┐       │
-│       │location musicdb://artists/█  ⏎ open  esc back                                                        │       │
+│       │location musicdb://artists/█                                                                          │       │
 │       │type to filter                                                                                        │       │
 │       │   Massive Attack/                                                                         6 albums   │       │
 │       │   Portishead/                                                                             3 albums   │       │
 │       │ › Radiohead/                                                                              9 albums   │       │
 │       │   Exit Music.flac                                                                             4:24   │       │
 │       │                                                                                                      │       │
-│       │↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  ^L location  type to filter  esc closes          │       │
+│       │⌫/alt+↑ up  ^L location  type to filter                                                               │       │
 │       └──────────────────────────────────────────────────────────────────────────────────────────────────────┘       │
 │                                                                                                                      │
 │                                                                                                                      │

@@ -4,7 +4,7 @@
 //! `stty` and drawn on the alternate screen with ANSI escapes. Fetching runs on
 //! a background thread so keys stay responsive while the TV is slow.
 
-use crate::error::{usage, Result};
+use crate::error::{Result, usage};
 use std::io::{IsTerminal, Read, Write};
 use std::process::{Command as Proc, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -49,11 +49,7 @@ pub fn frame(header: &str, body: &str, error: Option<&str>) -> String {
 }
 
 fn clock() -> String {
-    Proc::new("date")
-        .arg("+%T")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
+    Proc::new("date").arg("+%T").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
 }
 
 /// Raw-ish terminal for the lifetime of the guard.

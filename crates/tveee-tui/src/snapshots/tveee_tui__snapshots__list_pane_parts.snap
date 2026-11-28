@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 752
+assertion_line: 755
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -24,7 +24,7 @@ expression: s
 │       │ ─ Files                                                                                              │       │
 │       │   Exit Music.flac                                                                             4:24   │       │
 │       │                                                                                                      │       │
-│       │↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  type to filter  esc closes                       │       │
+│       │⌫/alt+↑ up  type to filter                                                                            │       │
 │       └──────────────────────────────────────────────────────────────────────────────────────────────────────┘       │
 │                                                                                                                      │
 │                                                                                                                      │

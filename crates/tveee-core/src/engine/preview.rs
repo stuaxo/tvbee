@@ -41,7 +41,7 @@ pub fn stop_pictures(pkg: Option<String>) {
 /// step. Anything else: scrcpy's pictures (the default for apps without
 /// their own way), or a screenshot every few seconds without it.
 pub fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
-    use crate::preview::{screencap, Scrcpy};
+    use crate::preview::{Scrcpy, screencap};
     let tv = shared.tv();
     let open = || shared.preview.load(Ordering::Relaxed) && !shared.stopping();
     let send = |m: Msg| tx.send(m).is_ok();
@@ -166,4 +166,3 @@ pub fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
         drop(live);
     }
 }
-

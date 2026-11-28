@@ -1,10 +1,10 @@
 //! `guide` and `providers`: programme guides from whichever provider has one
 //! (over-the-air TV on Philips TVs), and what each provider can do.
 
-use crate::error::{failed, usage, Result};
-use crate::provider::{self, Cx, Event};
-use crate::actions::ActionDescriptor;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::provider::{self, Cx, Event};
 
 const CAT: &str = "guide";
 
@@ -47,11 +47,7 @@ pub fn day_hhmm(t: i64, offset: i64) -> String {
 }
 
 fn fit(s: &str, w: usize) -> String {
-    if s.chars().count() <= w {
-        format!("{s:<w$}")
-    } else {
-        format!("{}…", s.chars().take(w - 1).collect::<String>())
-    }
+    if s.chars().count() <= w { format!("{s:<w$}") } else { format!("{}…", s.chars().take(w - 1).collect::<String>()) }
 }
 
 /// `guide [<channel>] [--hours N] [--provider ID]`.
@@ -163,7 +159,8 @@ fn channels(c: &Ctx, args: &[String]) -> Result<()> {
             println!("\n{}:", g.unwrap_or_default());
             group = g;
         }
-        let title = on.iter().find(|n| n.channel == ch.id).and_then(|n| n.now.as_ref()).map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
+        let title =
+            on.iter().find(|n| n.channel == ch.id).and_then(|n| n.now.as_ref()).map_or_else(String::new, |e| format!("{} {}", hhmm(e.start, off), e.title));
         let radio = if ch.radio { " (radio)" } else { "" };
         let mark = if current == Some(ch.id) { "  <- on now" } else { "" };
         let star = if ch.favourite { "★" } else { " " };

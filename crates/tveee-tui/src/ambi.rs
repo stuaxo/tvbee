@@ -157,7 +157,8 @@ impl App {
     }
 
     /// Set the colour the picker has (what's typed, else the one picked) on
-    /// option `col` of row `row`, and go back to the panel.
+    /// option `col` of row `row`. The picker stays open (what's typed too),
+    /// to try another; Esc goes back to the panel.
     pub(super) fn ambi_set(&mut self, row: usize, col: usize, actions: &Handle) {
         let typed = self.prompt.trim().to_string();
         let colour = if typed.is_empty() { hex(pick_colour(self.pick.0, self.pick.1)) } else { typed };
@@ -168,8 +169,7 @@ impl App {
             let _ = actions.dispatch(id, args);
             self.note = format!("{}: {colour}...", self.panel_title());
         }
-        self.prompt.clear();
-        self.overlay = Overlay::Ambilight { row, col };
+        self.overlay = Overlay::AmbiColour { row, col };
     }
 
     /// The panel's lines for `width`, each with its clickable spots (x,
@@ -187,7 +187,13 @@ impl App {
             Some(View::NeedsPairing { why, .. }) => {
                 return vec![
                     whole(Line::from(why.clone()), None),
-                    whole(Line::from(vec![Span::styled(" P ", Style::new().fg(Color::Black).bg(Color::Yellow)), Span::raw(" pair now: the TV shows a PIN to type in")]), Some(Hit::Input(Input::Pair))),
+                    whole(
+                        Line::from(vec![
+                            Span::styled(" P ", Style::new().fg(Color::Black).bg(Color::Yellow)),
+                            Span::raw(" pair now: the TV shows a PIN to type in"),
+                        ]),
+                        Some(Hit::Input(Input::Pair)),
+                    ),
                 ];
             }
             Some(View::Failed(e)) => return vec![whole(Line::from(format!("! {e}")).fg(Color::Red), None)],
@@ -387,7 +393,7 @@ impl App {
         }
         text.push(Line::default());
         text.push(Line::from(cmp));
-        text.push(Line::from("arrows or click pick  type a name or #hex  ⏎ set  esc back").fg(Color::DarkGray));
+        text.push(Line::from("type a name or #hex").fg(Color::DarkGray));
         let r = popup(f, &format!(" {} colour ", self.panel_title()), text, Color::Yellow);
         self.hits.push((r, Hit::Popup));
         for (line, x, w, gx, gy) in spots {

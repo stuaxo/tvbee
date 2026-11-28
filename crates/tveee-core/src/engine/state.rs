@@ -118,7 +118,10 @@ impl TvState {
 /// read (the connection dropping out) keeps one read before, as does a read
 /// saying there's no list when the one shown was browsed here (it doesn't
 /// depend on what the app shows).
-pub fn keeps_list(old: Option<&std::result::Result<Option<crate::provider::ContextList>, String>>, new: &std::result::Result<Option<crate::provider::ContextList>, String>) -> bool {
+pub fn keeps_list(
+    old: Option<&std::result::Result<Option<crate::provider::ContextList>, String>>,
+    new: &std::result::Result<Option<crate::provider::ContextList>, String>,
+) -> bool {
     let Some(Ok(Some(old))) = old else { return false };
     match new {
         Err(_) => true,

@@ -360,7 +360,10 @@ pub struct ListItem {
 impl ContextList {
     /// The item the app has highlighted, by its id, else its label.
     pub fn find(&self, p: &ListPlace) -> Option<usize> {
-        self.items.iter().position(|i| !p.focus_id.is_empty() && i.id == p.focus_id).or_else(|| self.items.iter().position(|i| !p.focus_label.is_empty() && i.label == p.focus_label))
+        self.items
+            .iter()
+            .position(|i| !p.focus_id.is_empty() && i.id == p.focus_id)
+            .or_else(|| self.items.iter().position(|i| !p.focus_label.is_empty() && i.label == p.focus_label))
     }
 
     /// The item playing now, by its id (empty: none).
@@ -584,8 +587,17 @@ mod tests {
 
     #[test]
     fn finds_channels() {
-        let ch = |id, n: &str, name: &str| Channel { id, number: Some(n.into()), name: Some(name.into()), radio: false, favourite: false, delivery: None, dvb: None };
-        let list = vec![ch(159, "1", "BBC ONE Lon"), ch(158, "2", "BBC TWO"), ch(156, "4", "Channel 4"), ch(143, "18", "More 4"), ch(9, "101", "BBC ONE Lon HD")];
+        let ch = |id, n: &str, name: &str| Channel {
+            id,
+            number: Some(n.into()),
+            name: Some(name.into()),
+            radio: false,
+            favourite: false,
+            delivery: None,
+            dvb: None,
+        };
+        let list =
+            vec![ch(159, "1", "BBC ONE Lon"), ch(158, "2", "BBC TWO"), ch(156, "4", "Channel 4"), ch(143, "18", "More 4"), ch(9, "101", "BBC ONE Lon HD")];
         let id = |q| find_channel(&list, q).map(|c| c.id);
         assert_eq!(id("4"), Some(156));
         assert_eq!(id("more 4"), Some(143));

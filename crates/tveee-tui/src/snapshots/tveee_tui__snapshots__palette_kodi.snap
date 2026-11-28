@@ -24,7 +24,7 @@ expression: "screen(&mut a, DESKTOP)"
 │                         │ ui: music visualiser: show or hide it (Kodi)                ui   │                         │
 │                         │ ui: the list the app shows (Kodi's folder)                  ui   │                         │
 │                         │                                                                  │                         │
-│                         │type to find  ↑/↓ choose  ⏎ run  esc close   …: asks first        │                         │
+│                         │type to find   …: asks first                                      │                         │
 │                         └──────────────────────────────────────────────────────────────────┘                         │
 │                                                                                                                      │
 │                                                                                                                      │

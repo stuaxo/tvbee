@@ -8,10 +8,10 @@
 //! Credentials are saved per pairing and TV in
 //! `~/.config/tveee/pairings/<id>-<ip>.txt` (readable only by you).
 
-use crate::error::{failed, usage, Error, Result};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Error, Result, failed, usage};
+use crate::tv::Tv;
 use std::path::PathBuf;
 
 /// What a pairing saved: `key=value` fields.
@@ -173,14 +173,20 @@ fn pairings(c: &Ctx, _: &[String]) -> Result<()> {
 
 pub fn actions() -> Vec<ActionDescriptor> {
     vec![
-        ActionDescriptor::terminal("pairing.pair", "pairing", "pair tveee with a service on the TV", pair).cli("pair", "[<id>]", "pair tveee with a service on the TV").long(
-            "Some TV services need a one-time pairing before tveee can use them (on\n\
+        ActionDescriptor::terminal("pairing.pair", "pairing", "pair tveee with a service on the TV", pair)
+            .cli("pair", "[<id>]", "pair tveee with a service on the TV")
+            .long(
+                "Some TV services need a one-time pairing before tveee can use them (on\n\
              Philips TVs, the JointSpace API: the TV shows a PIN, you type it here).\n\
              With one pairing available, the id can be left out. 'tveee pairings' lists\n\
              them. Saved in ~/.config/tveee/pairings/ (readable only by you).",
-        ),
+            ),
         ActionDescriptor::terminal("pairing.unpair", "pairing", "forget a saved pairing", unpair).cli("unpair", "<id>", "forget a saved pairing"),
-        ActionDescriptor::terminal("pairing.pairings", "pairing", "services tveee can pair with, and whether it has", pairings).cli("pairings", "", "services tveee can pair with, and whether it has"),
+        ActionDescriptor::terminal("pairing.pairings", "pairing", "services tveee can pair with, and whether it has", pairings).cli(
+            "pairings",
+            "",
+            "services tveee can pair with, and whether it has",
+        ),
     ]
 }
 
@@ -197,5 +203,4 @@ mod tests {
         assert_eq!(s.get("key"), Some("x=y"));
         assert_eq!(s.get("nope"), None);
     }
-
 }

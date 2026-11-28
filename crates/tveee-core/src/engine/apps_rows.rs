@@ -103,7 +103,6 @@ impl AppTab {
     }
 }
 
-
 /// How many lines a tab draws: its entries, plus section headings on Other.
 pub fn tab_rows(all: &[Entry], tab: AppTab) -> usize {
     let list = tab_list(all, tab);
@@ -121,4 +120,3 @@ pub fn tab_rows(all: &[Entry], tab: AppTab) -> usize {
 pub fn tab_list(all: &[Entry], tab: AppTab) -> Vec<Entry> {
     all.iter().filter(|e| tab.holds(e)).cloned().collect()
 }
-

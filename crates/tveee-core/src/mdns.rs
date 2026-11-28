@@ -102,9 +102,7 @@ pub fn parse(p: &[u8]) -> Vec<Record> {
         }
         let rec = match kind {
             PTR => read_name(p, data).map(|(target, _)| Record::Ptr { name: name.clone(), target }),
-            SRV => u16_at(p, data + 4).and_then(|port| {
-                read_name(p, data + 6).map(|(host, _)| Record::Srv { name: name.clone(), port, host })
-            }),
+            SRV => u16_at(p, data + 4).and_then(|port| read_name(p, data + 6).map(|(host, _)| Record::Srv { name: name.clone(), port, host })),
             TXT => {
                 let (mut entries, mut i) = (Vec::new(), data);
                 while i < data + len {
@@ -252,10 +250,7 @@ mod tests {
     fn reads_a_tv_response() {
         let recs = parse(&tv_response());
         assert_eq!(recs.len(), 4);
-        assert_eq!(
-            recs[0],
-            Record::Ptr { name: "_googlecast._tcp.local".into(), target: "Chromecast-x._googlecast._tcp.local".into() }
-        );
+        assert_eq!(recs[0], Record::Ptr { name: "_googlecast._tcp.local".into(), target: "Chromecast-x._googlecast._tcp.local".into() });
         let found = services(&["_googlecast._tcp.local"], &[(recs, Some(Ipv4Addr::new(10, 0, 0, 1)))]);
         assert_eq!(found.len(), 1);
         let s = &found[0];

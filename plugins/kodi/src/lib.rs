@@ -8,11 +8,11 @@
 //!
 //! No password set in Kodi: nothing to do. With one: `tveee pair kodi`.
 
+use tveee_core::actions::ActionDescriptor;
 use tveee_core::devtools::{Progress, SeekTo};
-use tveee_core::error::{failed, Error, Result};
+use tveee_core::error::{Error, Result, failed};
 use tveee_core::more::Place;
 use tveee_core::provider::{Outcome, Playing, Session};
-use tveee_core::actions::ActionDescriptor;
 use tveee_core::tv::Tv;
 
 pub const PACKAGE: &str = "org.xbmc.kodi";
@@ -53,13 +53,7 @@ pub fn seconds(time: &Value) -> Option<f64> {
 /// Seconds as Kodi's time object.
 pub fn time_json(secs: f64) -> String {
     let ms = (secs.max(0.0) * 1000.0).round() as u64;
-    format!(
-        r#"{{"hours":{},"minutes":{},"seconds":{},"milliseconds":{}}}"#,
-        ms / 3_600_000,
-        ms / 60_000 % 60,
-        ms / 1000 % 60,
-        ms % 1000
-    )
+    format!(r#"{{"hours":{},"minutes":{},"seconds":{},"milliseconds":{}}}"#, ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
 }
 
 /// `s` as a JSON string.
@@ -94,8 +88,7 @@ fn login(tv: &Tv) -> (u16, String, String) {
 
 fn off() -> Error {
     Error::Unavailable(
-        "Kodi isn't answering: it isn't running, or its remote control is off (in Kodi: Settings > Services > Control > Allow remote control via HTTP)"
-            .into(),
+        "Kodi isn't answering: it isn't running, or its remote control is off (in Kodi: Settings > Services > Control > Allow remote control via HTTP)".into(),
     )
 }
 
@@ -110,12 +103,15 @@ fn post_within(tv: &Tv, login: &(u16, String, String), body: &str, secs: u32) ->
     let (port, user, pass) = login;
     let url = format!("http://{}:{port}/jsonrpc", tv.ip);
     let auth = (!pass.is_empty()).then_some((user.as_str(), pass.as_str()));
-    let reply = tveee_core::https::request(&tveee_core::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: None, timeout_secs: secs });
+    let reply =
+        tveee_core::https::request(&tveee_core::https::Request { url: &url, body: Some(body), digest: None, basic: auth, retry: None, timeout_secs: secs });
     match reply {
         Ok((200, text)) => Ok(text),
         Ok((401, _)) => failed("Kodi wants a username and password: run 'tveee pair kodi'"),
         Ok((code, _)) => failed(format!("Kodi answered HTTP {code}")),
-        Err(_) if !body.contains("JSONRPC.Ping") && ping(tv) => failed(format!("Kodi didn't answer within {secs}s (it's running: a slow share or a big library?)")),
+        Err(_) if !body.contains("JSONRPC.Ping") && ping(tv) => {
+            failed(format!("Kodi didn't answer within {secs}s (it's running: a slow share or a big library?)"))
+        }
         Err(_) => Err(off()),
     }
 }
@@ -150,7 +146,10 @@ pub fn diagnose(tv: &Tv) -> Vec<tveee_core::plugin::Finding> {
     let (ok, detail) = if ping(tv) {
         (Some(true), "its remote control answers (position, exact seeking, artwork, places)")
     } else {
-        (None, "installed, but its remote control doesn't answer (Kodi not running, or off: Settings > Services > Control > Allow remote control via HTTP; with a password, 'tveee pair kodi')")
+        (
+            None,
+            "installed, but its remote control doesn't answer (Kodi not running, or off: Settings > Services > Control > Allow remote control via HTTP; with a password, 'tveee pair kodi')",
+        )
     };
     vec![tveee_core::plugin::Finding { ok, what: "kodi", detail: detail.into() }]
 }
@@ -272,7 +271,11 @@ impl Tracks {
     /// `currentsubtitle`, `subtitleenabled`).
     pub fn of(props: &Value) -> Tracks {
         let index = |k: &str| props.get(k)?.get("index")?.as_u64();
-        Tracks { audio: index("currentaudiostream"), subtitle: index("currentsubtitle"), subtitles_on: props.get("subtitleenabled").and_then(Value::as_bool).unwrap_or(false) }
+        Tracks {
+            audio: index("currentaudiostream"),
+            subtitle: index("currentsubtitle"),
+            subtitles_on: props.get("subtitleenabled").and_then(Value::as_bool).unwrap_or(false),
+        }
     }
 
     /// As a session keeps them.
@@ -283,7 +286,11 @@ impl Tracks {
     /// Back from a session (none kept: nothing to put back).
     pub fn from_extra(extra: &str) -> Option<Tracks> {
         let v: Value = serde_json::from_str(extra).ok()?;
-        Some(Tracks { audio: v.get("audio")?.as_u64(), subtitle: v.get("subtitle").and_then(Value::as_u64), subtitles_on: v.get("subtitles_on").and_then(Value::as_bool).unwrap_or(false) })
+        Some(Tracks {
+            audio: v.get("audio")?.as_u64(),
+            subtitle: v.get("subtitle").and_then(Value::as_u64),
+            subtitles_on: v.get("subtitles_on").and_then(Value::as_bool).unwrap_or(false),
+        })
     }
 
     /// The calls that put them back on player `id`.
@@ -547,6 +554,10 @@ impl tveee_core::provider::Player for Kodi {
         }
     }
     fn show_at(&self, tv: &Tv, at: &str) -> Outcome<()> {
+        // Kodi's top: its home screen
+        if at == library::ROOT {
+            return tveee_core::provider::Provider::open_here(self, tv, "kodi-window:home");
+        }
         let (m, _, path) = library::parse(at);
         let window = if path.is_empty() { format!("kodi-window:{}", m.window_name()) } else { format!("kodi-window:{}|{path}", m.window_name()) };
         tveee_core::provider::Provider::open_here(self, tv, &window)
@@ -564,9 +575,6 @@ impl tveee_core::provider::Player for Kodi {
                 Outcome::Fallback => Outcome::Fallback,
                 Outcome::Failed(e) => Outcome::Failed(e),
             };
-        }
-        if link == browse::UP {
-            return call(tv, "Input.ExecuteAction", r#"{"action":"parentdir"}"#).map(|_| "up a folder in Kodi".to_string()).into();
         }
         match self.open_here(tv, link) {
             Outcome::Handled(()) if link.starts_with("kodi-window:") => Outcome::Handled("opened it in Kodi".into()),
@@ -701,7 +709,8 @@ impl Kodi {
 
 // --- details ----------------------------------------------------------------------
 
-const DETAIL_FIELDS: &str = r#"["title","showtitle","season","episode","year","plot","tagline","rating","genre","director","cast","studio","runtime","streamdetails","file"]"#;
+const DETAIL_FIELDS: &str =
+    r#"["title","showtitle","season","episode","year","plot","tagline","rating","genre","director","cast","studio","runtime","streamdetails","file"]"#;
 
 /// Names in a JSON list of strings, joined; None if there are none.
 fn names(v: &Value, key: &str) -> Option<String> {
@@ -1205,7 +1214,9 @@ mod tests {
 
     #[test]
     fn details_of_an_episode() {
-        let item = json(r#"{"title":"A Very Nuanced Character","showtitle":"Taskmaster","season":3,"episode":4,"year":2016,"rating":7.84,"genre":["Comedy"],"director":[],"cast":[{"name":"Greg Davies","role":"Taskmaster"},{"name":"Alex Horne"}],"runtime":2700,"plot":"Five comedians.","tagline":"","streamdetails":{"audio":[{"channels":6,"codec":"ac3","language":"eng"},{"channels":2,"codec":"aac","language":"fre"}],"subtitle":[{"language":"eng"}],"video":[{"codec":"h264","height":1080}]}}"#);
+        let item = json(
+            r#"{"title":"A Very Nuanced Character","showtitle":"Taskmaster","season":3,"episode":4,"year":2016,"rating":7.84,"genre":["Comedy"],"director":[],"cast":[{"name":"Greg Davies","role":"Taskmaster"},{"name":"Alex Horne"}],"runtime":2700,"plot":"Five comedians.","tagline":"","streamdetails":{"audio":[{"channels":6,"codec":"ac3","language":"eng"},{"channels":2,"codec":"aac","language":"fre"}],"subtitle":[{"language":"eng"}],"video":[{"codec":"h264","height":1080}]}}"#,
+        );
         let d = parse_details(&item);
         let f = |k| d.fields.iter().find(|(n, _)| *n == k).map(|(_, v)| v.as_str());
         assert_eq!(f("show"), Some("Taskmaster, series 3, episode 4"));
@@ -1231,7 +1242,9 @@ mod tests {
 
     #[test]
     fn library_search() {
-        let r = json(r#"{"limits":{"end":2,"start":0,"total":2},"movies":[{"label":"Dune","movieid":3,"title":"Dune","year":2021},{"label":"Dune: Part Two","movieid":9,"title":"Dune: Part Two","year":2024}]}"#);
+        let r = json(
+            r#"{"limits":{"end":2,"start":0,"total":2},"movies":[{"label":"Dune","movieid":3,"title":"Dune","year":2021},{"label":"Dune: Part Two","movieid":9,"title":"Dune: Part Two","year":2024}]}"#,
+        );
         let found = parse_found(&r, "movie", "movies", "movieid");
         assert_eq!(found.len(), 2);
         assert_eq!(found[0], Found { kind: "movie", id: 3, title: "Dune".into(), year: Some(2021) });
@@ -1278,12 +1291,17 @@ mod tests {
         assert_eq!(Tracks::from_extra(&t.to_extra()), Some(t.clone()));
         assert_eq!(
             t.calls(1),
-            vec![("Player.SetAudioStream", r#"{"playerid":1,"stream":0}"#.to_string()), ("Player.SetSubtitle", r#"{"playerid":1,"subtitle":"off"}"#.to_string())]
+            vec![
+                ("Player.SetAudioStream", r#"{"playerid":1,"stream":0}"#.to_string()),
+                ("Player.SetSubtitle", r#"{"playerid":1,"subtitle":"off"}"#.to_string())
+            ]
         );
         // nothing said about the usual tracks
         assert_eq!(tracks_said(&json(PROPS)), "");
         // the second audio track, French subtitles on
-        let props = json(r#"{"currentaudiostream":{"codec":"dts","index":1,"name":"Commentary"},"currentsubtitle":{"index":2,"language":"fre","name":"French"},"subtitleenabled":true}"#);
+        let props = json(
+            r#"{"currentaudiostream":{"codec":"dts","index":1,"name":"Commentary"},"currentsubtitle":{"index":2,"language":"fre","name":"French"},"subtitleenabled":true}"#,
+        );
         let t = Tracks::of(&props);
         assert_eq!(t.calls(1)[1].1, r#"{"playerid":1,"subtitle":2,"enable":true}"#);
         assert_eq!(tracks_said(&props), ", Commentary DTS audio, French subtitles");

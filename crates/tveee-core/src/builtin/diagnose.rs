@@ -1,10 +1,10 @@
 //! Finding the TV on the network, and checking that tveee's setup works.
 
-use crate::error::{failed, usage, Result};
-use crate::mdns;
-use crate::actions::ActionDescriptor;
-use crate::tv;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::mdns;
+use crate::tv;
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::time::Duration;
@@ -112,11 +112,7 @@ pub fn parse_adb_devices(out: &str) -> BTreeMap<String, String> {
 /// What adb already knows about each device (without connecting to any).
 fn adb_states() -> BTreeMap<String, String> {
     let Some(adb) = tv::find_adb(|k| std::env::var_os(k)) else { return BTreeMap::new() };
-    std::process::Command::new(adb.path)
-        .arg("devices")
-        .output()
-        .map(|o| parse_adb_devices(&String::from_utf8_lossy(&o.stdout)))
-        .unwrap_or_default()
+    std::process::Command::new(adb.path).arg("devices").output().map(|o| parse_adb_devices(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
 }
 
 /// This machine's address on the LAN (the one it would use to reach `towards`).
@@ -138,10 +134,7 @@ fn scan(me: Ipv4Addr) -> Vec<Ipv4Addr> {
     let all: Vec<Ipv4Addr> = (1..=254).map(|d| Ipv4Addr::new(a, b, c, d)).filter(|ip| *ip != me).collect();
     for chunk in all.chunks(64) {
         let open: Vec<Ipv4Addr> = std::thread::scope(|sc| {
-            let hs: Vec<_> = chunk
-                .iter()
-                .map(|ip| sc.spawn(move || port_open(IpAddr::V4(*ip), ADB_PORT, Duration::from_millis(400)).then_some(*ip)))
-                .collect();
+            let hs: Vec<_> = chunk.iter().map(|ip| sc.spawn(move || port_open(IpAddr::V4(*ip), ADB_PORT, Duration::from_millis(400)).then_some(*ip))).collect();
             hs.into_iter().filter_map(|h| h.join().ok().flatten()).collect()
         });
         hits.extend(open);
@@ -335,10 +328,7 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
             .and_then(|o| parse_adb_devices(&String::from_utf8_lossy(&o.stdout)).remove(&c.tv.serial()));
         match state.as_deref() {
             Some("device") => {
-                let props = c
-                    .tv
-                    .shell(&["getprop ro.product.manufacturer; getprop ro.product.model; getprop ro.build.version.release"])
-                    .unwrap_or_default();
+                let props = c.tv.shell(&["getprop ro.product.manufacturer; getprop ro.product.model; getprop ro.build.version.release"]).unwrap_or_default();
                 let p: Vec<&str> = props.lines().map(str::trim).collect();
                 let about = match p.as_slice() {
                     [make, model, android, ..] => format!(" - {make} {model}, Android {android}"),
@@ -362,7 +352,12 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
     }
 
     // plugins and optional parts
-    let plugins: Vec<String> = c.plugins.iter().filter(|p| !matches!(p.source, crate::plugin::Source::Builtin)).map(|p| format!("{} {}", p.name, if p.enabled { "on" } else { "off" })).collect();
+    let plugins: Vec<String> = c
+        .plugins
+        .iter()
+        .filter(|p| !matches!(p.source, crate::plugin::Source::Builtin))
+        .map(|p| format!("{} {}", p.name, if p.enabled { "on" } else { "off" }))
+        .collect();
     if !plugins.is_empty() {
         report(None, "plugins", &format!("{} (see 'tveee plugins')", plugins.join(", ")));
     }
@@ -382,8 +377,10 @@ fn diagnose(c: &Ctx, _: &[String]) -> Result<()> {
 
 pub fn actions() -> Vec<ActionDescriptor> {
     vec![
-        ActionDescriptor::terminal("diagnose.findtv", CAT, "look for Android / Google TVs on the network", findtv).cli("findtv", "[--scan] [--wait <secs>] [--raw]", "look for Android / Google TVs on the network").long(
-            "Asks the local network (mDNS / DNS-SD) for the few services an Android or\n\
+        ActionDescriptor::terminal("diagnose.findtv", CAT, "look for Android / Google TVs on the network", findtv)
+            .cli("findtv", "[--scan] [--wait <secs>] [--raw]", "look for Android / Google TVs on the network")
+            .long(
+                "Asks the local network (mDNS / DNS-SD) for the few services an Android or\n\
              Google TV advertises: Cast, the Android TV Remote service, and ADB. For each\n\
              TV it shows the name, model, what it offers, and whether adb can reach it.\n\
              \n\
@@ -391,13 +388,15 @@ pub fn actions() -> Vec<ActionDescriptor> {
              \x20                 machine's /24, for TVs that advertise nothing\n\
              \x20 --wait <secs>   how long to listen for answers (default 2s)\n\
              \x20 --raw           list every service as advertised, with its TXT fields",
-        ),
-        ActionDescriptor::terminal("diagnose.diagnose", CAT, "check adb, scrcpy, TV_IP and the connection to the TV", diagnose).cli("diagnose", "", "check adb, scrcpy, TV_IP and the connection to the TV").long(
-            "Checks, in order: that adb can be found ($ADB, PATH, $ANDROID_HOME,\n\
+            ),
+        ActionDescriptor::terminal("diagnose.diagnose", CAT, "check adb, scrcpy, TV_IP and the connection to the TV", diagnose)
+            .cli("diagnose", "", "check adb, scrcpy, TV_IP and the connection to the TV")
+            .long(
+                "Checks, in order: that adb can be found ($ADB, PATH, $ANDROID_HOME,\n\
              $ANDROID_SDK_ROOT) and its version; scrcpy (for 'mirror'); which TV_IP is in\n\
              use and where it was set; that the TV answers on the adb port; and whether\n\
              adb is connected and allowed. Exits 1 if anything needs fixing.",
-        ),
+            ),
     ]
 }
 
@@ -436,9 +435,15 @@ mod tests {
     #[test]
     fn the_tvs_own_cast_beats_imitations() {
         let tv = [192, 168, 1, 19];
-        let mut real = svc("_googlecast._tcp.local", "QM163E-fbaf._googlecast._tcp.local", tv, &[("fn", "Living Room TV"), ("md", "QM163E"), ("rs", "YouTube")]);
+        let mut real =
+            svc("_googlecast._tcp.local", "QM163E-fbaf._googlecast._tcp.local", tv, &[("fn", "Living Room TV"), ("md", "QM163E"), ("rs", "YouTube")]);
         real.port = Some(8009);
-        let mut fake = svc("_googlecast._tcp.local", "QM163E-19[Cast]._googlecast._tcp.local", tv, &[("fn", "QM163E-19[Cast]"), ("md", "AirReceiver"), ("rmodel", "AirReceiver")]);
+        let mut fake = svc(
+            "_googlecast._tcp.local",
+            "QM163E-19[Cast]._googlecast._tcp.local",
+            tv,
+            &[("fn", "QM163E-19[Cast]"), ("md", "AirReceiver"), ("rmodel", "AirReceiver")],
+        );
         fake.port = Some(8010);
         let adb = svc("_adb._tcp.local", "adb-00001c5a6be6abf9._adb._tcp.local", tv, &[]);
         // whatever order the answers arrive in

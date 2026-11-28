@@ -1,8 +1,8 @@
 use super::{info, media};
-use crate::error::{failed, usage, Result};
-use crate::actions::ActionDescriptor;
-use crate::tv::Tv;
 use crate::Ctx;
+use crate::actions::ActionDescriptor;
+use crate::error::{Result, failed, usage};
+use crate::tv::Tv;
 
 const CAT: &str = "apps";
 
@@ -34,9 +34,7 @@ impl Kind {
     }
 
     pub fn parse(s: &str) -> Option<Kind> {
-        [Kind::Video, Kind::Music, Kind::Player, Kind::Store, Kind::Launcher, Kind::LiveTv, Kind::Other]
-            .into_iter()
-            .find(|k| k.as_str() == s)
+        [Kind::Video, Kind::Music, Kind::Player, Kind::Store, Kind::Launcher, Kind::LiveTv, Kind::Other].into_iter().find(|k| k.as_str() == s)
     }
 }
 
@@ -266,9 +264,7 @@ fn guess_cache(ip: &str) -> Option<std::path::PathBuf> {
 
 /// Cache lines: `kind<TAB>package<TAB>component-or--`.
 pub fn format_guesses(gs: &[Guess]) -> String {
-    gs.iter()
-        .map(|g| format!("{}\t{}\t{}\n", g.kind.as_str(), g.package, g.component.as_deref().unwrap_or("-")))
-        .collect()
+    gs.iter().map(|g| format!("{}\t{}\t{}\n", g.kind.as_str(), g.package, g.component.as_deref().unwrap_or("-"))).collect()
 }
 
 pub fn read_guesses(s: &str) -> Vec<Guess> {
@@ -492,8 +488,10 @@ pub fn home(c: &Ctx, args: &[String]) -> Result<()> {
                 println!("{mark} {}", home_label(&h));
             }
             if def.is_none() {
-                println!("
-no default set: the TV asks which to use when Home is pressed ('tveee home --set <app>')");
+                println!(
+                    "
+no default set: the TV asks which to use when Home is pressed ('tveee home --set <app>')"
+                );
             }
             Ok(())
         }
@@ -522,10 +520,7 @@ no default set: the TV asks which to use when Home is pressed ('tveee home --set
 /// Aliases whose app is installed (`pm list packages` output); `home` always.
 pub fn installed_aliases(pm_list: &str) -> Vec<&'static App> {
     let installed: Vec<&str> = pm_list.lines().filter_map(|l| l.trim().strip_prefix("package:")).collect();
-    all().iter()
-        .filter(|a| a.alias.is_some())
-        .filter(|a| a.target == "@home" || installed.contains(&a.package()))
-        .collect()
+    all().iter().filter(|a| a.alias.is_some()).filter(|a| a.target == "@home" || installed.contains(&a.package())).collect()
 }
 
 fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
@@ -618,10 +613,7 @@ pub fn persistent(dump: &str) -> std::collections::BTreeSet<String> {
 
 /// Aliases (other than `home`) that point at `pkg`.
 pub fn aliases_for_package(pkg: &str) -> Vec<&'static str> {
-    all().iter()
-        .filter(|a| a.target != "@home" && a.package() == pkg)
-        .filter_map(|a| a.alias)
-        .collect()
+    all().iter().filter(|a| a.target != "@home" && a.package() == pkg).filter_map(|a| a.alias).collect()
 }
 
 fn currentapp(c: &Ctx, _: &[String]) -> Result<()> {
@@ -647,7 +639,9 @@ pub fn restart(tv: &Tv, pkg: &str, target: &str, restore: bool) -> Result<String
     tv.shell(&["am", "force-stop", pkg])?;
     match saved {
         // apps that take the session back their own way
-        Some(s) if crate::provider::for_package(pkg).map_or(Ok(None), |p| p.restore_session(tv, target, &s).or_fallback())?.is_some() => Ok(format!("restarted {name} {}", s.said).trim_end().to_string()),
+        Some(s) if crate::provider::for_package(pkg).map_or(Ok(None), |p| p.restore_session(tv, target, &s).or_fallback())?.is_some() => {
+            Ok(format!("restarted {name} {}", s.said).trim_end().to_string())
+        }
         Some(s) => {
             let cmd = format!("am start -a android.intent.action.VIEW -d {} -p {}", super::open::sh_quote(&s.link), super::open::sh_quote(pkg));
             let out = tv.shell(&[&cmd])?;
@@ -695,11 +689,7 @@ pub fn parse_app_args(args: &[String]) -> std::result::Result<AppAsk, String> {
 fn own_actions(c: &Ctx, pkg: &str) -> Vec<(String, crate::actions::ActionDescriptor)> {
     let Some(p) = crate::provider::for_package(pkg) else { return Vec::new() };
     let prefix = format!("{}.", p.id());
-    c.actions
-        .iter()
-        .filter_map(|a| Some((a.id.strip_prefix(&prefix)?.to_string(), *a)))
-        .filter(|(word, a)| !word.contains('.') && a.cli.is_none())
-        .collect()
+    c.actions.iter().filter_map(|a| Some((a.id.strip_prefix(&prefix)?.to_string(), *a))).filter(|(word, a)| !word.contains('.') && a.cli.is_none()).collect()
 }
 
 /// `app [<app> [--restart [--disable-restore] | --page [--json] | <action...>]]`
@@ -708,10 +698,13 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
         // the apps tveee has more to offer for
         for p in crate::provider::all() {
             for pkg in p.hosts() {
-                let name = by_package(pkg).map_or_else(|| pkg.to_string(), |a| match a.alias {
-                    Some(alias) => format!("{} ({alias})", list_name(a.name)),
-                    None => list_name(a.name),
-                });
+                let name = by_package(pkg).map_or_else(
+                    || pkg.to_string(),
+                    |a| match a.alias {
+                        Some(alias) => format!("{} ({alias})", list_name(a.name)),
+                        None => list_name(a.name),
+                    },
+                );
                 println!("{name:<28} {}", crate::provider::capabilities(*p).join(", "));
             }
         }
@@ -801,10 +794,7 @@ fn quit(c: &Ctx, args: &[String]) -> Result<()> {
         return failed("quit: can't tell what is in the foreground");
     };
     // the default launcher may not be in PROTECTED
-    let home = tv.shell(&[
-        "cmd", "package", "resolve-activity", "--brief", "-a", "android.intent.action.MAIN",
-        "-c", "android.intent.category.HOME",
-    ])?;
+    let home = tv.shell(&["cmd", "package", "resolve-activity", "--brief", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"])?;
     let home = home.lines().last().unwrap_or_default().trim();
     let home = home.split('/').next().unwrap_or_default();
     if !quit_allowed(&pkg, home, force) {

@@ -6,7 +6,7 @@
 //! presses Install there, as someone with the remote would. Anything else
 //! Kodi asks on the way is left on screen and said.
 
-use super::{call, failed, str_of, Result, Tv, PACKAGE};
+use super::{PACKAGE, Result, Tv, call, failed, str_of};
 use serde_json::Value;
 use std::time::{Duration, Instant};
 

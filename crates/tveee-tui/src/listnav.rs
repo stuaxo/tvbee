@@ -2,6 +2,19 @@
 //! palette, the menu, the apps, options, the guide, ...): ↑/↓ one (round
 //! from the end to the start), PgUp/PgDn a page (stopping at the ends),
 //! Home/End the first and last.
+//!
+//! The keys on the ui's widgets, the same everywhere:
+//!
+//! * ↑/↓ (PgUp/PgDn, Home/End) move between rows.
+//! * ←/→ change the row's value (a choice of two, a tick: ← off, → on; a
+//!   light's mode), so trying values is one key each. They don't move
+//!   elsewhere; on a row without a value they do nothing (in a list of
+//!   places, ← goes up a level, as in a file manager).
+//! * Tab / Shift+Tab move between tabs (or a pane's parts). ←/→ switch tabs
+//!   only on the tab bar itself (↑ from the first row; ↓ back).
+//! * Space or ⏎ toggles or chooses; Esc goes back one step (out of the tab
+//!   bar, a picker, then the pop-up).
+//! * Changing something leaves the widget open, to try another value.
 
 use ratatui::crossterm::event::KeyCode;
 

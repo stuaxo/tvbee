@@ -164,7 +164,13 @@ impl App {
             None => (first + lines.len()).saturating_sub(room).max(first),
             Some(cur) => {
                 let top = self.log_top.unwrap_or(cur).max(first);
-                let top = if cur < top { cur } else if cur >= top + room { cur + 1 - room } else { top };
+                let top = if cur < top {
+                    cur
+                } else if cur >= top + room {
+                    cur + 1 - room
+                } else {
+                    top
+                };
                 top.min((last + 1).saturating_sub(room).max(first))
             }
         };
@@ -192,13 +198,15 @@ impl App {
         let picked = if lo <= hi { hi - lo + 1 } else { 0 };
         let title = match (at, from) {
             (None, _) => format!(" log - {} lines, following the newest (TVEEE_LOG=<file> keeps them) ", lines.len()),
-            (Some(_), Some(_)) => format!(" log - {picked} lines selected ", ),
+            (Some(_), Some(_)) => format!(" log - {picked} lines selected ",),
             (Some(cur), None) => format!(" log - line {} of {} ", cur - first + 1, lines.len()),
         };
-        let keys = if from.is_some() { " y/⏎ copy them  esc lets go  s save the log " } else { " ↑↓ pgup pgdn home  shift/v select  y copy  s save  end: newest  esc closes " };
+        let keys = if from.is_some() { " y copy them  s save the log " } else { " shift/v select  y copy  s save  end follows new lines " };
         let block = Block::bordered().title(title).title_bottom(Line::from(keys).right_aligned()).border_style(Style::new().fg(Color::DarkGray));
         f.render_widget(Paragraph::new(shown).block(block), r);
+        let bar = scrollbar(f, Bar::Log, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), lines.len(), top.saturating_sub(first));
         self.hits.push((r, Hit::Popup));
+        self.hits.extend(bar.map(|b| (b.area, Hit::Scrollbar(b))));
         for (i, (n, _)) in rows.iter().enumerate() {
             let y = r.y + 1 + u16::try_from(i).unwrap_or(0);
             self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::LogLine(*n)));
@@ -210,7 +218,7 @@ impl App {
             Line::from("Save the log (all the lines kept) to:"),
             Line::from(vec![Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray))]),
             Line::default(),
-            Line::from("⏎ save   esc back   ~/ is your home; else where tveee was started").fg(Color::DarkGray),
+            Line::from("~/ is your home; else where tveee was started").fg(Color::DarkGray),
         ];
         let r = popup(f, " save the log ", text, Color::Blue);
         self.hits.push((r, Hit::Popup));

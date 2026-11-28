@@ -302,7 +302,13 @@ impl App {
             }
             let from = self.list_from.take().map(|f| f.trim_end_matches('/').to_string());
             if let Some(l) = self.list_ok() {
-                let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id))).or(l.at).or(l.playing).unwrap_or(0);
+                let at = place
+                    .as_ref()
+                    .filter(|p| p.key == l.key)
+                    .and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id)))
+                    .or(l.at)
+                    .or(l.playing)
+                    .unwrap_or(0);
                 // back up from a folder: on it
                 let at = from.and_then(|f| l.items.iter().position(|i| i.id.split('?').next().unwrap_or("").trim_end_matches('/') == f)).unwrap_or(at);
                 self.overlay = Overlay::List { sel: at };
@@ -348,12 +354,20 @@ impl App {
         let area = f.area();
         let total = usize::from(area.width.saturating_sub(6)).clamp(40, 100);
         let dim = Style::new().fg(Color::DarkGray);
-        let app_name = self.st.snap.as_ref().and_then(front_pkg).map(|p| tveee_core::builtin::apps::by_package(&p).map_or(p.clone(), |a| a.name.to_string())).unwrap_or_else(|| "the app".into());
+        let app_name = self
+            .st
+            .snap
+            .as_ref()
+            .and_then(front_pkg)
+            .map(|p| tveee_core::builtin::apps::by_package(&p).map_or(p.clone(), |a| a.name.to_string()))
+            .unwrap_or_else(|| "the app".into());
         let mut text: Vec<Line> = Vec::new();
         let mut rows_at: Vec<Option<usize>> = Vec::new();
         // the breadcrumbs: which text line, and each clickable crumb (x, width, crumb)
         let mut crumb_line: Option<usize> = None;
         let mut crumb_spots: Vec<(u16, u16, usize)> = Vec::new();
+        // the rows: their first text line, how many shown, of how many, from
+        let mut bar: Option<(usize, usize, usize, usize)> = None;
         let (title, right) = match self.st.list.as_deref() {
             None => {
                 text.push(Line::from("reading the list...").italic());
@@ -375,7 +389,6 @@ impl App {
                     text.push(Line::from(vec![
                         Span::styled("location ", dim),
                         Span::styled(format!("{typed}█"), Style::new().fg(Color::White).bg(Color::DarkGray)),
-                        Span::styled("  ⏎ open  esc back", dim),
                     ]));
                     rows_at.push(None);
                 } else if self.crumbs.len() > 1 {
@@ -444,6 +457,9 @@ impl App {
                     text.push(Line::from(if l.items.is_empty() { "(empty)" } else { "nothing matches" }).italic());
                     rows_at.push(None);
                 }
+                // where the rows are, for the scrollbar beside them
+                bar = Some((text.len(), rows.len().min(room), rows.len(), start));
+                self.bar_rows = rows.iter().map(|r| r.as_ref().ok().copied()).collect();
                 for row in rows.iter().skip(start).take(room) {
                     let i = match row {
                         Ok(i) => *i,
@@ -454,15 +470,21 @@ impl App {
                         }
                     };
                     let item = &l.items[i];
-                    let mark = if playing == Some(i) { "▶" } else if theirs == Some(i) { "›" } else { " " };
+                    let mark = if playing == Some(i) {
+                        "▶"
+                    } else if theirs == Some(i) {
+                        "›"
+                    } else {
+                        " "
+                    };
                     let name = format!("{}{}", item.label, if item.folder { "/" } else { "" });
-                    let name: String = if name.chars().count() > label_w { format!("{}…", name.chars().take(label_w.saturating_sub(1)).collect::<String>()) } else { name };
+                    let name: String =
+                        if name.chars().count() > label_w { format!("{}…", name.chars().take(label_w.saturating_sub(1)).collect::<String>()) } else { name };
                     let meta = item.meta.clone().unwrap_or_default();
                     let line = Line::from(vec![Span::raw(format!(" {mark} {name:<label_w$}  ")), Span::styled(format!("{meta:>meta_w$}"), dim)]);
                     text.push(if i == sel { line.reversed() } else { line });
                     rows_at.push(Some(i));
                 }
-                let more = if rows.len() > room { "  (scrolls)" } else { "" };
                 text.push(Line::default());
                 rows_at.push(None);
                 let reading = if self.st.list_loading { "  reading..." } else { "" };
@@ -475,9 +497,9 @@ impl App {
                 };
                 let tab = if self.crumbs.len() > 1 { "tab breadcrumbs  " } else { "" };
                 let hint = if self.crumb_at.is_some() {
-                    format!("←→ choose a step  ⏎ go there  {loc}tab/↓/esc back to the list")
+                    format!("{loc}tab back to the list")
                 } else {
-                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  {tab}{loc}{sync}type to filter  esc closes{more}{reading}")
+                    format!("⌫/alt+↑ up  {tab}{loc}{sync}type to filter{reading}")
                 };
                 text.push(Line::from(hint).fg(Color::DarkGray));
                 rows_at.push(None);
@@ -485,7 +507,9 @@ impl App {
                     Some(p) => format!(" {} of {} ", p + 1, shown.len()),
                     None => format!(" {} ", shown.len()),
                 };
-                (format!(" {} ({app_name}) ", l.title), count)
+                // sync folder on: said up top too, where it's seen at a glance
+                let synced = if l.browsed && self.opt(tveee_core::options::LIST_SYNC) { "⇄ TV " } else { "" };
+                (format!(" {} ({app_name}) {synced}", l.title), count)
             }
         };
         // as wide as it can be, so it doesn't change width as it scrolls
@@ -494,7 +518,12 @@ impl App {
             first.spans.push(Span::raw(" ".repeat(total.saturating_sub(w))));
         }
         let r = popup_titled(f, &title, &right, text, Color::Magenta);
+        let bar = bar.and_then(|(line, shown, total, start)| {
+            let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
+            scrollbar(f, Bar::List, r.right().saturating_sub(1), y, u16::try_from(shown).unwrap_or(0), total, start)
+        });
         self.hits.push((r, Hit::Popup));
+        self.hits.extend(bar.map(|b| (b.area, Hit::Scrollbar(b))));
         if let Some(line) = crumb_line {
             let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
             for (x, w, i) in crumb_spots {
