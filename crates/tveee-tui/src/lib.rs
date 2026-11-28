@@ -121,6 +121,9 @@ struct App {
     options_on_tabs: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
     plugins: Vec<tveee_core::plugin::PluginState>,
+    /// The system panel paused (I): its figures as they were then, and the
+    /// memory graph's; not read meanwhile.
+    info_frozen: Option<(tveee_core::engine::Snapshot, Vec<u64>)>,
     /// Every plugin there is (from the start): what's installed again when
     /// one is turned on or off. None in tests (nothing installed).
     all_plugins: Option<fn() -> Vec<tveee_core::plugin::Plugin>>,
@@ -554,6 +557,7 @@ impl App {
             options_plugins: false,
             options_on_tabs: false,
             plugins: Vec::new(),
+            info_frozen: None,
             all_plugins: None,
             prompt: String::new(),
             search_targets: Vec::new(),
@@ -693,7 +697,21 @@ impl App {
                 };
             }
             Input::ToggleHelp => self.overlay = Overlay::Help(0),
-            Input::ToggleInfo => self.info = Some(!self.info_shown()),
+            Input::ToggleInfo => {
+                self.info = Some(!self.info_shown());
+                self.info_frozen = None;
+            }
+            Input::PauseInfo => {
+                self.note = if self.info_frozen.take().is_some() {
+                    "system panel: updating again".into()
+                } else if !self.info_shown() {
+                    "the system panel isn't open (i opens it)".into()
+                } else {
+                    // kept as they are now; the TV isn't asked for them meanwhile
+                    self.info_frozen = self.st.snap.clone().map(|s| (s, self.st.mem_history.clone()));
+                    "system panel paused (I again resumes it)".into()
+                };
+            }
             Input::ToggleAmbilight if self.panel_id().is_none() => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
