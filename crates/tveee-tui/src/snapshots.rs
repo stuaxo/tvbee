@@ -887,3 +887,28 @@ fn ambilight_picker_switches_lights() {
     assert_eq!(a.overlay, Overlay::Ambilight { row: 0, col: 1 });
     assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["power", "off"])));
 }
+
+#[test]
+fn picker_shows_what_is_typed() {
+    let (mut a, _rx, h) = app_seeing(with_ambilight());
+    a.ambi_open = true;
+    a.overlay = Overlay::AmbiColour { row: 4, col: 1 };
+    let typed = |a: &mut App, text: &str| {
+        for c in text.chars() {
+            let Overlay::AmbiColour { row, col } = a.overlay else { panic!() };
+            a.ambi_ask_key(row, col, KeyCode::Char(c), KeyModifiers::NONE, &h);
+        }
+        screen(a, DESKTOP)
+    };
+    // part of a name: not one yet
+    let s = typed(&mut a, "ora");
+    assert!(s.contains("ora: not a colour yet"), "{s}");
+    // the whole name: its colour (and its #hex)
+    let s = typed(&mut a, "nge");
+    assert!(s.contains("#ff6400") && !s.contains("not a colour"), "{s}");
+    // #hex and r,g,b too
+    a.prompt.clear();
+    assert!(typed(&mut a, "#00ff88").contains("#00ff88"));
+    a.prompt.clear();
+    assert!(typed(&mut a, "10,20,30").contains("#0a141e"));
+}

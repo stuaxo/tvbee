@@ -25,7 +25,7 @@ expression: s
 │                            │or type: warm█                                              │6/512 MB                   ││
 │                            │red                                                         │ 2.40                      ││
 │                            │                                                            │───────────────────────────┘│
-│                            │now (each its own)  →  warm                                 │                            │
+│                            │now (each its own)  →       #ff9329                         │                            │
 │                            │arrows or click pick  type a name or #hex  ⏎ set  esc back  │                            │
 │                            └────────────────────────────────────────────────────────────┘                            │
 │                                                                                                                      │

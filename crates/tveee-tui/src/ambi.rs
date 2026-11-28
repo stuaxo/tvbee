@@ -359,6 +359,11 @@ impl App {
             Span::styled("or type: ", dim),
             Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray)),
             Span::styled(" ".repeat(20usize.saturating_sub(self.prompt.chars().count() + 1)), Style::new().bg(Color::DarkGray)),
+            // the colour typed, beside it, once it's one
+            match tveee_core::panel::parse_colour(&self.prompt) {
+                Some(c) if !self.prompt.trim().is_empty() => Span::styled("    ", block(c)),
+                _ => Span::raw(""),
+            },
         ]));
         text.push(Line::from(Span::styled(hint, dim)));
         // the light's colour now, and the one picked
@@ -368,10 +373,14 @@ impl App {
             None => cmp.push(Span::styled("(each its own)", dim)),
         }
         cmp.push(Span::styled("  →  ", dim));
-        if self.prompt.is_empty() {
-            cmp.push(Span::styled("    ", block(pick_colour(self.pick.0, self.pick.1))));
-        } else {
-            cmp.push(Span::raw(self.prompt.clone()));
+        // what's typed, as soon as it's a colour tveee knows
+        match (self.prompt.trim(), tveee_core::panel::parse_colour(&self.prompt)) {
+            ("", _) => cmp.push(Span::styled("    ", block(pick_colour(self.pick.0, self.pick.1)))),
+            (_, Some(c)) => {
+                cmp.push(Span::styled("    ", block(c)));
+                cmp.push(Span::styled(format!(" {}", hex(c)), dim));
+            }
+            (typed, None) => cmp.push(Span::styled(format!("{typed}: not a colour yet"), dim)),
         }
         text.push(Line::default());
         text.push(Line::from(cmp));
