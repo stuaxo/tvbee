@@ -138,9 +138,15 @@ fn request_once(r: &Request) -> std::result::Result<(u16, String), Fail> {
         // curl writes 000 when it couldn't connect at all
         Some((0, _)) | None => {
             let err = String::from_utf8_lossy(&out.stderr);
-            let e = failed::<()>(format!("https {}: {}", r.url, err.trim().lines().last().unwrap_or("no reply"))).unwrap_err();
-            // curl exit 7: couldn't connect (refused)
-            Err(if out.status.code() == Some(7) { Refused(e) } else { Other(e) })
+            let said = err.trim().lines().last().unwrap_or("no reply").to_string();
+            let doing = format!("https {}", r.url);
+            // what curl's exit says, kept as the cause: 7 couldn't connect
+            // (refused), 28 timed out
+            Err(match out.status.code() {
+                Some(7) => Refused(Error::io(doing, std::io::Error::new(std::io::ErrorKind::ConnectionRefused, said))),
+                Some(28) => Other(Error::io(doing, std::io::Error::new(std::io::ErrorKind::TimedOut, said))),
+                _ => Other(failed::<()>(format!("{doing}: {said}")).unwrap_err()),
+            })
         }
         Some(r) => Ok(r),
     }

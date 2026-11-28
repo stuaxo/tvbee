@@ -6,7 +6,6 @@
 mod plugin_tests;
 mod plugins;
 
-use error::Error;
 use plugin::Mode;
 use registry::Command;
 use tv::Tv;
@@ -81,12 +80,12 @@ fn main() {
     };
     if let Err(e) = cmd.run.call(cmd.fronts, &ctx, rest) {
         eprintln!("tveee: {e}");
-        if let Error::Usage(_) = e {
+        if e.kind() == error::Kind::Usage {
             eprintln!("(see 'tveee {} --help')", cmd.name);
         }
-        std::process::exit(match e {
-            Error::Usage(_) => 2,
-            Error::Failed(_) | Error::Unavailable(_) => 1,
+        std::process::exit(match e.kind() {
+            error::Kind::Usage => 2,
+            error::Kind::Failed | error::Kind::Unavailable => 1,
         });
     }
 }

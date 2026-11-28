@@ -39,7 +39,7 @@ pub fn get(host: &str, port: u16, path: &str) -> Result<(u16, String)> {
 
 fn get_live(host: &str, port: u16, path: &str) -> Result<(u16, String)> {
     let addr = (host, port).to_socket_addrs()?.next().ok_or_else(|| Error::Failed(format!("can't resolve {host}")))?;
-    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
+    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(|e| Error::io(format!("connecting to {host}:{port}"), e))?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     write!(s, "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n")?;
     let mut raw = Vec::new();
