@@ -769,6 +769,21 @@ mod guide_tests {
     use super::*;
 
     #[test]
+    fn endpoints_ask_with_the_pairing() {
+        use tveee_core::ask::{Ask, Auth, Request, Retry};
+        let tv = Tv { ip: "192.0.2.7".into() };
+        let saved = tveee_core::pairing::Saved(vec![("user".into(), "u1".into()), ("key".into(), "k1".into())]);
+        let e = Endpoint { path: "/6/ambilight/mode", body: Some(r#"{"current":"manual"}"#.into()), what: "test", saved: Some(&saved) };
+        let Request::Http(h) = e.request(&tv).unwrap() else { panic!("not HTTP") };
+        assert_eq!(h.url, "https://192.0.2.7:1926/6/ambilight/mode");
+        assert_eq!(h.auth, Auth::Digest { user: "u1".into(), password: "k1".into() });
+        assert_eq!((h.retry, h.body.as_deref()), (Retry::WhileAwake, Some(r#"{"current":"manual"}"#)));
+        // a pairing without its key: pairing required
+        let half = tveee_core::pairing::Saved(vec![("user".into(), "u1".into())]);
+        assert!(Endpoint { path: "/6/system", body: None, what: "test", saved: Some(&half) }.request(&tv).is_err());
+    }
+
+    #[test]
     fn nettv_app_names() {
         assert_eq!(nettv_app_name("https://www.live.bbctvapps.co.uk/tap/iplayer?origin=portal"), "iPlayer");
         assert_eq!(nettv_app_name("https://www.arte.tv/hbbtv"), "Arte");
