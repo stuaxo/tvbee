@@ -20,6 +20,7 @@ use tveee_core::tv::Tv;
 pub const PACKAGE: &str = "org.xbmc.kodi";
 
 pub mod addons;
+pub mod answers;
 pub mod browse;
 pub mod library;
 pub mod link;

@@ -45,6 +45,9 @@ diesel = { version = "2.4", default-features = false, features = ["sqlite"] }
 libsqlite3-sys = { version = ">=0.39.0, <0.41.0", features = ["bundled"] }
 # reading the JSON TVs and apps answer with (JointSpace, Kodi, devtools)
 serde_json = { version = "1", default-features = false, features = ["std"] }
+# answers as structs (#[derive(Deserialize)]): compile-time only; serde_json
+# uses serde already
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 # the ui's preview panel: pictures in the terminal (sixel, kitty, iTerm2, or
 # unicode half-blocks), and JPEG decoding for YouTube's storyboard frames
