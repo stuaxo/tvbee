@@ -268,13 +268,14 @@ pub(super) const HELP: &str = " everywhere
    u        the link whole / shortened    y  copy the link (click it: the same;
             its buttons copy or open it; ctrl+click opens it in most terminals)
    l        Ambilight panel (TVs with one; P there pairs if needed)
-   L        change the Ambilight: power, style and setting, Hue, any light's colour
+   L        change the Ambilight in its panel: ↑↓ ←→ (or click), ⏎ on a light:
+            a colour picker (arrows or click, or type a name or #hex)
    v        preview: a picture of what's on (scrcpy if installed, 1 a second;
             YouTube's storyboards; else a screenshot every few seconds)
    /        search the app in front (tab picks another app)
    z        music visualiser: show or hide it (Kodi, while it plays music)
-   t        the list the app shows (Kodi's folder or add-on): choose from it,
-            following Kodi's highlight (type to filter)
+   t        the list the app shows (Kodi's folder or add-on, YouTube's chapters
+            and links): choose from it, following the app (type to filter)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
@@ -425,7 +426,8 @@ impl App {
             Overlay::Palette(sel) => self.draw_palette(f, sel),
             Overlay::Logs { at, from } => self.draw_logs(f, at, from),
             Overlay::SaveLog => self.draw_save_log(f),
-            Overlay::Ambilight { row, col } => self.draw_ambi_dialog(f, row, col),
+            // changed in the panel itself (its cursor): nothing over it
+            Overlay::Ambilight { .. } => {}
             Overlay::AmbiColour { row, col } => self.draw_ambi_colour(f, row, col),
             Overlay::Pin => self.draw_pin(f),
             Overlay::Confirm { id, yes } => self.draw_confirm(f, id, yes),

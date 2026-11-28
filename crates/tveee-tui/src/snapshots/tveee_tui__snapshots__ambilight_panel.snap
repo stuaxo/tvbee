@@ -1,0 +1,40 @@
+---
+source: crates/tveee-tui/src/snapshots.rs
+assertion_line: 809
+expression: s
+---
+┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
+│load 4.82▲ │ 310 MB [F]ree │ [l] panel │ [:] commands                                                                 │
+│what     Paused in Kodi                                                ┌ panel - L (or click) changes it, l hides ───┐│
+│title    Episode 3 (Off-Road)                                          │control  the TV                              ││
+│progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │power     on   off                           ││
+│audio    AAC-LC  AAC                                                   │style     video   sound   colour             ││
+│do        t  list   /  search                                          │setting   standard   natural   vivid   game  ││
+│                                                                       │          comfort   relax                    ││
+│volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │ambi+hue  on   off                           ││
+│                                                                       │          sync Hue bulbs with the TV         ││
+│                                                                       │lights    all              │                 ││
+│                                                                       └─────────────────────────────────────────────┘│
+│                                                                       ┌ system - i hides ───────────────────────────┐│
+│                                                                       │power    Awake                               ││
+│                                                                       │app      [player] org.xbmc.kodi              ││
+│                                                                       │memory   1032/1342 MB used, 310 MB free      ││
+│                                                                       │1342 MB                                      ││
+│                                                                       │                                             ││
+│                                                                       │last 0s                                      ││
+│                                                                       │swap     ━━━┃── 316/512 MB                   ││
+│                                                                       │load     4.82 3.10 2.40                      ││
+│                                                                       └─────────────────────────────────────────────┘│
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ space  play/pause   ←  -10s   →  +10s   ↑  vol+   ↓  vol-   m  mute   tab  remote   :  cmds   ?  help   q  quit      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

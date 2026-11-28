@@ -54,7 +54,7 @@ fn credentials(saved: &tveee_core::pairing::Saved) -> Option<(&str, &str)> {
 /// Whether the TV is awake (adb says so): then a refused JointSpace
 /// connection is live TV restarting the API, worth waiting for.
 pub fn awake(tv: &Tv) -> bool {
-    tv.shell(&["dumpsys power | grep mWakefulness="]).is_ok_and(|s| s.contains("mWakefulness=Awake"))
+    tv.read::<tveee_core::readings::Power>().is_ok_and(|p| p.awake())
 }
 
 /// Whether tveee is paired with this TV's JointSpace.

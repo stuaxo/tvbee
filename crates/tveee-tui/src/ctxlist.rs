@@ -165,14 +165,34 @@ impl App {
                 let theirs = self.st.snap.as_ref().and_then(|s| s.list_place.as_ref()).filter(|p| p.key == l.key).and_then(|p| l.find(p)).or(l.at);
                 // rows that fit: heading, filter, hint and borders aside
                 let room = usize::from(area.height.saturating_sub(8)).max(3);
-                let start = pos.unwrap_or(0).saturating_sub(room / 2).min(shown.len().saturating_sub(room));
+                // the rows: the items shown, each part's subheading before it
+                let mut rows: Vec<std::result::Result<usize, String>> = Vec::new();
+                let mut part: Option<&str> = None;
+                for &i in &shown {
+                    let s = l.items[i].section.as_deref();
+                    if s.is_some() && s != part {
+                        rows.push(Err(s.unwrap_or_default().to_string()));
+                    }
+                    part = s;
+                    rows.push(Ok(i));
+                }
+                let at_row = rows.iter().position(|r| *r == Ok(sel)).unwrap_or(0);
+                let start = at_row.saturating_sub(room / 2).min(rows.len().saturating_sub(room));
                 let meta_w = shown.iter().filter_map(|&i| l.items[i].meta.as_ref()).map(|m| m.chars().count()).max().unwrap_or(0).min(24);
                 let label_w = total.saturating_sub(4 + meta_w + 2);
                 if shown.is_empty() {
                     text.push(Line::from(if l.items.is_empty() { "(empty)" } else { "nothing matches" }).italic());
                     rows_at.push(None);
                 }
-                for &i in shown.iter().skip(start).take(room) {
+                for row in rows.iter().skip(start).take(room) {
+                    let i = match row {
+                        Ok(i) => *i,
+                        Err(heading) => {
+                            text.push(Line::from(Span::styled(format!(" ─ {heading} "), Style::new().fg(Color::Magenta).bold())));
+                            rows_at.push(None);
+                            continue;
+                        }
+                    };
                     let item = &l.items[i];
                     let mark = if theirs == Some(i) { "›" } else { " " };
                     let name = format!("{}{}", item.label, if item.folder { "/" } else { "" });
@@ -182,7 +202,7 @@ impl App {
                     text.push(if i == sel { line.reversed() } else { line });
                     rows_at.push(Some(i));
                 }
-                let more = if shown.len() > room { "  (scrolls)" } else { "" };
+                let more = if rows.len() > room { "  (scrolls)" } else { "" };
                 text.push(Line::default());
                 rows_at.push(None);
                 let reading = if self.st.list_loading { "  reading..." } else { "" };

@@ -260,13 +260,6 @@ fn join2<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B +
     })
 }
 
-fn wakefulness(power: &str) -> Option<String> {
-    power
-        .lines()
-        .find(|l| l.contains("mWakefulness="))
-        .map(|l| l.trim().trim_start_matches("mWakefulness=").to_string())
-}
-
 /// What the TV is doing, from the power, window and media_session dumps.
 /// `audio`: `dumpsys audio`, for apps that play without a media session.
 fn activity_from(tv: &Tv, wake: Option<&str>, window: &str, media: &str, audio: &str) -> Option<Activity> {
@@ -312,14 +305,15 @@ fn push_activity(out: &mut String, a: &Activity) {
 /// The status report, one `label:   value` line each.
 fn status_text(tv: &Tv) -> Result<String> {
     let ((power, window), ((audio, system), media)) = join2(
-        || join2(|| tv.shell(&["dumpsys", "power"]), || tv.window_dump()),
+        || join2(|| tv.read_whole::<crate::readings::Power>(), || tv.read::<crate::readings::Window>()),
         || join2(|| join2(|| tv.shell(&["dumpsys", "audio"]), || read_system(tv)), || tv.shell(&["dumpsys", "media_session"])),
     );
     let (power, window, audio, system) = (power?, window?, audio?, system?);
     // media sessions only feed the optional what/title lines, so don't fail on them
     let media = media.unwrap_or_default();
-    let wake = wakefulness(&power);
-    let activity = activity_from(tv, wake.as_deref(), &window, &media, &audio);
+    // power not said (asked twice): no power line, rather than "standby"
+    let wake = power.map(|p| p.wakefulness);
+    let activity = activity_from(tv, wake.as_deref(), &window.text, &media, &audio);
 
     let mut out = String::new();
     push_line(&mut out, "TV", &tv.ip);
@@ -329,7 +323,7 @@ fn status_text(tv: &Tv) -> Result<String> {
     if let Some(w) = &wake {
         push_line(&mut out, "power", w);
     }
-    push_line(&mut out, "focus", &focus_window(&window).unwrap_or_default());
+    push_line(&mut out, "focus", window.focus.as_deref().unwrap_or_default());
     let muted = super::media::parse_muted(&audio).map_or_else(|| "unknown".into(), |m| m.to_string());
     if let Some((v, max)) = super::media::parse_volume(&audio) {
         push_line(&mut out, "volume", &format!("{v}/{max}"));
@@ -365,14 +359,14 @@ const NOTHING: &str = "nothing playing that tveee recognises\n";
 /// Just the what / title / progress / url lines.
 fn nowplaying_text(tv: &Tv) -> Result<String> {
     let ((power, window), (media, audio)) = join2(
-        || join2(|| tv.shell(&["dumpsys", "power"]), || tv.window_dump()),
+        || join2(|| tv.read_whole::<crate::readings::Power>(), || tv.read::<crate::readings::Window>()),
         || join2(|| tv.shell(&["dumpsys", "media_session"]), || tv.shell(&["dumpsys", "audio"])),
     );
     let (power, window, media) = (power?, window?, media?);
     // only for apps without a media session: don't fail on it
     let audio = audio.unwrap_or_default();
     let mut out = String::new();
-    match activity_from(tv, wakefulness(&power).as_deref(), &window, &media, &audio) {
+    match activity_from(tv, power.map(|p| p.wakefulness).as_deref(), &window.text, &media, &audio) {
         Some(a) => push_activity(&mut out, &a),
         None => out.push_str(NOTHING),
     }
@@ -595,7 +589,13 @@ fn host(url: &str) -> &str {
 pub fn list_lines(l: &crate::provider::ContextList, app: &str) -> Vec<String> {
     let w = l.items.iter().map(|i| i.label.chars().count() + usize::from(i.folder)).max().unwrap_or(0).min(48);
     let mut out = vec![format!("{} ({app}, {} {})", l.title, l.items.len(), if l.items.len() == 1 { "item" } else { "items" })];
+    let mut part = None;
     for (n, i) in l.items.iter().enumerate() {
+        // a part's subheading where it starts
+        if i.section.is_some() && i.section != part {
+            out.push(format!("─ {}", i.section.as_deref().unwrap_or_default()));
+        }
+        part.clone_from(&i.section);
         let mark = if l.at == Some(n) { if l.kind == "folder" { "›" } else { "▶" } } else { " " };
         let name = format!("{}{}", i.label, if i.folder { "/" } else { "" });
         let meta = i.meta.as_deref().map(|m| format!("  {m}")).unwrap_or_default();
@@ -749,8 +749,9 @@ pub fn actions() -> Vec<ActionDescriptor> {
             .cli("list", "[app] [N]", "the list the app in front shows, or choose item N from it")
             .long(
                 "Prints the list the app in front is showing, numbered, the highlighted one\n\
-                 marked (›): in Kodi, the folder or add-on listing on its screen, as Kodi\n\
-                 shows it. Reading it doesn't change what's on the screen.\n\
+                 marked (› or ▶): in Kodi, the folder or add-on listing on its screen, as\n\
+                 Kodi shows it; in YouTube, the video's chapters (choosing one seeks there)\n\
+                 and links. Reading it doesn't change what's on the screen.\n\
                  \n\
                  \x20 tveee list          the app in front's list\n\
                  \x20 tveee list kodi     Kodi's, even behind another app\n\
@@ -789,13 +790,22 @@ mod tests {
     #[test]
     fn list_printed() {
         use crate::provider::{ContextList, ListItem};
-        let item = |label: &str, folder, meta: Option<&str>| ListItem { id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
+        let item = |label: &str, folder, meta: Option<&str>| ListItem { section: None, id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
         let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], at: Some(1) };
         let lines = list_lines(&l, "Kodi");
         assert_eq!(lines[0], "Artists (Kodi, 3 items)");
         assert_eq!(lines[1], "    1  Portishead/");
         assert_eq!(lines[2], "›   2  Radiohead/       9 albums");
         assert_eq!(lines[3], "    3  Exit Music.flac");
+        // parts: a subheading where each starts
+        let mut l = l;
+        l.items[0].section = Some("Folders".into());
+        l.items[1].section = Some("Folders".into());
+        l.items[2].section = Some("Files".into());
+        let lines = list_lines(&l, "Kodi");
+        assert_eq!(lines[1], "─ Folders");
+        assert_eq!(lines[4], "─ Files");
+        assert_eq!(lines[5], "    3  Exit Music.flac");
     }
 
     #[test]

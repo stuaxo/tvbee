@@ -613,6 +613,7 @@ fn kodi_artists() -> TvState {
     use tveee_core::provider::{ContextList, ListItem, ListPlace};
     let mut st = kodi_paused();
     let item = |id: &str, label: &str, folder: bool, meta: Option<&str>| ListItem {
+        section: None,
         id: id.into(),
         label: label.into(),
         meta: meta.map(str::to_string),
@@ -731,4 +732,183 @@ fn list_pane_follows_kodi() {
     a.st = h.state();
     a.list_sync(Change::Snapshot);
     assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::LoadList]);
+}
+
+#[test]
+fn list_pane_parts() {
+    // the list in two parts: a subheading where each starts
+    let mut st = kodi_artists();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        for (n, it) in l.items.iter_mut().enumerate() {
+            it.section = Some(if n < 3 { "Artists" } else { "Files" }.into());
+        }
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, _rx, h) = app_seeing(st);
+    a.overlay = Overlay::List { sel: 3 };
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("─ Artists") && s.contains("─ Files"), "{s}");
+    // subheadings aren't chosen: still 4 rows to click
+    assert_eq!(a.hits.iter().filter(|(_, h)| matches!(h, Hit::ListRow(_))).count(), 4);
+    // filtered to the files only: the artists' subheading goes
+    for c in "exit".chars() {
+        let Overlay::List { sel } = a.overlay else { panic!() };
+        a.list_key(sel, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    let s = screen(&mut a, DESKTOP);
+    assert!(!s.contains("─ Artists") && s.contains("─ Files"), "{s}");
+}
+
+/// Kodi playing, with an Ambilight as the TV has it: on, following video
+/// (standard), Hue on, three lights a side.
+fn with_ambilight() -> TvState {
+    use tveee_core::panel::{Choice, Row, Run, Shown, View};
+    const ID: &str = "ambilight.change";
+    let mut st = kodi_paused();
+    let light = |side: &str, n: u32, rgb| Choice {
+        label: format!("{side} {n}"),
+        colour: Some(rgb),
+        run: Run::Ask { prompt: format!("Colour for {side} {n}:"), hint: "red, warm, #ff8800", id: ID, args: vec!["one".into(), side.into(), n.to_string()] },
+    };
+    let mut lights = vec![Choice { label: "all".into(), colour: None, run: Run::Ask { prompt: "Colour for every light:".into(), hint: "red", id: ID, args: vec!["all".into()] } }];
+    for n in 0..3 {
+        lights.push(light("left", n, (255, 120 - n as u8 * 40, 0)));
+    }
+    for n in 0..3 {
+        lights.push(light("right", n, (0, 80 + n as u8 * 60, 255)));
+    }
+    let shown = Shown {
+        info: vec![("power".into(), "on".into()), ("control".into(), "the TV".into()), ("style".into(), "follow video, standard".into()), ("hue".into(), "on (Ambilight+Hue)".into())],
+        swatches: Vec::new(),
+        rows: vec![
+            Row { name: "power", options: vec![Choice::act("on", ID, &["power", "on"]), Choice::act("off", ID, &["power", "off"])], current: Some(0), help: None },
+            Row { name: "style", options: vec![Choice::act("video", ID, &["style", "FOLLOW_VIDEO"]), Choice::act("sound", ID, &["style", "FOLLOW_AUDIO"]), Choice::act("colour", ID, &["style", "FOLLOW_COLOR"])], current: Some(0), help: None },
+            Row {
+                name: "setting",
+                options: ["standard", "natural", "vivid", "game", "comfort", "relax"].iter().map(|s| Choice::act(*s, ID, &["style", "FOLLOW_VIDEO", s])).collect(),
+                current: Some(0),
+                help: None,
+            },
+            Row { name: "ambi+hue", options: vec![Choice::act("on", ID, &["hue", "on"]), Choice::act("off", ID, &["hue", "off"])], current: Some(0), help: Some("sync Hue bulbs with the TV") },
+            Row { name: "lights", options: lights, current: None, help: None },
+        ],
+    };
+    st.panels = vec!["ambilight"];
+    if let Some(s) = st.snap.as_mut() {
+        s.panels = vec![("ambilight", View::Shown(shown))];
+    }
+    st
+}
+
+#[test]
+fn ambilight_panel_edits_in_place() {
+    let (mut a, rx, h) = app_seeing(with_ambilight());
+    a.ambi_open = true;
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!("ambilight_panel", s);
+    // the rows are the choices; "control" (not a row) still said; no colour blocks twice
+    assert!(s.contains("power") && s.contains(" video ") && s.contains(" standard ") && s.contains("control"), "{s}");
+    assert!(!s.contains("follow video, standard"), "the style isn't said twice: {s}");
+    // Ambilight+Hue: its own toggle, said what it does
+    assert!(s.contains("ambi+hue") && s.contains("sync Hue bulbs with the TV"), "{s}");
+    // L: the cursor in the panel, no pop-up
+    a.apply(Input::AmbilightDialog, &h);
+    assert_eq!(a.overlay, Overlay::Ambilight { row: 0, col: 0 });
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("esc done"), "{s}");
+    let _ = rx.try_iter().count();
+    // ↓ to style, → changes it at once
+    a.ambi_key(0, 0, KeyCode::Down, &h);
+    let Overlay::Ambilight { row, col } = a.overlay else { panic!() };
+    a.ambi_key(row, col, KeyCode::Right, &h);
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { id: "ambilight.change", args } if args == &["style", "FOLLOW_AUDIO"])));
+    // a light: ⏎ opens the picker
+    a.overlay = Overlay::Ambilight { row: 4, col: 2 };
+    a.ambi_key(4, 2, KeyCode::Enter, &h);
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 2 });
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!("ambilight_picker", s);
+    // → twice along the full row (red, orange, yellow), ⏎ sets it as #hex
+    a.pick = (0, 1);
+    a.ambi_ask_key(4, 2, KeyCode::Right, KeyModifiers::NONE, &h);
+    a.ambi_ask_key(4, 2, KeyCode::Right, KeyModifiers::NONE, &h);
+    a.ambi_ask_key(4, 2, KeyCode::Enter, KeyModifiers::NONE, &h);
+    let want = super::ambi::hex(super::ambi::pick_colour(2, 1));
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["one", "left", "1", want.as_str()])), "{want}");
+    assert_eq!(a.overlay, Overlay::Ambilight { row: 4, col: 2 });
+    // typed instead: what's typed is set
+    a.overlay = Overlay::AmbiColour { row: 4, col: 0 };
+    for c in "warm".chars() {
+        a.ambi_ask_key(4, 0, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    a.ambi_ask_key(4, 0, KeyCode::Enter, KeyModifiers::NONE, &h);
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["all", "warm"])));
+    // a click on a colour sets it
+    a.overlay = Overlay::AmbiColour { row: 4, col: 0 };
+    let _ = screen(&mut a, DESKTOP);
+    let spot = a.hits.iter().find(|(_, hit)| *hit == Hit::AmbiPick(0, super::ambi::SPECIALS)).map(|(r, _)| *r).expect("white in the picker");
+    a.click(spot.x, spot.y, &h);
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["all", "#ffffff"])));
+}
+
+#[test]
+fn ambilight_picker_switches_lights() {
+    let (mut a, rx, h) = app_seeing(with_ambilight());
+    a.ambi_open = true;
+    // picking a colour for every light
+    a.overlay = Overlay::Ambilight { row: 4, col: 0 };
+    a.ambi_key(4, 0, KeyCode::Enter, &h);
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 0 });
+    for c in "warm".chars() {
+        a.ambi_ask_key(4, 0, KeyCode::Char(c), KeyModifiers::NONE, &h);
+    }
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("▕all▏") && s.contains("tab: the next"), "{s}");
+    // click another light (in the panel): the picker is for that one now
+    let spot = |a: &App, hit: Hit| a.hits.iter().rev().find(|(_, x)| *x == hit).map(|(r, _)| *r).expect("on screen");
+    let r = spot(&a, Hit::AmbiOption(4, 3));
+    a.click(r.x, r.y, &h);
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 3 });
+    // tab: the next light; what's typed is kept
+    a.ambi_ask_key(4, 3, KeyCode::Tab, KeyModifiers::NONE, &h);
+    assert_eq!((a.overlay, a.prompt.as_str()), (Overlay::AmbiColour { row: 4, col: 4 }, "warm"));
+    // "all" in the picker's own row of lights
+    let _ = screen(&mut a, DESKTOP);
+    let r = spot(&a, Hit::AmbiOption(4, 0));
+    a.click(r.x, r.y, &h);
+    assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 0 });
+    assert!(!rx.try_iter().any(|x| matches!(x, Action::Run { .. })), "switching sets nothing");
+    // a choice that isn't a light (power off): the picker goes, it's changed
+    let _ = screen(&mut a, DESKTOP);
+    let r = spot(&a, Hit::AmbiOption(0, 1));
+    a.click(r.x, r.y, &h);
+    assert_eq!(a.overlay, Overlay::Ambilight { row: 0, col: 1 });
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { args, .. } if args == &["power", "off"])));
+}
+
+#[test]
+fn picker_shows_what_is_typed() {
+    let (mut a, _rx, h) = app_seeing(with_ambilight());
+    a.ambi_open = true;
+    a.overlay = Overlay::AmbiColour { row: 4, col: 1 };
+    let typed = |a: &mut App, text: &str| {
+        for c in text.chars() {
+            let Overlay::AmbiColour { row, col } = a.overlay else { panic!() };
+            a.ambi_ask_key(row, col, KeyCode::Char(c), KeyModifiers::NONE, &h);
+        }
+        screen(a, DESKTOP)
+    };
+    // part of a name: not one yet
+    let s = typed(&mut a, "ora");
+    assert!(s.contains("ora: not a colour yet"), "{s}");
+    // the whole name: its colour (and its #hex)
+    let s = typed(&mut a, "nge");
+    assert!(s.contains("#ff6400") && !s.contains("not a colour"), "{s}");
+    // #hex and r,g,b too
+    a.prompt.clear();
+    assert!(typed(&mut a, "#00ff88").contains("#00ff88"));
+    a.prompt.clear();
+    assert!(typed(&mut a, "10,20,30").contains("#0a141e"));
 }

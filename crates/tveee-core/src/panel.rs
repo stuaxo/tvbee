@@ -51,6 +51,8 @@ pub struct Row {
     pub name: &'static str,
     pub options: Vec<Choice>,
     pub current: Option<usize>,
+    /// What it does, when the name doesn't say ("sync Hue bulbs with the TV").
+    pub help: Option<&'static str>,
 }
 
 /// An option: its label, a colour it shows (a light's), and what picking it does.
@@ -89,4 +91,36 @@ pub fn all() -> &'static [Spec] {
 
 pub fn by_id(id: &str) -> Option<&'static Spec> {
     all().iter().find(|p| p.id == id)
+}
+
+/// A colour: `#ff8800`, `ff8800`, `255,136,0`, or a name.
+pub fn parse_colour(s: &str) -> Option<Rgb> {
+    let s = s.trim().to_lowercase();
+    let named = match s.as_str() {
+        "red" => Some((255, 0, 0)),
+        "green" => Some((0, 255, 0)),
+        "blue" => Some((0, 0, 255)),
+        "white" => Some((255, 255, 255)),
+        "warm" => Some((255, 147, 41)),
+        "yellow" => Some((255, 200, 0)),
+        "orange" => Some((255, 100, 0)),
+        "cyan" => Some((0, 255, 255)),
+        "magenta" | "pink" => Some((255, 0, 160)),
+        "purple" => Some((128, 0, 255)),
+        "black" | "off" => Some((0, 0, 0)),
+        _ => None,
+    };
+    if named.is_some() {
+        return named;
+    }
+    let hex = s.trim_start_matches('#');
+    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+        return Some((byte(0)?, byte(2)?, byte(4)?));
+    }
+    let parts: Vec<u8> = s.split([',', ' ']).filter(|p| !p.is_empty()).filter_map(|p| p.parse().ok()).collect();
+    match parts.as_slice() {
+        [r, g, b] => Some((*r, *g, *b)),
+        _ => None,
+    }
 }

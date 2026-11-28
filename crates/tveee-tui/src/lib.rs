@@ -71,6 +71,8 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// Where the colour picker is (column, row).
+    pick: (usize, usize),
     /// Where the progress bar stays after a pause, seek or stop asked for
     /// here, until the next read says what it's doing (no prediction).
     frozen: Option<f64>,
@@ -534,6 +536,7 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            pick: (0, 1),
             frozen: None,
             log_back: None,
             save_confirm: None,
@@ -972,10 +975,23 @@ impl App {
                     let _ = actions.send(Action::Volume(target - v as i32));
                 }
             }
+            // a choice in the panel: the cursor there, and changed
+            (Overlay::None, Some(Hit::AmbiOption(row, col))) => {
+                self.overlay = Overlay::Ambilight { row, col };
+                self.ambi_pick(row, col, actions);
+            }
             (Overlay::None, _) => {}
             (Overlay::Ambilight { .. }, Some(Hit::AmbiOption(row, col))) => self.ambi_pick(row, col, actions),
+            (Overlay::Ambilight { .. }, Some(Hit::Input(Input::AmbilightDialog))) => {}
             (Overlay::Ambilight { .. }, Some(Hit::Popup)) => {}
             (Overlay::Ambilight { .. }, _) => self.overlay = Overlay::None,
+            (Overlay::AmbiColour { row, col }, Some(Hit::AmbiPick(x, y))) => {
+                self.pick = (x, y);
+                self.prompt.clear();
+                self.ambi_set(row, col, actions);
+            }
+            // another light (or any choice in the panel) while picking a colour
+            (Overlay::AmbiColour { .. }, Some(Hit::AmbiOption(r, c))) => self.ambi_switch(r, c, actions),
             (Overlay::AmbiColour { .. }, Some(Hit::Popup)) => {}
             (Overlay::AmbiColour { row, col }, _) => self.overlay = Overlay::Ambilight { row, col },
             // the PIN box: a click outside it cancels
