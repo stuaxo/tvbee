@@ -15,17 +15,17 @@ expression: "screen(&mut a, DESKTOP)"
 │                                                                       │swap     ━━━┃── 316/512 MB                   ││
 │                                                                       │load     4.82 3.10 2.40                      ││
 │                                                                       └─────────────────────────────────────────────┘│
-│                         ┌ commands ───────────────────────────────────────────────────── 5 ┐                         │
+│                         ┌ commands ───────────────────────────────────────────────────── 4 ┐                         │
 │                         │> kodi█                                                           │                         │
 │                         │────────────────────────────────────────────────────────────────  │                         │
-│                         │ kodi: next subtitles                                      kodi   │                         │
-│                         │ kodi: next audio track                                    kodi   │                         │
+│                         │ kodi: next subtitles                                  .k  kodi   │                         │
+│                         │ kodi: next audio track                                .a  kodi   │                         │
 │                         │ kodi: find in the library…                                kodi   │                         │
-│                         │ ui: music visualiser: show or hide it (Kodi)                ui   │                         │
-│                         │ ui: the list the app shows (Kodi's folder)                  ui   │                         │
+│                         │ ui: the list the app shows (Kodi's folder)               t  ui   │                         │
 │                         │                                                                  │                         │
 │                         │type to find   …: asks first                                      │                         │
 │                         └──────────────────────────────────────────────────────────────────┘                         │
+│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
