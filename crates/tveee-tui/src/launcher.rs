@@ -63,7 +63,8 @@ pub fn apps_key(tab: AppTab, sel: usize, code: KeyCode, list: &[Entry]) -> (Over
     let at = |sel| (Overlay::Apps { tab, sel }, None);
     match code {
         KeyCode::Esc | KeyCode::Backspace => (Overlay::None, None),
-        KeyCode::Tab | KeyCode::Left | KeyCode::Right => (Overlay::Apps { tab: tab.other(), sel: 0 }, None),
+        // (←/→: nothing; the rows have no value to change. See listnav.)
+        KeyCode::Tab | KeyCode::BackTab => (Overlay::Apps { tab: tab.other(), sel: 0 }, None),
         KeyCode::Char(' ') if n > 0 => (Overlay::AppActions { tab, sel, at: 0 }, None),
         c if super::listnav::is_move(c) => {
                 let to = super::listnav::step(sel, n, c).unwrap_or(sel);
