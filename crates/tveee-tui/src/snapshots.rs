@@ -206,9 +206,9 @@ fn help_fits_the_corner() {
     a.overlay = Overlay::Help(0);
     let s = screen(&mut a, CORNER);
     insta::assert_snapshot!(s);
-    // nothing runs past the box, and it says it scrolls
+    // nothing runs past the box, and it says how far down it is
     assert!(s.lines().all(|l| l.chars().count() <= usize::from(CORNER.0)));
-    assert!(s.contains("↑/↓ scroll"));
+    assert!(s.contains("1-14 of"), "{s}");
     // scrolled to the end: the last of it shows, and ↑ moves straight away
     a.overlay = Overlay::Help(999);
     let end = screen(&mut a, CORNER);
