@@ -5,7 +5,7 @@
 
 use super::{Error, Result, Tv, failed, login, off, ping};
 use serde_json::{Value, json};
-use tveee_core::ask::{Ask, Auth, Http, Reply, Request};
+use tveee_core::ask::{Ask, Auth, Http, Reply, Request, Retry};
 
 /// A Kodi JSON-RPC method.
 pub trait Method {
@@ -29,7 +29,7 @@ impl<M: Method> Ask for Rpc<'_, M> {
         let (port, user, password) = login(tv);
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": self.0.name(), "params": self.0.params() }).to_string();
         let auth = if password.is_empty() { Auth::None } else { Auth::Basic { user, password } };
-        Ok(Request::Http(Http { url: format!("http://{}:{port}/jsonrpc", tv.ip), body: Some(body), auth, timeout_secs: self.1 }))
+        Ok(Request::Http(Http { url: format!("http://{}:{port}/jsonrpc", tv.ip), body: Some(body), auth, timeout_secs: self.1, retry: Retry::Never }))
     }
     fn parse(&self, reply: &Reply) -> Result<Option<M::Out>> {
         match reply.status {

@@ -62,37 +62,56 @@ pub fn paired(tv: &Tv) -> bool {
     tveee_core::pairing::load(PAIRING, &tv.ip).as_ref().and_then(credentials).is_some()
 }
 
-fn https_get(tv: &Tv, saved: &tveee_core::pairing::Saved, path: &str) -> Result<(u16, String)> {
-    let Some(digest) = credentials(saved) else { return Err(tveee_core::pairing::required_error(PAIRING, path)) };
-    tveee_core::https::request(&tveee_core::https::Request {
-        url: &https_url(&tv.ip, path),
-        body: None,
-        digest: Some(digest),
-        basic: None,
-        retry: Some(&|| awake(tv)),
-        timeout_secs: 10,
-    })
+/// A JointSpace endpoint that needs pairing (part 8): its path, a JSON body
+/// to POST (None: a GET), and what it's for ("the channel list", named in
+/// the "pairing required" error). Answers the HTTP status and body.
+pub struct Endpoint<'a> {
+    pub path: &'a str,
+    pub body: Option<String>,
+    pub what: &'a str,
+    /// The pairing to use (None: the saved one, required).
+    pub saved: Option<&'a tveee_core::pairing::Saved>,
+}
+
+impl tveee_core::ask::Ask for Endpoint<'_> {
+    type Answer = (u16, String);
+    fn name(&self) -> String {
+        format!("JointSpace {}", self.path)
+    }
+    fn request(&self, tv: &Tv) -> Result<tveee_core::ask::Request> {
+        use tveee_core::ask::{Auth, Http, Request, Retry};
+        let loaded;
+        let saved = match self.saved {
+            Some(s) => s,
+            None => {
+                loaded = tveee_core::pairing::require(PAIRING, tv, self.what)?;
+                &loaded
+            }
+        };
+        let Some((user, key)) = credentials(saved) else { return Err(tveee_core::pairing::required_error(PAIRING, self.what)) };
+        Ok(Request::Http(Http {
+            url: https_url(&tv.ip, self.path),
+            body: self.body.clone(),
+            auth: Auth::Digest { user: user.to_string(), password: key.to_string() },
+            timeout_secs: 10,
+            // refused while the TV is awake: live TV restarting its API
+            retry: Retry::WhileAwake,
+        }))
+    }
+    fn parse(&self, reply: &tveee_core::ask::Reply) -> Result<Option<(u16, String)>> {
+        Ok(Some((reply.status, reply.body.clone())))
+    }
 }
 
 /// GET a path that needs pairing; `what` names it in the "pairing required"
 /// error ("the channel list").
 pub fn js_get_paired(tv: &Tv, path: &str, what: &str) -> Result<(u16, String)> {
-    let saved = tveee_core::pairing::require(PAIRING, tv, what)?;
-    https_get(tv, &saved, path)
+    tv.ask(&Endpoint { path, body: None, what, saved: None })
 }
 
 /// POST to a path that needs pairing.
 pub fn js_post(tv: &Tv, path: &str, body: &str, what: &str) -> Result<(u16, String)> {
-    let saved = tveee_core::pairing::require(PAIRING, tv, what)?;
-    let Some(digest) = credentials(&saved) else { return Err(tveee_core::pairing::required_error(PAIRING, what)) };
-    tveee_core::https::request(&tveee_core::https::Request {
-        url: &https_url(&tv.ip, path),
-        body: Some(body),
-        digest: Some(digest),
-        basic: None,
-        retry: Some(&|| awake(tv)),
-        timeout_secs: 10,
-    })
+    tv.ask(&Endpoint { path, body: Some(body.to_string()), what, saved: None })
 }
 
 fn read_pin() -> Result<String> {
@@ -192,7 +211,7 @@ impl tveee_core::pairing::Pairing for JointSpace {
 
     /// What the TV is doing now: a read only pairing allows.
     fn check(&self, tv: &Tv, saved: &tveee_core::pairing::Saved) -> Option<String> {
-        Some(match https_get(tv, saved, "/6/activities/tv") {
+        Some(match tv.ask(&Endpoint { path: "/6/activities/tv", body: None, what: "the check", saved: Some(saved) }) {
             Ok((200, body)) => format!("check: /6/activities/tv answers: {}", body.trim()),
             Ok((code, _)) => format!("check: /6/activities/tv gave HTTP {code} (the pairing is saved anyway)"),
             Err(e) => format!("check failed: {e}"),
@@ -217,7 +236,7 @@ fn jointspace(c: &Ctx, args: &[String]) -> Result<()> {
         Some(_) => return usage("usage: tveee jointspace [/6/<path>]"),
     };
     let (status, body) = match tveee_core::pairing::load(PAIRING, &c.tv.ip) {
-        Some(saved) => https_get(&c.tv, &saved, &path)?,
+        Some(saved) => c.tv.ask(&Endpoint { path: &path, body: None, what: "jointspace", saved: Some(&saved) })?,
         None => tveee_core::http::get(&c.tv.ip, 1925, &path)?,
     };
     match status {
@@ -640,7 +659,7 @@ fn modify_favourite(tv: &Tv, list: &str, ccid: u32, add: bool) -> Result<bool> {
     if tveee_core::builtin::info::focus_package(&tv.window_dump()?).as_deref() != Some(LIVE_TV) {
         return Ok(false);
     }
-    let body = format!(r#"{{"{}":{{"id":[{ccid}]}}}}"#, if add { "add" } else { "remove" });
+    let body = serde_json::json!({ (if add { "add" } else { "remove" }): { "id": [ccid] } }).to_string();
     let start = std::time::Instant::now();
     loop {
         match js_post(tv, &format!("/6/channeldb/tv/modifyfavourite/{list}"), &body, "changing favourites")? {
