@@ -188,7 +188,9 @@ pub fn actions() -> Vec<A> {
             ),
         A::new("input.back", CAT, "back", |c, _| c.tv.key(4).map(|()| "back".into())).cli("back", "", "press the back button"),
         A::new("input.text", CAT, "type text", text).cli("text", "\"<string>\"", "type text into the focused field").text("Type:", "text for the focused field"),
-        A::new("input.source", CAT, "switch input", input).cli("input", "<name>", "switch input source"),
+        A::new("input.source", CAT, "switch input", input)
+            .cli("input", "<name>", "switch input source")
+            .choices(&[("HDMI 1", "hdmi1"), ("HDMI 2", "hdmi2"), ("HDMI 3", "hdmi3"), ("HDMI 4", "hdmi4"), ("TV (the tuner)", "tv")]),
         A::terminal("input.list", CAT, "list inputs", inputs)
             .cli("inputs", "[--all]", "list the TV's input sources")
             .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),

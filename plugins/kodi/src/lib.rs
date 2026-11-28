@@ -1082,6 +1082,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             Some(other) => tveee_core::error::usage(format!("subtitles: next, off, on or previous, not '{other}'")),
         })
         .args("[next|off|on|previous]")
+        .choices(&[("next subtitles", "next"), ("previous subtitles", "previous"), ("subtitles off", "off"), ("subtitles on", "on")])
         .key('k')
         .while_playing("video"),
         A::new("kodi.subtitles.off", "kodi", "kodi: subtitles off", |cx, _| subtitles(cx.tv, "off").map(Into::into)).key('K').while_playing("video"),
@@ -1091,6 +1092,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             Some(other) => tveee_core::error::usage(format!("audio: next or previous, not '{other}'")),
         })
         .args("[next|previous]")
+        .choices(&[("next audio track", "next"), ("previous audio track", "previous")])
         .key('a')
         .while_playing("video"),
         A::new("kodi.scan", "kodi", "kodi: look for new videos (library scan)", |cx, a| match a.first().map(String::as_str) {

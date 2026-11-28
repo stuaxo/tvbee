@@ -146,6 +146,10 @@ pub enum Params {
         prompt: &'static str,
         hint: &'static str,
     },
+    /// One of a few: each (what it says, the argument it runs with). A
+    /// front end offers them as a list; run with no argument, the action
+    /// does its default (the first, usually).
+    Choice(&'static [(&'static str, &'static str)]),
 }
 
 /// How the command line reaches an action: `tveee <name> <usage>`.
@@ -279,6 +283,12 @@ impl ActionDescriptor {
     /// Ask for a line of text first (`prompt`, with an example `hint`).
     pub const fn text(mut self, prompt: &'static str, hint: &'static str) -> Self {
         self.params = Params::Text { prompt, hint };
+        self
+    }
+
+    /// It takes one of `choices` (see [`Params::Choice`]).
+    pub const fn choices(mut self, choices: &'static [(&'static str, &'static str)]) -> Self {
+        self.params = Params::Choice(choices);
         self
     }
 

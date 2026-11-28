@@ -191,6 +191,8 @@ pub struct Bars {
 /// Something on screen that responds to a click.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Hit {
+    /// One of an action's choices (in its list).
+    ChoiceItem(usize),
     /// A scrollbar: dragged (or clicked) to scroll its pane.
     Scrollbar(BarAt),
     Input(Input),

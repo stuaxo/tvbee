@@ -333,6 +333,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                         KeyCode::Char(c) if c.is_ascii_digit() && app.prompt.len() < 8 => app.prompt.push(c),
                         _ => {}
                     }
+                } else if let Overlay::Choose { id, sel } = app.overlay {
+                    app.choose_key(id, sel, k.code, actions);
                 } else if let Overlay::Palette(sel) = app.overlay {
                     app.palette_key(sel, k.code, k.modifiers, actions);
                 } else if let Overlay::Prompt(id) = app.overlay
@@ -1038,6 +1040,10 @@ impl App {
             // the panel beside it: not a reason to stop picking
             (Overlay::AmbiColour { .. }, Some(Hit::Input(Input::AmbilightDialog))) => {}
             (Overlay::AmbiColour { row, col }, _) => self.overlay = Overlay::Ambilight { row, col },
+            // a list of choices: one clicked runs it; outside it, closed
+            (Overlay::Choose { id, .. }, Some(Hit::ChoiceItem(i))) => self.run_action_choice(id, i, actions),
+            (Overlay::Choose { .. }, Some(Hit::Popup)) => {}
+            (Overlay::Choose { .. }, _) => self.overlay = Overlay::None,
             // the PIN box: a click outside it cancels
             (Overlay::Pin, Some(Hit::Popup)) => {}
             (Overlay::Pin, _) => {
