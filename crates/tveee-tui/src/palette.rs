@@ -40,7 +40,40 @@ pub enum Item {
 /// What matches `query`, best first. Only actions that can run here (ones
 /// that print for themselves need the command line). An empty query lists
 /// the plugins' actions in their order, then the ui's.
+/// How relevant an action is now: 0 the app in front's own (Kodi's, or the
+/// guide's for live TV), 1 playback while something plays, 2 anything
+/// else, 3 for another kind of thing playing (subtitles while music plays).
+#[derive(Default, Clone)]
+pub struct Now {
+    /// The app in front's provider, and whether it has a guide (live TV).
+    pub provider: Option<(&'static str, bool)>,
+    /// What's playing ("video", "audio"), if anything is.
+    pub playing: Option<&'static str>,
+}
+
+impl Now {
+    pub fn rank(&self, a: &ActionDescriptor) -> u8 {
+        let own = self.provider.is_some_and(|(id, guide)| a.category == id || (guide && a.category == "guide"));
+        match (own, a.media) {
+            (_, Some(m)) if self.playing != Some(m) => 3,
+            (true, _) => 0,
+            _ if a.category == "media" && self.playing.is_some() => 1,
+            _ => 2,
+        }
+    }
+}
+
 pub fn palette_matches(actions: &[ActionDescriptor], query: &str) -> Vec<Item> {
+    palette_ranked(actions, query, &Now::default())
+}
+
+/// The palette's items for `query`, the best matches first, and among
+/// equals (or with nothing typed) the most relevant now ([`Now::rank`]).
+pub fn palette_ranked(actions: &[ActionDescriptor], query: &str, now: &Now) -> Vec<Item> {
+    let rank = |item: &Item| match item {
+        Item::Action(i) => now.rank(&actions[*i]),
+        Item::Ui(_) => 2,
+    };
     // (what's searched: the title as shown, and the id `tveee do` knows)
     let all = actions
         .iter()
@@ -50,15 +83,18 @@ pub fn palette_matches(actions: &[ActionDescriptor], query: &str) -> Vec<Item> {
         .chain(UI.iter().enumerate().map(|(i, (title, _))| (Item::Ui(i), title.to_string())));
     let query = query.trim();
     if query.is_empty() {
-        return all.map(|(item, _)| item).collect();
+        // the most relevant first; the rest in their order
+        let mut items: Vec<Item> = all.map(|(item, _)| item).collect();
+        items.sort_by_key(|i| rank(i));
+        return items;
     }
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut buf = Vec::new();
     let mut scored: Vec<(u32, usize, Item)> =
         all.enumerate().filter_map(|(order, (item, hay))| pattern.score(Utf32Str::new(&hay, &mut buf), &mut matcher).map(|s| (s, order, item))).collect();
-    // best first; equal scores keep the order
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    // best first; equal scores the most relevant, then their order
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(rank(&a.2).cmp(&rank(&b.2))).then(a.1.cmp(&b.1)));
     scored.into_iter().map(|(_, _, item)| item).collect()
 }
 
@@ -103,7 +139,16 @@ impl App {
 
     /// What's listed now, for what's been typed.
     pub(super) fn palette_list(&self) -> Vec<Item> {
-        palette_matches(&self.actions, &self.prompt)
+        palette_ranked(&self.actions, &self.prompt, &self.palette_now())
+    }
+
+    /// What makes an action relevant now: the app in front, what's playing.
+    pub(super) fn palette_now(&self) -> Now {
+        let snap = self.st.snap.as_ref();
+        let pkg = snap.and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
+        let provider = pkg.as_deref().and_then(tveee_core::provider::for_package).map(|p| (p.id(), p.guide().is_some()));
+        let playing = snap.and_then(|s| s.activity.as_ref()).and_then(|a| a.media);
+        Now { provider, playing }
     }
 
     /// Keys in the palette: typing narrows it, ↑/↓ choose, ⏎ runs (or asks
@@ -251,5 +296,29 @@ mod tests {
         assert_eq!(choose(&a[3]), (Overlay::Confirm { id: "power.off", yes: false }, None));
         // a level it can't do without
         assert_eq!(choose(&a[4]), (Overlay::Prompt("media.volume"), None));
+    }
+
+    #[test]
+    fn the_relevant_first() {
+        use tveee_core::actions::ActionDescriptor as A;
+        let ok = |_: &tveee_core::actions::Cx, _: &[String]| Ok("".into());
+        let a = vec![
+            A::new("power.sleep", "power", "sleep", ok),
+            A::new("media.next", "media", "next track", ok),
+            A::new("kodi.subtitles", "kodi", "kodi: subtitles", ok).while_playing("video"),
+            A::new("kodi.find", "kodi", "kodi: find in the library", ok),
+        ];
+        let order =
+            |now: &Now| palette_ranked(&a, "", now).into_iter().filter_map(|i| if let Item::Action(n) = i { Some(a[n].id) } else { None }).collect::<Vec<_>>();
+        // nothing in front: as listed (subtitles last: nothing's playing)
+        assert_eq!(order(&Now::default()), ["power.sleep", "media.next", "kodi.find", "kodi.subtitles"]);
+        // Kodi playing music: Kodi's own, then playback; subtitles last
+        let music = Now { provider: Some(("kodi", false)), playing: Some("audio") };
+        assert_eq!(order(&music), ["kodi.find", "media.next", "power.sleep", "kodi.subtitles"]);
+        // Kodi playing video: subtitles are relevant now
+        let video = Now { provider: Some(("kodi", false)), playing: Some("video") };
+        assert_eq!(order(&video)[..2], ["kodi.subtitles", "kodi.find"]);
+        // typed: the match comes first, relevance breaks ties
+        assert_eq!(palette_ranked(&a, "sleep", &music).first(), Some(&Item::Action(0)));
     }
 }
