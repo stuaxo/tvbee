@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! YouTube for Android TV: its app entry (links for what's playing, search),
 //! and commands that look inside the app.
 //!
@@ -16,8 +17,10 @@ use tveee_core::more::{Chapter, Details, Go, Link, Place};
 use tveee_core::provider::{Outcome, Playing};
 use tveee_core::tv::Tv;
 
+/// The YouTube app's Android package.
 pub const PACKAGE: &str = "com.google.android.youtube.tv";
 
+/// Whether the TV has the YouTube app.
 pub fn detect(tv: &Tv) -> Result<bool> {
     let out = tv.shell(&["cmd", "package", "list", "packages", PACKAGE])?;
     Ok(out.lines().any(|l| l.trim() == format!("package:{PACKAGE}")))
@@ -40,6 +43,7 @@ pub const PLACES: &[Place] = &[
     Place { id: "watchlater", label: "Watch later", link: "https://www.youtube.com/playlist?list=WL" },
 ];
 
+/// The apps this plugin knows: YouTube.
 pub fn apps() -> Vec<tveee_core::builtin::apps::App> {
     use tveee_core::builtin::apps::{Kind, app};
     vec![app("youtube", "YouTube", PACKAGE, Kind::Video)]
@@ -48,6 +52,8 @@ pub fn apps() -> Vec<tveee_core::builtin::apps::App> {
 /// The YouTube provider: what's playing (via the app's devtools page), its
 /// places, details via yt-dlp, and search by results link.
 pub struct YouTube;
+/// YouTube's provider: what's playing (through its devtools page), exact
+/// seeking, chapters and links, pictures for the preview.
 pub static YOUTUBE: YouTube = YouTube;
 
 impl tveee_core::provider::Provider for YouTube {
@@ -313,11 +319,17 @@ pub fn local_copy(id: &str) -> Result<PathBuf> {
 /// `height`, `fps` frames a second of video.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Storyboard {
+    /// Frames across each sheet.
     pub cols: u32,
+    /// Frames down each sheet.
     pub rows: u32,
+    /// Frames a second of video (a frame every 1/fps seconds).
     pub fps: f64,
+    /// Each frame's width, in pixels.
     pub width: u32,
+    /// Each frame's height, in pixels.
     pub height: u32,
+    /// The sheets' image URLs, in order.
     pub sheets: Vec<String>,
 }
 
@@ -434,6 +446,7 @@ pub fn storyboard_frame(id: &str, secs: f64) -> Option<Vec<u8>> {
     ffmpeg_jpeg(None, &sheet, &format!("crop={}:{}:{x}:{y}", board.width, board.height))
 }
 
+/// This plugin's providers: YouTube.
 pub fn providers() -> Vec<&'static dyn tveee_core::provider::Provider> {
     vec![&YOUTUBE]
 }
