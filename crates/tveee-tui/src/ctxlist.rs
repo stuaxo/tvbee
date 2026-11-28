@@ -485,7 +485,9 @@ impl App {
                     Some(p) => format!(" {} of {} ", p + 1, shown.len()),
                     None => format!(" {} ", shown.len()),
                 };
-                (format!(" {} ({app_name}) ", l.title), count)
+                // sync folder on: said up top too, where it's seen at a glance
+                let synced = if l.browsed && self.opt(tveee_core::options::LIST_SYNC) { "⇄ TV " } else { "" };
+                (format!(" {} ({app_name}) {synced}", l.title), count)
             }
         };
         // as wide as it can be, so it doesn't change width as it scrolls
