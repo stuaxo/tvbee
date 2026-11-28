@@ -564,6 +564,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
                 .is_some_and(|p| p.eq_ignore_ascii_case("on"));
             set_power(cx.tv, !on).map(Into::into)
         })
+        .words(&["lights", "led", "glow"])
         .key('A'),
         A::new("ambilight.video", WHAT, "ambilight: follow the video", |cx, _| {
             set_style(cx.tv, "FOLLOW_VIDEO", Some("STANDARD"), None)?;

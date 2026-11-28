@@ -143,6 +143,7 @@ pub fn open_link(tv: &Tv, line: &str) -> Result<String> {
 pub fn actions() -> Vec<ActionDescriptor> {
     vec![
         crate::actions::ActionDescriptor::new("apps.open_link", "apps", "open a link", |cx, a| open_link(cx.tv, &a.join(" ")).map(Into::into))
+            .words(&["url", "link", "web", "address"])
             .key('o')
             .text("Link to open:", "e.g. https://youtu.be/...   or   vlc http://host/film.mkv"),
     ]

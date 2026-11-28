@@ -6,15 +6,15 @@ expression: "screen(&mut a, CORNER)"
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
 │load 4.82▲ │ 310 MB [F]ree │ [:] commands                 │
 │what     Paused in Kodi                                   │
-│title    Episode 3 (Off-Road)                             │
-┌ commands ───────────────────────────────────────────── 1 ┐
+┌ commands ───────────────────────────────────────────── 3 ┐
 │> log█                                                    │
 │──────────────────────────────────────────────────────────│
 │ ui: show the log (what tveee did lately)                 │
+│ ui: system info on/off                                   │
+│ ui: live TV guide                                        │
 │                                                          │
 │type to find   …: asks first                              │
 └──────────────────────────────────────────────────────────┘
-│                                                          │
 │                                                          │
 │ space  play   ←→  seek   tab  remote   ?  help   q  quit │
 │                                                          │

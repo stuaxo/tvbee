@@ -63,13 +63,14 @@ fn power_off(cx: &Cx, _: &[String]) -> Result<Output> {
 
 pub fn actions() -> Vec<A> {
     vec![
-        A::new("power.sleep", CAT, "sleep (standby)", sleep).cli("sleep", "", "send the TV to standby").key('s'),
-        A::new("power.wake", CAT, "wake", wake).cli("wake", "", "wake from standby").key('w'),
+        A::new("power.sleep", CAT, "sleep (standby)", sleep).words(&["standby", "off"]).cli("sleep", "", "send the TV to standby").key('s'),
+        A::new("power.wake", CAT, "wake", wake).words(&["on", "standby"]).cli("wake", "", "wake from standby").key('w'),
         A::new("power.reboot", CAT, "reboot", reboot)
             .cli("reboot", "", "reboot the TV")
             .key('R')
             .confirm("Reboot the TV? It will be unreachable for about a minute."),
         A::new("power.off", CAT, "power off", power_off)
+            .words(&["shutdown", "shut"])
             .cli("shutdown", "", "power off completely (not standby)")
             .key('X')
             .confirm("Power off the TV? It can't be woken over the network afterwards;\nyou'll need the remote or the TV's power button."),
