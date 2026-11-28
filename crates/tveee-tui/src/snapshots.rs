@@ -1690,3 +1690,26 @@ fn a_link_in_the_palette_opens_on_the_tv() {
     assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { id: "apps.open_link", args } if args == &["https://youtu.be/gwLRWgOWhBs"])));
     assert_eq!(a.overlay, Overlay::None);
 }
+
+#[test]
+fn volume_box_says_the_level_and_steps_it() {
+    let (mut a, rx, h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    a.actions = tveee_core::builtin::media::actions();
+    a.overlay = Overlay::Prompt("media.volume");
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("(now 24/60)") && s.contains("←/→ step it now"), "{s}");
+    // →: up 2 now, the box still open
+    let _ = rx.try_iter().count();
+    if let Some(step) = super::overlays::prompt_step("media.volume", KeyCode::Right) {
+        a.apply(Input::Do(step), &h);
+    }
+    assert!(rx.try_iter().any(|x| x == Action::Volume(2)));
+    assert_eq!(a.overlay, Overlay::Prompt("media.volume"));
+    // the seek box: where it's at
+    a.overlay = Overlay::Prompt("media.seek");
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("(now 27:5") && s.contains("/ 48:47)"), "{s}");
+    assert_eq!(super::overlays::prompt_step("media.seek", KeyCode::Left), Some(Action::Seek(-10.0)));
+    assert_eq!(super::overlays::prompt_step("kodi.find", KeyCode::Left), None);
+}

@@ -335,6 +335,13 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
                     }
                 } else if let Overlay::Palette(sel) = app.overlay {
                     app.palette_key(sel, k.code, k.modifiers, actions);
+                } else if let Overlay::Prompt(id) = app.overlay
+                    && let Some(step) = prompt_step(id, k.code)
+                {
+                    // ←/→ in a volume or seek box: stepped now (as the main
+                    // screen's keys do), the box still open
+                    let _ = id;
+                    app.apply(Input::Do(step), actions);
                 } else if let Overlay::Prompt(id) = app.overlay {
                     let mut text = std::mem::take(&mut app.prompt);
                     let (next, action) = prompt_key(id, k.code, k.modifiers, &mut text);

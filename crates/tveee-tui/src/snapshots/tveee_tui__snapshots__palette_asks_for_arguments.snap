@@ -8,9 +8,9 @@ expression: "screen(&mut a, CORNER)"
 │what     Paused in Kodi                                   │
 │title    Episode 3 (Off-Road)                             │
 ┌ volume ──────────────────────────────────────────────────┐
-│volume:                                                   │
+│volume (now 24/60):                                       │
 │█                                                         │
-│up|down|<level>                                           │
+│up|down|<level>   ←/→ step it now                         │
 │                                                          │
 │⏎ go   esc cancel   paste works   ctrl-u clears           │
 └──────────────────────────────────────────────────────────┘

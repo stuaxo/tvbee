@@ -116,6 +116,19 @@ pub fn search_key(at: usize, code: KeyCode, mods: KeyModifiers, text: &mut Strin
 
 /// Keys while typing what action `id` needs: edit `text`; Enter runs it
 /// with that, Esc cancels. Ctrl-U clears.
+/// In a box asking for a volume or a position, ←/→ step it there and then
+/// (the box staying open, typing still possible): what to send, if
+/// `code` is a step for action `id`.
+pub fn prompt_step(id: &str, code: KeyCode) -> Option<Action> {
+    match (id, code) {
+        ("media.volume", KeyCode::Left) => Some(Action::Volume(-2)),
+        ("media.volume", KeyCode::Right) => Some(Action::Volume(2)),
+        ("media.seek", KeyCode::Left) => Some(Action::Seek(-10.0)),
+        ("media.seek", KeyCode::Right) => Some(Action::Seek(10.0)),
+        _ => None,
+    }
+}
+
 pub fn prompt_key(id: &'static str, code: KeyCode, mods: KeyModifiers, text: &mut String) -> (Overlay, Option<Action>) {
     let here = Overlay::Prompt(id);
     match code {
@@ -838,6 +851,21 @@ impl App {
             Params::Text { prompt, hint } => (prompt.to_string(), hint),
             Params::None => (format!("{}:", it.title), usage_of(it)),
         };
+        // a volume or a position: where it is now, and ←/→ to step it
+        let now = match id {
+            "media.volume" => self.st.snap.as_ref().and_then(|s| s.volume).map(|(v, max)| format!("{v}/{max}")),
+            "media.seek" => self.progress_now().map(|p| match p.duration {
+                Some(d) => format!("{} / {}", tveee_core::nowplaying::clock(p.position), tveee_core::nowplaying::clock(d)),
+                None => tveee_core::nowplaying::clock(p.position),
+            }),
+            _ => None,
+        };
+        let stepped = prompt_step(id, KeyCode::Left).is_some();
+        let prompt = match now {
+            Some(n) => format!("{} (now {n}):", prompt.trim_end_matches(':')),
+            None => prompt,
+        };
+        let hint = if stepped { format!("{hint}   ←/→ step it now") } else { hint.to_string() };
         let field = 60usize;
         // show the end of long input
         let shown: String = {
