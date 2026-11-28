@@ -155,7 +155,13 @@ impl Window {
 
 impl Reading for Window {
     fn cmd() -> Cmd {
-        Cmd::new("dumpsys").arg("window").grep_e("mCurrentFocus=|mOwnerUid=")
+        // `dumpsys window windows`: the windows section only (the TV skips
+        // writing the rest), with the full dump as a fallback should a TV
+        // not say what has focus there (grep finds nothing)
+        Cmd::raw(
+            "dumpsys window windows | grep -F -e mCurrentFocus= -e mOwnerUid= || \
+             dumpsys window | grep -F -e mCurrentFocus= -e mOwnerUid=",
+        )
     }
     const NAME: &'static str = "window";
     fn parse(out: &str) -> Option<Window> {
@@ -271,6 +277,15 @@ mod tests {
         // nothing in focus yet is an answer; an empty one isn't
         assert_eq!(Window::parse("  mCurrentFocus=null\n").unwrap().package(), None);
         assert_eq!(Window::parse(""), None);
+    }
+
+    #[test]
+    fn readings_ask_for_little() {
+        // fixed strings (no regex), and the window's own section first
+        assert_eq!(Power::cmd().render(), "dumpsys power | grep -F -e mWakefulness=");
+        let w = Window::cmd().render();
+        assert!(w.starts_with("dumpsys window windows | grep -F -e mCurrentFocus= -e mOwnerUid= || dumpsys window |"), "{w}");
+        assert!(!w.contains('\n'), "one line: {w}");
     }
 
     #[test]

@@ -127,9 +127,16 @@ impl Cmd {
         self
     }
 
-    /// Only the lines with `pattern` (`| grep pattern`).
+    /// Only the lines with the text `pattern` (`| grep -F -e pattern`: a
+    /// fixed string, matched without a regex: toybox's quickest).
     pub fn grep(self, pattern: &str) -> Cmd {
-        self.pipe(Cmd::new("grep").arg(pattern))
+        self.grep_any(&[pattern])
+    }
+
+    /// Only the lines with any of the texts `patterns` (`grep -F -e a -e b`).
+    pub fn grep_any(self, patterns: &[&str]) -> Cmd {
+        let g = patterns.iter().fold(Cmd::new("grep").arg("-F"), |g, p| g.arg("-e").arg(*p));
+        self.pipe(g)
     }
 
     /// Only the lines matching extended regex `pattern` (`| grep -E`).
@@ -263,7 +270,8 @@ mod tests {
     fn commands_are_quoted_once() {
         let c = Cmd::new("dumpsys").arg("window").grep_e("mCurrentFocus=|mOwnerUid=");
         assert_eq!(c.render(), "dumpsys window | grep -E 'mCurrentFocus=|mOwnerUid='");
-        assert_eq!(Cmd::new("dumpsys").arg("power").grep("mWakefulness=").render(), "dumpsys power | grep mWakefulness=");
+        assert_eq!(Cmd::new("dumpsys").arg("power").grep("mWakefulness=").render(), "dumpsys power | grep -F -e mWakefulness=");
+        assert_eq!(Cmd::new("x").grep_any(&["a=", "*b*"]).render(), "x | grep -F -e a= -e '*b*'");
         // a path with a quote and a space can't break it
         assert_eq!(Cmd::new("ls").arg("/sdcard/it's here").render(), r"ls '/sdcard/it'\''s here'");
         assert_eq!(Cmd::new("echo").arg("").render(), "echo ''");
