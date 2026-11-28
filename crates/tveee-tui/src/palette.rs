@@ -111,6 +111,11 @@ impl App {
     pub(super) fn palette_key(&mut self, sel: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
         let n = self.palette_list().len();
         match code {
+            // Esc: what's typed first, then the palette
+            KeyCode::Esc if !self.prompt.is_empty() => {
+                self.prompt.clear();
+                self.overlay = Overlay::Palette(0);
+            }
             KeyCode::Esc => {
                 self.overlay = Overlay::None;
                 self.palette_closed();

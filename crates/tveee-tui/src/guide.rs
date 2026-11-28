@@ -280,6 +280,8 @@ impl App {
                 self.details = Details::Focused;
                 return;
             }
+            // Esc: the filter first, then the guide
+            KeyCode::Esc if !self.prompt.is_empty() => self.prompt.clear(),
             KeyCode::Esc => {
                 self.overlay = Overlay::None;
                 return;
