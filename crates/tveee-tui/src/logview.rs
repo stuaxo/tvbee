@@ -58,6 +58,9 @@ pub struct LogView {
     pub top: Option<usize>,
     /// A drag over the lines started (it selects).
     pub drag: bool,
+    /// The file name ⏎ was pressed for that's there already (⏎ again
+    /// writes over it).
+    pub save_confirm: Option<String>,
 }
 
 impl App {
@@ -96,7 +99,7 @@ impl App {
             }
             KeyCode::Char('s') => {
                 self.log.back = Some(Overlay::Logs { at, from });
-                self.save_confirm = None;
+                self.log.save_confirm = None;
                 self.prompt = default_log_name();
                 self.overlay = Overlay::SaveLog;
             }
@@ -131,9 +134,9 @@ impl App {
                     return;
                 }
                 let path = log_path(&name);
-                if path.exists() && self.save_confirm.as_deref() != Some(name.as_str()) {
+                if path.exists() && self.log.save_confirm.as_deref() != Some(name.as_str()) {
                     self.note = format!("{} is there already: ⏎ again writes over it", path.display());
-                    self.save_confirm = Some(name);
+                    self.log.save_confirm = Some(name);
                     return;
                 }
                 let (_, lines) = tveee_core::log::recent_numbered();
@@ -143,17 +146,17 @@ impl App {
                     Ok(()) => format!("saved {} lines of the log to {}", lines.len(), path.display()),
                     Err(e) => format!("couldn't save the log to {}: {e}", path.display()),
                 };
-                self.save_confirm = None;
+                self.log.save_confirm = None;
                 self.overlay = self.log.back.take().unwrap_or(Overlay::None);
             }
             KeyCode::Backspace => {
                 self.prompt.pop();
-                self.save_confirm = None;
+                self.log.save_confirm = None;
             }
             KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.prompt.clear(),
             KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => {
                 self.prompt.push(c);
-                self.save_confirm = None;
+                self.log.save_confirm = None;
             }
             _ => {}
         }

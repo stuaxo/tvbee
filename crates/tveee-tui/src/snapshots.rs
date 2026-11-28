@@ -185,20 +185,20 @@ fn long_link_shortened_corner() {
     let s = screen(&mut a, CORNER);
     insta::assert_snapshot!(s);
     // one row, cut in the middle, made a link to the whole thing
-    assert_eq!(a.links.len(), 1);
-    assert!(a.links[0].text.contains('…'));
-    assert!(a.links[0].url.ends_with("token=abcdef0123456789"));
+    assert_eq!(a.links.drawn.len(), 1);
+    assert!(a.links.drawn[0].text.contains('…'));
+    assert!(a.links.drawn[0].url.ends_with("token=abcdef0123456789"));
 }
 
 #[test]
 fn long_link_whole_desktop() {
     let mut a = app(kodi_catchup());
-    a.url_full = true;
+    a.links.url_full = true;
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
     // every row of it, and the open button, are links to it
-    assert_eq!(a.links.iter().filter(|l| l.text != "[open ↗]").map(|l| l.text.as_str()).collect::<String>(), a.links[0].url);
-    assert!(a.links.iter().any(|l| l.text == "[open ↗]"));
+    assert_eq!(a.links.drawn.iter().filter(|l| l.text != "[open ↗]").map(|l| l.text.as_str()).collect::<String>(), a.links.drawn[0].url);
+    assert!(a.links.drawn.iter().any(|l| l.text == "[open ↗]"));
     // its buttons answer clicks
     assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::CopyUrl)));
     assert!(a.hits.iter().any(|(_, h)| *h == Hit::Input(Input::OpenUrl)));
@@ -418,7 +418,7 @@ fn options_plugins_tab_desktop() {
     let mut a = app(kodi_paused());
     // what's saved: kodi chosen on (this app's own options)
     a.opts = Some(vec![("plugin.kodi".to_string(), true)]);
-    a.plugins = plugin_states();
+    a.plugins.states = plugin_states();
     a.overlay = Overlay::Options(0);
     let opts = screen(&mut a, DESKTOP);
     assert!(opts.contains("scroll animations") && opts.contains(" Plugins "), "{opts}");
@@ -468,10 +468,10 @@ fn load_hidden_and_system_watched() {
     let top = s.lines().nth(1).unwrap_or_default();
     assert!(!top.contains("load") && !top.contains("310 MB") && top.contains("[F]ree memory"), "{top}");
     // the system panel opened: the engine is told to read the figures; closed: told to stop
-    a.info = Some(true);
+    a.system.shown = Some(true);
     let _ = screen(&mut a, CORNER);
     assert!(rx.try_iter().any(|x| x == Action::WatchSystem(true)));
-    a.info = Some(false);
+    a.system.shown = Some(false);
     let _ = screen(&mut a, CORNER);
     assert!(rx.try_iter().any(|x| x == Action::WatchSystem(false)));
     // toggled back on in the options: shown at once (from the figures it
@@ -997,12 +997,12 @@ fn links_under_a_pop_up_stay_under_it() {
     // the link drawn, showing
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(DESKTOP.0, DESKTOP.1)).unwrap();
     let frame = term.draw(|f| a.draw(f)).unwrap();
-    assert_eq!(super::links::showing(&a.links, frame.buffer).len(), a.links.len());
-    assert!(!a.links.is_empty());
+    assert_eq!(super::links::showing(&a.links.drawn, frame.buffer).len(), a.links.drawn.len());
+    assert!(!a.links.drawn.is_empty());
     // help drawn over it: not written again on top
     a.overlay = Overlay::Help(0);
     let frame = term.draw(|f| a.draw(f)).unwrap();
-    assert!(super::links::showing(&a.links, frame.buffer).is_empty(), "the link would show through help");
+    assert!(super::links::showing(&a.links.drawn, frame.buffer).is_empty(), "the link would show through help");
 }
 
 #[test]
@@ -1561,18 +1561,18 @@ fn a_plugin_turned_off_goes_at_once() {
     use tveee_core::plugin::{PluginState, Source};
     let (mut a, _rx, _h) = app_seeing(kodi_paused());
     a.opts = Some(Vec::new());
-    a.plugins = vec![PluginState { name: "kodi", desc: "Kodi", enabled: true, source: Source::Cache }];
+    a.plugins.states = vec![PluginState { name: "kodi", desc: "Kodi", enabled: true, source: Source::Cache }];
     a.options.plugins = true;
     a.overlay = Overlay::Options(0);
     // ← turns it off: now, not at the next start
     a.options_key(0, KeyCode::Left);
-    assert!(!a.plugins[0].enabled && a.plugins[0].source == Source::Override);
+    assert!(!a.plugins.states[0].enabled && a.plugins.states[0].source == Source::Override);
     assert_eq!(a.note, "plugin kodi: off");
     assert_eq!(a.plugin_opt("kodi"), Some(false));
     let s = screen(&mut a, DESKTOP);
     assert!(!s.contains("(from the next start)"), "{s}");
     a.options_key(0, KeyCode::Right);
-    assert!(a.plugins[0].enabled);
+    assert!(a.plugins.states[0].enabled);
 }
 
 #[test]
@@ -1593,7 +1593,7 @@ fn system_panel_pauses() {
     let st = kodi_paused();
     let (mut a, rx, h, held) = app_holding(st.clone());
     a.opts = Some(Vec::new());
-    a.info = Some(true);
+    a.system.shown = Some(true);
     let s = screen(&mut a, DESKTOP);
     assert!(s.contains("I pauses"), "{s}");
     assert!(rx.try_iter().any(|x| x == Action::WatchSystem(true)));

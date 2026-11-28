@@ -401,6 +401,15 @@ pub(super) const HELP: &str = " everywhere
    wheel    volume
    Shift+drag selects text as usual (to copy the url)";
 
+/// The plugins: each one's state (the options' Plugins tab), and every
+/// plugin there is (installed again when one is turned on or off; None in
+/// tests, where nothing is installed).
+#[derive(Default)]
+pub struct PluginsView {
+    pub states: Vec<tveee_core::plugin::PluginState>,
+    pub all: Option<fn() -> Vec<tveee_core::plugin::Plugin>>,
+}
+
 /// The options dialog's own state.
 #[derive(Default)]
 pub struct OptionsView {
@@ -415,7 +424,7 @@ impl App {
     /// The plugins its tab lets you change: the vendor ones (built-in ones
     /// are always on).
     pub(super) fn vendor_plugins(&self) -> Vec<&tveee_core::plugin::PluginState> {
-        self.plugins.iter().filter(|p| p.source != tveee_core::plugin::Source::Builtin).collect()
+        self.plugins.states.iter().filter(|p| p.source != tveee_core::plugin::Source::Builtin).collect()
     }
 
     /// Keys in the options dialog (see [`super::listnav`]): ↑/↓ choose,
@@ -541,17 +550,17 @@ impl App {
     /// menu and palette from them, and the TV read again, so nothing it
     /// filled in (Kodi's "paused") stays, nor waits for the next start.
     pub(super) fn replug(&mut self, name: &str, on: bool) {
-        if let Some(s) = self.plugins.iter_mut().find(|s| s.name == name) {
+        if let Some(s) = self.plugins.states.iter_mut().find(|s| s.name == name) {
             s.enabled = on;
             // the user's choice now, not what was found on the TV
             s.source = tveee_core::plugin::Source::Override;
         }
-        let Some(all) = self.all_plugins.map(|f| f()) else { return };
+        let Some(all) = self.plugins.all.map(|f| f()) else { return };
         // the states lined up with every plugin (by name)
         let states: Vec<tveee_core::plugin::PluginState> = all
             .iter()
             .map(|p| {
-                self.plugins.iter().find(|s| s.name == p.name).cloned().unwrap_or(tveee_core::plugin::PluginState {
+                self.plugins.states.iter().find(|s| s.name == p.name).cloned().unwrap_or(tveee_core::plugin::PluginState {
                     name: p.name,
                     desc: p.desc,
                     enabled: false,
@@ -717,7 +726,7 @@ impl App {
             }
             body.push(Line::default());
             body.push(Line::from(Span::styled(" built in (always on)", dim)));
-            for p in self.plugins.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin) {
+            for p in self.plugins.states.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin) {
                 body.push(Line::from(Span::styled(format!(" [x] {:<20}  {}", p.name, p.desc), dim)));
             }
             vec![
