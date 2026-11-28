@@ -32,7 +32,7 @@ pub fn lane(a: &Action) -> Lane {
         | Action::PreviewPanel(_)
         | Action::WatchSystem(_)
         | Action::WatchList(_) => Lane::Read,
-        Action::PrefetchInfo => Lane::Idle,
+        Action::PrefetchInfo | Action::ListAhead(_) => Lane::Idle,
         _ => Lane::Act,
     }
 }
@@ -187,6 +187,43 @@ pub struct Shared {
     /// The launcher's apps have been sent (held while they're being read, so
     /// they're read once, by whichever lane gets there first).
     pub apps_sent: std::sync::Mutex<bool>,
+    /// Lists read ahead of being opened (and read lately), by their link:
+    /// opening one is then at once ([`Ahead`]).
+    pub ahead: std::sync::Mutex<Ahead>,
+}
+
+/// How long a list read (ahead, or opened) answers for itself.
+pub const AHEAD_KEEP: Duration = Duration::from_secs(60);
+/// How many lists are kept.
+const AHEAD_MAX: usize = 32;
+
+/// Lists read lately, by their link (see [`Shared::ahead`]).
+#[derive(Default)]
+pub struct Ahead {
+    lists: std::collections::HashMap<String, (Instant, crate::provider::ContextList)>,
+}
+
+impl Ahead {
+    /// List `at`, if it was read in the last [`AHEAD_KEEP`].
+    pub fn get(&self, at: &str) -> Option<crate::provider::ContextList> {
+        self.lists.get(at).filter(|(t, _)| t.elapsed() < AHEAD_KEEP).map(|(_, l)| l.clone())
+    }
+
+    /// Keep `l` as list `at`, the oldest going past [`AHEAD_MAX`].
+    pub fn put(&mut self, at: &str, l: crate::provider::ContextList) {
+        self.lists.retain(|_, (t, _)| t.elapsed() < AHEAD_KEEP);
+        if self.lists.len() >= AHEAD_MAX
+            && let Some(oldest) = self.lists.iter().min_by_key(|(_, (t, _))| *t).map(|(k, _)| k.clone())
+        {
+            self.lists.remove(&oldest);
+        }
+        self.lists.insert(at.to_string(), (Instant::now(), l));
+    }
+
+    /// Whether `at` is kept and fresh.
+    pub fn has(&self, at: &str) -> bool {
+        self.lists.get(at).is_some_and(|(t, _)| t.elapsed() < AHEAD_KEEP)
+    }
 }
 
 /// How long the user has to leave things alone before background work runs.
@@ -219,6 +256,7 @@ impl Shared {
             art: Default::default(),
 
             apps_sent: std::sync::Mutex::new(false),
+            ahead: Default::default(),
         }
     }
 
@@ -746,7 +784,18 @@ impl Actor {
                 // on the app's screen too, if asked (not reaching it isn't
                 // a reason not to browse)
                 let shown = if show { p.show_at(&self.tv, &at).or_fallback().err().map(|e| format!("couldn't show it on the TV: {e}")) } else { None };
-                let l = p.list_at(&self.tv, &at).or_fallback().map_err(|e| e.to_string());
+                // read lately (or ahead, in a lull): at once
+                let kept = lock(&self.shared.ahead).get(&at);
+                let l = match kept {
+                    Some(l) => {
+                        crate::tlog!("list {at}: read ahead");
+                        Ok(Some(l))
+                    }
+                    None => p.list_at(&self.tv, &at).or_fallback().map_err(|e| e.to_string()),
+                };
+                if let Ok(Some(l)) = &l {
+                    lock(&self.shared.ahead).put(&at, l.clone());
+                }
                 let _ = tx.send(Msg::List(l));
                 shown.unwrap_or_default()
             }
@@ -782,6 +831,7 @@ impl Actor {
             | Action::LoadList
             | Action::CheckRunning
             | Action::PrefetchInfo
+            | Action::ListAhead(_)
             | Action::WatchPanel(..)
             | Action::PreviewPanel(_)
             | Action::WatchSystem(_)
@@ -882,10 +932,29 @@ pub fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => return,
         };
+        // several asks waiting: the lists asked for last are the ones wanted
+        let a = a.map(|first| {
+            asked.try_iter().fold(first, |last, next| if matches!(next, Action::ListAhead(_)) || !matches!(last, Action::ListAhead(_)) { next } else { last })
+        });
         if !shared.wait_idle() {
             return;
         }
         match a {
+            Some(Action::ListAhead(ats)) => {
+                let pkg = lock(&shared.pkg).clone().unwrap_or_default();
+                let player = crate::provider::for_package(&pkg).and_then(|p| p.player()).filter(|p| p.has_list());
+                for at in ats {
+                    let (Some(p), false) = (player, lock(&shared.ahead).has(&at)) else { continue };
+                    // the user's back: what they do comes first
+                    if !shared.wait_idle() {
+                        return;
+                    }
+                    if let Ok(Some(l)) = p.list_at(&tv, &at).or_fallback() {
+                        crate::tlog!("list {at}: read ahead");
+                        lock(&shared.ahead).put(&at, l);
+                    }
+                }
+            }
             Some(Action::PrefetchInfo) => {
                 // reads (and caches) every description; any one will do to start it
                 if let Some(g) = live_provider().and_then(|p| p.guide()) {
@@ -943,6 +1012,36 @@ pub fn push_lane(shared: &Shared, wake: &Sender<()>) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn lists_read_ahead_are_kept_a_while() {
+        use super::*;
+        let mut a = Ahead::default();
+        assert!(a.get("music||").is_none());
+        let l = crate::provider::ContextList {
+            title: "Music".into(),
+            kind: "folder",
+            key: "10502|".into(),
+            items: Vec::new(),
+            playing: None,
+            at: None,
+            up: None,
+            reopen: None,
+            crumbs: Vec::new(),
+            crumbs_whole: true,
+            location: None,
+            open_location: None,
+            browsed: true,
+        };
+        a.put("music||", l.clone());
+        assert!(a.has("music||") && a.get("music||").is_some_and(|x| x.title == "Music"));
+        // no more than AHEAD_MAX: the oldest goes
+        for n in 0..AHEAD_MAX + 3 {
+            a.put(&format!("music||{n}"), l.clone());
+        }
+        assert!(a.lists.len() <= AHEAD_MAX);
+        assert!(!a.has("music||"));
+    }
 
     #[test]
     fn opening_reads_now() {

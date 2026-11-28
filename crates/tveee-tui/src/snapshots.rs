@@ -1639,3 +1639,24 @@ fn esc_clears_the_filter_first() {
     a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::None);
 }
+
+#[test]
+fn reads_ahead_what_may_be_opened_next() {
+    let st = kodi_albums_browsed();
+    let (mut a, rx, h, held) = app_holding(st.clone());
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    // a browsed list arrives: the folder highlighted, and the one above
+    *held.lock().unwrap() = Arc::new(st);
+    a.st = h.state();
+    a.list_sync(Change::List);
+    let asked: Vec<Action> = rx.try_iter().filter(|x| matches!(x, Action::ListAhead(_))).collect();
+    assert_eq!(asked, vec![Action::ListAhead(vec!["music|Dummy|musicdb://albums/250/".into(), "music||".into()])]);
+    // moving: the next one (the folder above asked for again with it)
+    a.list_key(0, KeyCode::Down, KeyModifiers::NONE, &h);
+    let asked: Vec<Action> = rx.try_iter().filter(|x| matches!(x, Action::ListAhead(_))).collect();
+    assert_eq!(asked, vec![Action::ListAhead(vec!["music|A Polished Solid|musicdb://albums/251/".into(), "music||".into()])]);
+    // the same again: not asked twice
+    a.read_ahead(1);
+    assert!(!rx.try_iter().any(|x| matches!(x, Action::ListAhead(_))));
+}

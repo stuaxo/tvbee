@@ -143,6 +143,9 @@ pub enum Action {
     LoadList,
     /// Choose an item from it; its list is read again after.
     ListGo(crate::more::Go),
+    /// Lists likely to be opened next (a browsed list's folder above, the
+    /// folder highlighted): read in a lull, so opening one is at once.
+    ListAhead(Vec<String>),
     /// A plugin was turned on or off (installed again): what it offers
     /// (panels) and what's shown are read again.
     Replugged,
