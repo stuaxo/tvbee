@@ -1660,3 +1660,20 @@ fn reads_ahead_what_may_be_opened_next() {
     a.read_ahead(1);
     assert!(!rx.try_iter().any(|x| matches!(x, Action::ListAhead(_))));
 }
+
+#[test]
+fn remote_preview_says_the_tracks() {
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let line = a.track_line().expect("Kodi says its tracks");
+    assert!(line.starts_with("Audio: "), "{line}");
+    // in remote mode, with the preview open, it's under the picture
+    a.mode = Mode::Remote;
+    a.preview.open = true;
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains(&line), "{s}");
+    // player mode: the card already says it
+    a.mode = Mode::Player;
+    let s = screen(&mut a, DESKTOP);
+    assert_eq!(s.matches(&line).count(), 0, "{s}");
+}
