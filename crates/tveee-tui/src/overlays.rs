@@ -672,14 +672,15 @@ impl App {
 
     pub(super) fn draw_menu(&mut self, f: &mut Frame, sel: usize) {
         let (text, items) = self.menu_lines(sel);
-        let r = popup(f, " more ", text, Color::Cyan);
-        self.hits.push((r, Hit::Popup));
-        for (row, item) in items.into_iter().enumerate() {
-            if let Some(i) = item {
-                let y = r.y + 1 + u16::try_from(row).unwrap_or(0);
-                self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::MenuItem(i)));
+        let mut buf = LineBuf::default();
+        for (line, item) in text.into_iter().zip(items.into_iter().chain(std::iter::repeat(None))) {
+            match item {
+                Some(i) => buf.push_hit(line, Hit::MenuItem(i)),
+                None => _ = buf.push(line),
             }
         }
+        let (_, hits) = buf.popup(f, " more ", "", Color::Cyan);
+        self.hits.extend(hits);
     }
 
     /// The options dialog: a tab of options, and one of plugins.
@@ -874,21 +875,22 @@ impl App {
 
     pub(super) fn draw_confirm(&mut self, f: &mut Frame, id: &'static str, yes: bool) {
         let Some(it) = tveee_core::actions::find(&self.actions, id) else { return };
-        let mut text: Vec<Line> = it.confirm.unwrap_or("Are you sure?").lines().map(Line::from).collect();
-        text.push(Line::default());
-        let answers_row = u16::try_from(text.len()).unwrap_or(0);
+        let mut buf = LineBuf::default();
+        for l in it.confirm.unwrap_or("Are you sure?").lines() {
+            buf.push(Line::from(l));
+        }
+        buf.push(Line::default());
         let pick = |label: &'static str, on: bool| {
             let st = if on { Style::new().fg(Color::Black).bg(Color::Red).bold() } else { Style::new().reversed() };
             Span::styled(format!(" {label} "), st)
         };
-        text.push(Line::from(vec![pick("No", !yes), Span::raw("   "), pick("Yes", yes)]));
-        text.push(Line::from("y = yes   ←/→ choose   ⏎ confirm   any other key cancels").fg(Color::DarkGray));
-        let r = popup(f, &format!(" {} ", it.title), text, Color::Red);
-        self.hits.push((r, Hit::Popup));
-        let y = r.y + 1 + answers_row;
+        let answers = buf.push(Line::from(vec![pick("No", !yes), Span::raw("   "), pick("Yes", yes)]));
         // " No " then 3 spaces then " Yes "
-        self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: 4, height: 1 }, Hit::ConfirmNo));
-        self.hits.push((ratatui::layout::Rect { x: r.x + 8, y, width: 5, height: 1 }, Hit::ConfirmYes));
+        buf.spot(answers, 0, 4, Hit::ConfirmNo);
+        buf.spot(answers, 7, 5, Hit::ConfirmYes);
+        buf.push(Line::from("y = yes   ←/→ choose   ⏎ confirm   any other key cancels").fg(Color::DarkGray));
+        let (_, hits) = buf.popup(f, &format!(" {} ", it.title), "", Color::Red);
+        self.hits.extend(hits);
     }
 
     /// Items grouped under their plugin, the highlighted one reversed; and for
