@@ -413,8 +413,12 @@ fn launcher_keys() {
     assert_eq!(k(1, KeyCode::Esc), (Overlay::None, None));
     assert_eq!(k(1, KeyCode::Backspace), (Overlay::None, None));
     // switching tabs starts at the top of the other one
-    for key in [KeyCode::Tab, KeyCode::Left, KeyCode::Right] {
+    for key in [KeyCode::Tab, KeyCode::BackTab] {
         assert_eq!(k(2, key), (Overlay::Apps { tab: AppTab::Other, sel: 0 }, None));
+    }
+    // ←/→: nothing (the rows have no value to change)
+    for key in [KeyCode::Left, KeyCode::Right] {
+        assert_eq!(k(2, key), (at(2), None));
     }
     assert_eq!(apps_key(AppTab::Other, 0, KeyCode::Tab, &[]), (at(0), None));
     // letters jump, even the ones that mean something on the main screen

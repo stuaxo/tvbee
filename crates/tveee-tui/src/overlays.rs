@@ -226,10 +226,25 @@ pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
 /// A line of the help, coloured so it reads at a glance: headings bold
 /// cyan, keys yellow (the first column's, and a second column's: a short
 /// key after three spaces and before two), asides in brackets dim.
+#[cfg(test)]
 pub(super) fn help_line(line: &str) -> Line<'static> {
+    help_line_in(line, &mut 0)
+}
+
+/// Every line of the help, coloured: an aside carried on from one line to
+/// the next while its bracket is open.
+pub(super) fn help_styled(lines: &[String]) -> Vec<Line<'static>> {
+    let mut open = 0;
+    lines.iter().map(|l| help_line_in(l, &mut open)).collect()
+}
+
+/// [`help_line`], with `open` brackets still open from the lines before
+/// (and as many after it, on return).
+fn help_line_in(line: &str, open: &mut usize) -> Line<'static> {
     let c: Vec<char> = line.chars().collect();
     // a heading: " everywhere", " player mode"
     if c.first() == Some(&' ') && c.get(1).is_some_and(|x| *x != ' ') {
+        *open = 0;
         return Line::from(Span::styled(line.to_string(), Style::new().fg(Color::Cyan).bold()));
     }
     #[derive(Clone, Copy, PartialEq)]
@@ -246,7 +261,7 @@ pub(super) fn help_line(line: &str) -> Line<'static> {
         (end - at <= 9).then_some(end)
     };
     let mut i = 0;
-    let mut depth = 0usize;
+    let mut depth = *open;
     while i < c.len() {
         let after_gap = i >= 3 && c[i - 3..i].iter().all(|x| *x == ' ') && c[i] != ' ';
         // the first column (from the 4th) or a later one
@@ -268,6 +283,7 @@ pub(super) fn help_line(line: &str) -> Line<'static> {
         }
         i += 1;
     }
+    *open = depth;
     let style = |k: Kind| match k {
         Kind::Plain => Style::new(),
         Kind::Key => Style::new().fg(Color::Yellow),
@@ -599,7 +615,7 @@ impl App {
             (" keys - any key closes ", String::new())
         };
         let total = lines.len();
-        let text: Vec<Line> = lines.iter().skip(top).take(room).map(|l| help_line(l)).collect();
+        let text: Vec<Line> = help_styled(&lines).into_iter().skip(top).take(room).collect();
         let r = popup_titled(f, title, &right, text, Color::DarkGray);
         let bar = scrollbar(f, Bar::Help, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), total, top);
         self.hits.push((r, Hit::Popup));
