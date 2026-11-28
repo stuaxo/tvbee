@@ -147,6 +147,23 @@ pub struct Drawn {
     pub url: String,
 }
 
+/// The links whose text is still on screen where they were drawn: a pop-up
+/// drawn over one afterwards hides it, and writing it again (as a
+/// hyperlink) would put it on top of the pop-up.
+pub fn showing(links: &[Drawn], screen: &ratatui::buffer::Buffer) -> Vec<Drawn> {
+    links
+        .iter()
+        .filter(|l| {
+            let area = screen.area;
+            l.text.chars().enumerate().all(|(i, c)| {
+                let x = l.x + u16::try_from(i).unwrap_or(u16::MAX);
+                x < area.right() && l.y < area.bottom() && screen[(x, l.y)].symbol().starts_with(c)
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 /// Draw `links` again over themselves as terminal hyperlinks, in the style
 /// they were drawn in (cyan, underlined).
 pub fn emit(links: &[Drawn]) -> std::io::Result<()> {
