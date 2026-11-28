@@ -342,6 +342,22 @@ pub(super) fn wrap_keep(line: &str, w: usize, hang: usize) -> Vec<String> {
 }
 
 /// A bordered box centred over the screen, sized to its text. Returns where.
+/// A scrollbar down column `x` from row `y`, `height` rows tall, beside
+/// `height` of `total` rows shown from row `top` (on a pane's right border,
+/// say); nothing when they all fit.
+pub(super) fn scrollbar(f: &mut Frame, x: u16, y: u16, height: u16, total: usize, top: usize) {
+    use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+    let shown = usize::from(height);
+    if total <= shown || height == 0 {
+        return;
+    }
+    let area = ratatui::layout::Rect { x, y, width: 1, height }.intersection(f.area());
+    let max = total - shown;
+    let mut state = ScrollbarState::new(max).position(top.min(max)).viewport_content_length(shown);
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight).begin_symbol(None).end_symbol(None).track_symbol(Some("│")).thumb_symbol("┃").track_style(Style::new().fg(Color::DarkGray)).thumb_style(Style::new().fg(Color::Gray));
+    f.render_stateful_widget(bar, area, &mut state);
+}
+
 pub(super) fn popup(f: &mut Frame, title: &str, text: Vec<Line>, border: Color) -> ratatui::layout::Rect {
     popup_titled(f, title, "", text, border)
 }
