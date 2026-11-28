@@ -13,9 +13,9 @@ expression: s
 │                                                                       │          comfort   relax                    ││
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │ambi+hue  on   off                           ││
 │                                                                       │          sync Hue bulbs with the TV         ││
-│                            ┌ panel colour ──────────────────────────────────────────────┐ ▕  ▏    │                 ││
+│                            ┌ panel colour ──────────────────────────────────────────────┐ ▐  ▌    │                 ││
 │                            │Colour for left 1                                           │───────────────────────────┘│
-│                            │for   all      ▕  ▏    │             tab: the next          │───────────────────────────┐│
+│                            │for   all      ▐  ▌    │             tab: the next          │───────────────────────────┐│
 │                            │                                                            │                           ││
 │                            │                                     lighter                │org.xbmc.kodi              ││
 │                            │▐▌                                   full                   │ MB used, 310 MB free      ││
