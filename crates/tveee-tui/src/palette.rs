@@ -36,6 +36,15 @@ pub const UI: &[(&str, &str, Input)] = &[
 pub enum Item {
     Action(usize),
     Ui(usize),
+    /// What's typed is a link: open it on the TV.
+    Link,
+}
+
+/// Whether `query` is a link to open (pasted, say): a web address, or one
+/// starting www.
+pub fn is_link(query: &str) -> bool {
+    let q = query.trim();
+    !q.contains(char::is_whitespace) && (q.starts_with("http://") || q.starts_with("https://") || q.starts_with("www."))
 }
 
 /// What matches `query`, best first. Only actions that can run here (ones
@@ -76,7 +85,12 @@ pub fn palette_matches(actions: &[ActionDescriptor], query: &str) -> Vec<Item> {
 /// The palette's items for `query`, the best matches first, and among
 /// equals (or with nothing typed) the most relevant now ([`Now::rank`]).
 pub fn palette_ranked(actions: &[ActionDescriptor], query: &str, now: &Now) -> Vec<Item> {
+    // a link typed or pasted: opening it is what's wanted
+    if is_link(query) {
+        return vec![Item::Link];
+    }
     let rank = |item: &Item| match item {
+        Item::Link => 0,
         Item::Action(i) => now.rank(&actions[*i]),
         Item::Ui(_) => 2,
     };
@@ -202,6 +216,13 @@ impl App {
                     }
                     self.palette_closed();
                 }
+                Some(&Item::Link) => {
+                    let link = self.palette.query.trim().to_string();
+                    self.note = format!("opening {link}...");
+                    let _ = actions.dispatch("apps.open_link", vec![link]);
+                    self.overlay = Overlay::None;
+                    self.palette_closed();
+                }
                 None => {}
             },
             KeyCode::Backspace => {
@@ -240,6 +261,7 @@ impl App {
                     (format!("{}{more}", a.title), a.key.map(|k| format!(".{k}")).unwrap_or_default(), a.category)
                 }
                 Item::Ui(i) => (UI[i].0.to_string(), UI[i].1.to_string(), "ui"),
+                Item::Link => ("open this link on the TV".to_string(), String::new(), "apps"),
             };
             let right_text = if key.is_empty() { right.to_string() } else { format!("{key}  {right}") };
             let gap = width.saturating_sub(left.chars().count() + right_text.chars().count() + 2);
@@ -292,7 +314,7 @@ mod tests {
                 .into_iter()
                 .filter_map(|i| match i {
                     Item::Action(i) => Some(a[i].id),
-                    Item::Ui(_) => None,
+                    Item::Ui(_) | Item::Link => None,
                 })
                 .collect::<Vec<_>>()
         };
@@ -346,5 +368,12 @@ mod tests {
         assert_eq!(first, Some(Item::Action(with_wake.len() - 1)));
         // typed: the match comes first, relevance breaks ties
         assert_eq!(palette_ranked(&a, "sleep", &music).first(), Some(&Item::Action(0)));
+    }
+
+    #[test]
+    fn a_link_pasted_opens_it() {
+        assert!(is_link("https://youtu.be/gwLRWgOWhBs") && is_link("www.example.com/x") && is_link("  http://a/b  "));
+        assert!(!is_link("open http://a") && !is_link("youtube") && !is_link(""));
+        assert_eq!(palette_matches(&[], "https://youtu.be/x"), vec![Item::Link]);
     }
 }
