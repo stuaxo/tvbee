@@ -11,21 +11,21 @@ expression: "screen(&mut a, DESKTOP)"
 │audio    AAC-LC  AAC                                                   │memory   1032/1342 MB used, 310 MB free      ││
 │do        .k  next subtitles   t  list   /  search                     │1342 MB                                      ││
 │                                                                       │                                             ││
-│volume   ━━━━━━━━━━━━━━━━┌ commands ──────────────────────────────────────────────────── 21 ┐                        ││
+│volume   ━━━━━━━━━━━━━━━━┌ commands ──────────────────────────────────────────────────── 20 ┐                        ││
 │                         │> █                                                               │12 MB                   ││
 │                         │────────────────────────────────────────────────────────────────  │40                      ││
-│                         │ kodi: next subtitles                                      kodi   │────────────────────────┘│
-│                         │ kodi: next audio track                                    kodi   │                         │
+│                         │ kodi: next subtitles                                  .k  kodi   │────────────────────────┘│
+│                         │ kodi: next audio track                                .a  kodi   │                         │
 │                         │ kodi: find in the library…                                kodi   │                         │
 │                         │ volume…                                                  media   │                         │
-│                         │ sleep (standby)                                          power   │                         │
-│                         │ power off…                                               power   │                         │
+│                         │ sleep (standby)                                      .s  power   │                         │
+│                         │ power off…                                           .X  power   │                         │
 │                         │ ui: show the log (what tveee did lately)                    ui   │                         │
-│                         │ ui: all keys (help)                                         ui   │                         │
-│                         │ ui: live TV guide                                           ui   │                         │
-│                         │ ui: music visualiser: show or hide it (Kodi)                ui   │                         │
-│                         │ ui: the list the app shows (Kodi's folder)                  ui   │                         │
-│                         │ ui: launch an app                                           ui   │                         │
+│                         │ ui: all keys (help)                                      ?  ui   │                         │
+│                         │ ui: live TV guide                                        g  ui   │                         │
+│                         │ ui: the list the app shows (Kodi's folder)               t  ui   │                         │
+│                         │ ui: launch an app                                        a  ui   │                         │
+│                         │ ui: search the app in front                              /  ui   │                         │
 │                         │                                                                  │                         │
 │                         │type to find   …: asks first                                      │                         │
 │                         └──────────────────────────────────────────────────────────────────┘                         │

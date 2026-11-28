@@ -11,22 +11,23 @@ const ROWS: usize = 12;
 
 /// What the ui itself can do, listed in the palette with the plugins'
 /// actions (as ui: ...).
-pub const UI: &[(&str, Input)] = &[
-    ("ui: show the log (what tveee did lately)", Input::ShowLogs),
-    ("ui: all keys (help)", Input::ToggleHelp),
-    ("ui: live TV guide", Input::OpenGuide),
-    ("ui: music visualiser: show or hide it (Kodi)", Input::ToggleVisualiser),
-    ("ui: the list the app shows (Kodi's folder)", Input::OpenList),
-    ("ui: launch an app", Input::OpenApps),
-    ("ui: search the app in front", Input::OpenSearch),
-    ("ui: options", Input::OpenOptions),
-    ("ui: preview on/off", Input::TogglePreview),
-    ("ui: system info on/off", Input::ToggleInfo),
-    ("ui: show the whole link / shorten it", Input::ToggleUrl),
-    ("ui: copy the link", Input::CopyUrl),
-    ("ui: open the link in the browser", Input::OpenUrl),
-    ("ui: remote / player mode", Input::ToggleMode),
-    ("ui: quit", Input::Quit),
+/// The ui's own entries: what it says, its key on the main screen ("": none),
+/// and what it does. (The music visualiser is the media.visualiser action.)
+pub const UI: &[(&str, &str, Input)] = &[
+    ("ui: show the log (what tveee did lately)", "", Input::ShowLogs),
+    ("ui: all keys (help)", "?", Input::ToggleHelp),
+    ("ui: live TV guide", "g", Input::OpenGuide),
+    ("ui: the list the app shows (Kodi's folder)", "t", Input::OpenList),
+    ("ui: launch an app", "a", Input::OpenApps),
+    ("ui: search the app in front", "/", Input::OpenSearch),
+    ("ui: options", ",", Input::OpenOptions),
+    ("ui: preview on/off", "v", Input::TogglePreview),
+    ("ui: system info on/off", "i", Input::ToggleInfo),
+    ("ui: show the whole link / shorten it", "u", Input::ToggleUrl),
+    ("ui: copy the link", "y", Input::CopyUrl),
+    ("ui: open the link in the browser", "", Input::OpenUrl),
+    ("ui: remote / player mode", "tab", Input::ToggleMode),
+    ("ui: quit", "q", Input::Quit),
 ];
 
 /// A palette entry: a plugin's action (index into the actions), or
@@ -80,7 +81,7 @@ pub fn palette_ranked(actions: &[ActionDescriptor], query: &str, now: &Now) -> V
         .enumerate()
         .filter(|(_, a)| matches!(a.run, Run::Do(_)))
         .map(|(i, a)| (Item::Action(i), format!("{} {}", a.title, a.id)))
-        .chain(UI.iter().enumerate().map(|(i, (title, _))| (Item::Ui(i), title.to_string())));
+        .chain(UI.iter().enumerate().map(|(i, (title, _, _))| (Item::Ui(i), title.to_string())));
     let query = query.trim();
     if query.is_empty() {
         // the most relevant first; the rest in their order
@@ -191,7 +192,7 @@ impl App {
                 }
                 Some(&Item::Ui(i)) => {
                     self.overlay = Overlay::None;
-                    if self.apply(UI[i].1.clone(), actions) {
+                    if self.apply(UI[i].2.clone(), actions) {
                         self.quit = true;
                     }
                     self.palette_closed();
@@ -225,19 +226,22 @@ impl App {
         // a window of ROWS around the highlight
         let first = sel.saturating_sub(ROWS - 1).min(list.len().saturating_sub(ROWS));
         for (row, &item) in list.iter().enumerate().skip(first).take(ROWS) {
-            let (left, right) = match item {
+            // the right column: its key (a menu key after `.`), then its category,
+            // so the palette teaches the shortcuts
+            let (left, key, right) = match item {
                 Item::Action(i) => {
                     let a = &self.actions[i];
                     let more = if needs_input(a) || a.confirm.is_some() { "…" } else { "" };
-                    (format!("{}{more}", a.title), a.category)
+                    (format!("{}{more}", a.title), a.key.map(|k| format!(".{k}")).unwrap_or_default(), a.category)
                 }
-                Item::Ui(i) => (UI[i].0.to_string(), "ui"),
+                Item::Ui(i) => (UI[i].0.to_string(), UI[i].1.to_string(), "ui"),
             };
-            let gap = width.saturating_sub(left.chars().count() + right.chars().count() + 2);
+            let right_text = if key.is_empty() { right.to_string() } else { format!("{key}  {right}") };
+            let gap = width.saturating_sub(left.chars().count() + right_text.chars().count() + 2);
             let line = Line::from(vec![
                 Span::raw(format!(" {left}")),
                 Span::raw(" ".repeat(gap)),
-                Span::styled(format!("{right} "), Style::new().fg(Color::DarkGray)),
+                Span::styled(format!("{right_text} "), Style::new().fg(Color::DarkGray)),
             ]);
             text.push(if row == sel { line.reversed() } else { line });
         }
