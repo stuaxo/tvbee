@@ -52,6 +52,8 @@ pub enum Hit {
     LogLine(usize),
     /// Item N of the list pane.
     ListRow(usize),
+    /// Breadcrumb N of the list pane: back to that list.
+    Crumb(usize),
 }
 
 /// Columns `s` takes.

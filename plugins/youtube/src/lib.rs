@@ -137,8 +137,9 @@ impl tveee_core::provider::Player for YouTube {
         let Some((link, pos)) = link_and_position(tv) else { return Outcome::Handled(None) };
         // which chapter: only from what's cached (never yt-dlp every refresh)
         let at = cached_details(&link).and_then(|d| Some(d.chapters[chapter_at(&d.chapters, pos?)?].clone()));
-        let (focus_id, focus_label) = at.map_or_else(Default::default, |c| (chapter_id(&c), c.title));
-        Outcome::Handled(Some(tveee_core::provider::ListPlace { key: link, focus_label, focus_id }))
+        // the chapter playing (YouTube has no highlight of its own)
+        let playing_id = at.map(|c| chapter_id(&c)).unwrap_or_default();
+        Outcome::Handled(Some(tveee_core::provider::ListPlace { key: link, focus_label: String::new(), focus_id: String::new(), playing_id }))
     }
     fn list(&self, tv: &Tv) -> Outcome<tveee_core::provider::ContextList> {
         let Some((link, pos)) = link_and_position(tv) else { return Outcome::Fallback };
@@ -538,7 +539,7 @@ pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_
         return None;
     }
     let title = if d.chapters.is_empty() { "Links" } else { "Chapters and links" };
-    Some(ContextList { title: title.into(), kind: "chapters", key: link.to_string(), items, at: pos.and_then(|p| chapter_at(&d.chapters, p)) })
+    Some(ContextList { title: title.into(), kind: "chapters", key: link.to_string(), items, playing: pos.and_then(|p| chapter_at(&d.chapters, p)), at: None, up: None, reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None })
 }
 
 /// The video playing: its link and position (devtools).
@@ -630,8 +631,8 @@ mod tests {
         assert_eq!(parts, [Some("Chapters"), Some("Chapters"), Some("Links"), Some("Links")]);
         assert_eq!(l.items[1].go, Go::Seek(54.0));
         assert_eq!(l.items[1].meta.as_deref(), Some("0:54"));
-        // the chapter playing at 1:00 is the second
-        assert_eq!((l.at, l.kind, l.key.as_str()), (Some(1), "chapters", link));
+        // the chapter playing at 1:00 is the second (no highlight: YouTube has none)
+        assert_eq!((l.playing, l.at, l.kind, l.key.as_str()), (Some(1), None, "chapters", link));
         assert_eq!(chapter_at(&d.chapters, 10.0), Some(0));
         // nothing to list
         assert!(chapters_list(link, &Details::default(), None).is_none());

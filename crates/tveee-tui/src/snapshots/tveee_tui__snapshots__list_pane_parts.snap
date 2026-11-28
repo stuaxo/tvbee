@@ -24,7 +24,7 @@ expression: s
 │       │ ─ Files                                                                                              │       │
 │       │   Exit Music.flac                                                                             4:24   │       │
 │       │                                                                                                      │       │
-│       │↑↓ pgup pgdn home end  ⏎/click choose  type to filter  esc closes                                     │       │
+│       │↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  type to filter  esc closes                             │       │
 │       └──────────────────────────────────────────────────────────────────────────────────────────────────────┘       │
 │                                                                                                                      │
 │                                                                                                                      │

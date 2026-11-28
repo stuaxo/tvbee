@@ -303,8 +303,36 @@ pub struct ContextList {
     /// its items only need reading again when this changes.
     pub key: String,
     pub items: Vec<ListItem>,
-    /// The highlighted (or playing) item, if the app says.
+    /// The item the app has highlighted (its cursor), if it says: `›`.
     pub at: Option<usize>,
+    /// The item playing now, if one of them is (a song, the chapter
+    /// playing): `▶`, the same in every list (the guide's channel on now).
+    pub playing: Option<usize>,
+    /// The list it's in, if it's in one (Kodi's ".." row): that list's
+    /// [`ContextList::key`], and how to go there.
+    pub up: Option<(String, crate::more::Go)>,
+    /// How to come back to this list later (from further in): for the
+    /// breadcrumbs.
+    pub reopen: Option<crate::more::Go>,
+    /// The lists it's in, named from where it is (Kodi's path: a share's
+    /// folders, or "Music › Albums"), outermost first, not itself.
+    pub crumbs: Vec<ListCrumb>,
+    /// Whether [`ContextList::crumbs`] go all the way to it (a share's
+    /// path); else the ones between are only known by having gone through.
+    pub crumbs_whole: bool,
+    /// Where it is, as a path that can be typed (Kodi's folder path).
+    pub location: Option<String>,
+    /// How to open a typed location: a link with `{}` for it.
+    pub open_location: Option<String>,
+}
+
+/// A step on the way to a list (a breadcrumb): its name, its list's key,
+/// and how to open it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListCrumb {
+    pub title: String,
+    pub key: String,
+    pub go: Option<crate::more::Go>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -327,7 +355,12 @@ pub struct ListItem {
 impl ContextList {
     /// The item the app has highlighted, by its id, else its label.
     pub fn find(&self, p: &ListPlace) -> Option<usize> {
-        self.items.iter().position(|i| !p.focus_id.is_empty() && i.id == p.focus_id).or_else(|| self.items.iter().position(|i| i.label == p.focus_label))
+        self.items.iter().position(|i| !p.focus_id.is_empty() && i.id == p.focus_id).or_else(|| self.items.iter().position(|i| !p.focus_label.is_empty() && i.label == p.focus_label))
+    }
+
+    /// The item playing now, by its id (empty: none).
+    pub fn find_playing(&self, id: &str) -> Option<usize> {
+        (!id.is_empty()).then(|| self.items.iter().position(|i| i.id == id)).flatten()
     }
 }
 
@@ -339,6 +372,8 @@ pub struct ListPlace {
     pub key: String,
     pub focus_label: String,
     pub focus_id: String,
+    /// The id of the item playing now ([`ListItem::id`]), if one is.
+    pub playing_id: String,
 }
 
 /// An app tveee can ask what it's playing and tell what to do, through an
