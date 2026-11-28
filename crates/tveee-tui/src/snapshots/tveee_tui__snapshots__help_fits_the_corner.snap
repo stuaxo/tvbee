@@ -1,9 +1,9 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 208
+assertion_line: 205
 expression: s
 ---
-┌ keys - any other key closes ───────────────── 1-14 of 80 ┐
+┌ keys - any other key closes ───────────────── 1-14 of 82 ┐
 │ everywhere                                               ┃
 │   space p  play/pause                                    ┃
 │   ⌫        back                                          │

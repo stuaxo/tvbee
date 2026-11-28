@@ -1580,3 +1580,35 @@ fn remote_mode_findable_when_narrow() {
     assert!(!a.click(u16::try_from(x).unwrap(), 0, &h));
     assert_eq!(a.mode, Mode::Remote);
 }
+
+#[test]
+fn system_panel_pauses() {
+    let st = kodi_paused();
+    let (mut a, rx, h, held) = app_holding(st.clone());
+    a.opts = Some(Vec::new());
+    a.info = Some(true);
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("I pauses"), "{s}");
+    assert!(rx.try_iter().any(|x| x == Action::WatchSystem(true)));
+    // I: paused, the TV no longer asked for the figures, the ones shown kept
+    a.apply(Input::PauseInfo, &h);
+    let mut later = st.clone();
+    if let Some(s) = later.snap.as_mut() {
+        s.system.load = Some((9.99, 9.99, 9.99));
+    }
+    *held.lock().unwrap() = Arc::new(later);
+    a.st = h.state();
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("paused, I resumes") && !s.contains("9.99 9.99"), "the panel kept: {s}");
+    assert!(rx.try_iter().any(|x| x == Action::WatchSystem(false)));
+    // again: updating, the new figures shown
+    a.apply(Input::PauseInfo, &h);
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("9.99 9.99") && s.contains("I pauses"), "{s}");
+    assert!(rx.try_iter().any(|x| x == Action::WatchSystem(true)));
+    // closed: not paused when opened again
+    a.apply(Input::PauseInfo, &h);
+    a.apply(Input::ToggleInfo, &h);
+    a.apply(Input::ToggleInfo, &h);
+    assert!(screen(&mut a, DESKTOP).contains("I pauses"));
+}
