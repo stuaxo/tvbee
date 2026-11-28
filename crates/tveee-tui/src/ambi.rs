@@ -41,6 +41,21 @@ fn asks(r: &Row) -> bool {
     !r.options.is_empty() && r.options.iter().all(|o| matches!(o.run, Run::Ask { .. }))
 }
 
+/// The Ambilight panel's own state.
+pub struct AmbiView {
+    /// Whether the panel is open.
+    pub open: bool,
+    /// Where the colour picker is (column, row).
+    pub pick: (usize, usize),
+}
+
+impl Default for AmbiView {
+    fn default() -> Self {
+        // the picker starts on its full colours' row
+        AmbiView { open: false, pick: (0, 1) }
+    }
+}
+
 impl App {
     /// The panel `l` shows: the first this TV has.
     pub(super) fn panel_id(&self) -> Option<&'static str> {
@@ -131,7 +146,7 @@ impl App {
     /// goes in its field (a name, #hex), ⏎ sets what's typed or else the
     /// colour picked, Esc goes back to the panel.
     pub(super) fn ambi_ask_key(&mut self, row: usize, col: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
-        let (gx, gy) = self.pick;
+        let (gx, gy) = self.ambi.pick;
         match code {
             KeyCode::Esc => self.overlay = Overlay::Ambilight { row, col },
             KeyCode::Enter => self.ambi_set(row, col, actions),
@@ -141,11 +156,11 @@ impl App {
                 let to = if code == KeyCode::Tab { (col + 1) % n } else { (col + n - 1) % n };
                 self.overlay = Overlay::AmbiColour { row, col: to };
             }
-            KeyCode::Left => self.pick = ((gx + pick_width(gy) - 1) % pick_width(gy), gy),
-            KeyCode::Right => self.pick = ((gx + 1) % pick_width(gy), gy),
+            KeyCode::Left => self.ambi.pick = ((gx + pick_width(gy) - 1) % pick_width(gy), gy),
+            KeyCode::Right => self.ambi.pick = ((gx + 1) % pick_width(gy), gy),
             KeyCode::Up | KeyCode::Down => {
                 let gy = if code == KeyCode::Up { (gy + PICK_HEIGHT - 1) % PICK_HEIGHT } else { (gy + 1) % PICK_HEIGHT };
-                self.pick = (gx.min(pick_width(gy) - 1), gy);
+                self.ambi.pick = (gx.min(pick_width(gy) - 1), gy);
             }
             KeyCode::Backspace => {
                 self.prompt.pop();
@@ -161,7 +176,7 @@ impl App {
     /// to try another; Esc goes back to the panel.
     pub(super) fn ambi_set(&mut self, row: usize, col: usize, actions: &Handle) {
         let typed = self.prompt.trim().to_string();
-        let colour = if typed.is_empty() { hex(pick_colour(self.pick.0, self.pick.1)) } else { typed };
+        let colour = if typed.is_empty() { hex(pick_colour(self.ambi.pick.0, self.ambi.pick.1)) } else { typed };
         let rows = self.ambi_rows();
         if let Some(Run::Ask { id, args, .. }) = rows.get(row).and_then(|r| r.options.get(col)).map(|o| &o.run) {
             let mut args = args.clone();
@@ -340,7 +355,7 @@ impl App {
             let mut spans: Vec<Span> = Vec::new();
             let mut x = 0;
             for gx in 0..pick_width(gy) {
-                let on = self.pick == (gx, gy) && self.prompt.is_empty();
+                let on = self.ambi.pick == (gx, gy) && self.prompt.is_empty();
                 let colour = pick_colour(gx, gy);
                 let dark = u32::from(colour.0) * 3 + u32::from(colour.1) * 6 + u32::from(colour.2) < 1280;
                 let label = if gy == SPECIALS {
@@ -384,7 +399,7 @@ impl App {
         cmp.push(Span::styled("  →  ", dim));
         // what's typed, as soon as it's a colour tveee knows
         match (self.prompt.trim(), tveee_core::panel::parse_colour(&self.prompt)) {
-            ("", _) => cmp.push(Span::styled("    ", block(pick_colour(self.pick.0, self.pick.1)))),
+            ("", _) => cmp.push(Span::styled("    ", block(pick_colour(self.ambi.pick.0, self.ambi.pick.1)))),
             (_, Some(c)) => {
                 cmp.push(Span::styled("    ", block(c)));
                 cmp.push(Span::styled(format!(" {}", hex(c)), dim));

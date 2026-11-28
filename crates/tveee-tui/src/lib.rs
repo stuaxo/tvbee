@@ -50,6 +50,14 @@ use tveee_core::engine::*;
 
 const CAT: &str = "ui";
 struct App {
+    /// The guide's own state (where it's scrolled to, its details panel).
+    guide: guide::GuideView,
+    /// The preview panel's own state.
+    preview: preview::PreviewPane,
+    /// The Ambilight panel's own state.
+    ambi: ambi::AmbiView,
+    /// Scrollbars: one being dragged, and the rows they pick from.
+    bars: drawing::Bars,
     /// The list pane's own state (its breadcrumbs, a typed location, ...).
     list: ctxlist::ListPane,
     /// The log pop-up's own state.
@@ -77,20 +85,12 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
-    /// Where the colour picker is (column, row).
-    pick: (usize, usize),
     /// Where the progress bar stays after a pause, seek or stop asked for
     /// here, until the next read says what it's doing (no prediction).
     frozen: Option<f64>,
     /// The file name ⏎ was pressed for that's there already (⏎ again
     /// writes over it).
     save_confirm: Option<String>,
-    /// A scrollbar being dragged (until the button's let go, the mouse is
-    /// its): it, and where in its thumb it was grabbed.
-    bar_drag: Option<(drawing::BarAt, u16)>,
-    /// Which item each row of the list pane or options is (None: a
-    /// heading, a gap), as last drawn: a dragged scrollbar picks by row.
-    bar_rows: Vec<Option<usize>>,
     /// tveee's options as this app reads them: None, the saved ones; tests
     /// give each app its own (never the real file, nor each other's).
     opts: Option<Vec<(String, bool)>>,
@@ -116,32 +116,8 @@ struct App {
     settling: Option<Settling>,
     /// Off (`--no-settle`): show every state the TV reports, as it comes.
     settle: bool,
-    /// The preview panel: open or not, its picture (ready to draw), where it
-    /// came from, and what it's doing.
-    preview_open: bool,
-    preview: Option<ratatui_image::protocol::StatefulProtocol>,
-    preview_source: &'static str,
-    preview_note: String,
     /// How this terminal shows pictures (asked once at the start).
     picker: Option<ratatui_image::picker::Picker>,
-    /// Whether the Ambilight panel is open.
-    ambi_open: bool,
-    /// How many GUIDE_STEPs ahead of now the guide shows.
-    guide_later: i64,
-    /// Where the grid's left edge is drawn now (Unix seconds); it slides
-    /// toward where it should be when scroll animations are on.
-    guide_view: i64,
-    /// When the slide last moved.
-    guide_slid: Instant,
-    /// The details panel, and how far it's scrolled.
-    details: Details,
-    details_scroll: usize,
-    /// The programme the details are for (channel, start), to start each
-    /// one from the top.
-    details_of: Option<(u32, i64)>,
-    /// Descriptions asked for; `want_info` is the next to ask for.
-    infos_asked: std::collections::HashSet<(u32, i64)>,
-    want_info: Option<(u32, i64)>,
     /// Something asked to quit (the palette's ui: quit).
     quit: bool,
     /// The link (what's on's URL) shown whole, not shortened to fit.
@@ -302,7 +278,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
             dirty = false;
         }
         // drawing the details panel can find a description it needs
-        if let Some((ch, start)) = app.want_info.take() {
+        if let Some((ch, start)) = app.guide.want_info.take() {
             let _ = actions.send(Action::LoadInfo(ch, start));
         }
         // a short wait, so news from the TV shows at once (keys wake it anyway);
@@ -518,14 +494,15 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            guide: Default::default(),
+            preview: Default::default(),
+            ambi: Default::default(),
+            bars: Default::default(),
             list: Default::default(),
             log: Default::default(),
             options: Default::default(),
-            pick: (0, 1),
             frozen: None,
             save_confirm: None,
-            bar_drag: None,
-            bar_rows: Vec::new(),
             opts: None,
             system_watching: false,
             under: None,
@@ -536,20 +513,7 @@ impl App {
             search_targets: Vec::new(),
             settling: None,
             settle,
-            ambi_open: false,
-            preview_open: false,
-            preview: None,
-            preview_source: "",
-            preview_note: String::new(),
             picker: None,
-            guide_later: 0,
-            guide_view: 0,
-            guide_slid: Instant::now(),
-            details: Details::Closed,
-            details_scroll: 0,
-            details_of: None,
-            infos_asked: std::collections::HashSet::new(),
-            want_info: None,
             quit: false,
             url_full: false,
             links: Vec::new(),
@@ -593,15 +557,15 @@ impl App {
             CoreEvent::Preview(p) => {
                 let picker = self.picker.get_or_insert_with(ratatui_image::picker::Picker::halfblocks);
                 if let Some(img) = image::RgbImage::from_raw(p.width, p.height, p.rgb) {
-                    self.preview = Some(picker.new_resize_protocol(image::DynamicImage::ImageRgb8(img)));
-                    self.preview_source = p.source;
+                    self.preview.image = Some(picker.new_resize_protocol(image::DynamicImage::ImageRgb8(img)));
+                    self.preview.source = p.source;
                 }
             }
             CoreEvent::PreviewNote(n) => {
-                if !n.is_empty() && n != self.preview_note {
+                if !n.is_empty() && n != self.preview.note {
                     tveee_core::tlog!("preview: {n}");
                 }
-                self.preview_note = n;
+                self.preview.note = n;
             }
             CoreEvent::AskPin => {
                 self.prompt.clear();
@@ -689,26 +653,26 @@ impl App {
                 self.note = "no Ambilight here that tveee can control".into();
             }
             Input::ToggleAmbilight => {
-                self.ambi_open = !self.ambi_open;
+                self.ambi.open = !self.ambi.open;
                 if let Some(id) = self.panel_id() {
-                    let _ = actions.send(Action::WatchPanel(id, self.ambi_open));
+                    let _ = actions.send(Action::WatchPanel(id, self.ambi.open));
                 }
             }
             Input::TogglePreview => {
-                self.preview_open = !self.preview_open;
-                if !self.preview_open {
-                    (self.preview, self.preview_source) = (None, "");
-                    self.preview_note.clear();
+                self.preview.open = !self.preview.open;
+                if !self.preview.open {
+                    (self.preview.image, self.preview.source) = (None, "");
+                    self.preview.note.clear();
                 }
-                let _ = actions.send(Action::PreviewPanel(self.preview_open));
+                let _ = actions.send(Action::PreviewPanel(self.preview.open));
             }
             Input::AmbilightDialog if self.panel_id().is_none() => {
                 self.note = "no Ambilight here that tveee can control".into();
             }
             Input::AmbilightDialog => {
                 // the panel's reads feed the dialog
-                if let (false, Some(id)) = (self.ambi_open, self.panel_id()) {
-                    self.ambi_open = true;
+                if let (false, Some(id)) = (self.ambi.open, self.panel_id()) {
+                    self.ambi.open = true;
                     let _ = actions.send(Action::WatchPanel(id, true));
                 }
                 let col = self.ambi_rows().first().and_then(|r| r.current).unwrap_or(0);
@@ -889,12 +853,12 @@ impl App {
                     let cell = m.row.saturating_sub(b.area.y);
                     let (start, len) = b.thumb();
                     let grab = if (start..start + len).contains(&cell) { cell - start } else { len / 2 };
-                    self.bar_drag = Some((b, grab));
+                    self.bars.drag = Some((b, grab));
                     self.drag_bar(m.row);
                 }
             }
-            MouseEventKind::Drag(MouseButton::Left) if self.bar_drag.is_some() => self.drag_bar(m.row),
-            MouseEventKind::Up(MouseButton::Left) if self.bar_drag.is_some() => self.bar_drag = None,
+            MouseEventKind::Drag(MouseButton::Left) if self.bars.drag.is_some() => self.drag_bar(m.row),
+            MouseEventKind::Up(MouseButton::Left) if self.bars.drag.is_some() => self.bars.drag = None,
             // the log's lines: shift+click selects to there; a drag selects
             MouseEventKind::Down(MouseButton::Left)
                 if matches!((self.overlay, self.hit_at(m.column, m.row)), (Overlay::Logs { .. }, Some(Hit::LogLine(_)))) =>
@@ -930,7 +894,7 @@ impl App {
     /// The scrollbar being dragged, with the mouse at row `y`: its pane
     /// scrolled to match.
     fn drag_bar(&mut self, y: u16) {
-        let Some((b, grab)) = self.bar_drag else { return };
+        let Some((b, grab)) = self.bars.drag else { return };
         let top = b.top_at(i32::from(y) - i32::from(b.area.y) - i32::from(grab));
         let room = usize::from(b.area.height);
         // the row in the middle of what's to be shown: the nearest item to
@@ -951,17 +915,17 @@ impl App {
                 self.overlay = Overlay::Logs { at: Some(cur), from };
             }
             (drawing::Bar::List, Overlay::List { .. }) => {
-                if let Some(i) = middle(&self.bar_rows) {
+                if let Some(i) = middle(&self.bars.rows) {
                     self.overlay = Overlay::List { sel: i };
                 }
             }
             (drawing::Bar::Options, Overlay::Options(_)) => {
-                if let Some(i) = middle(&self.bar_rows) {
+                if let Some(i) = middle(&self.bars.rows) {
                     self.overlay = Overlay::Options(i);
                 }
             }
             // the pane closed under it
-            _ => self.bar_drag = None,
+            _ => self.bars.drag = None,
         }
     }
 
@@ -998,7 +962,7 @@ impl App {
             (Overlay::Options(_), Some(Hit::Popup)) => {}
             (Overlay::Options(_), _) => self.overlay = Overlay::None,
             (Overlay::Guide { .. }, Some(Hit::Details(click))) => {
-                self.details = match click {
+                self.guide.details = match click {
                     DetailsClick::Open => Details::Open,
                     DetailsClick::Focus => Details::Focused,
                     DetailsClick::Unfocus => Details::Open,
@@ -1007,8 +971,8 @@ impl App {
             }
             (Overlay::Guide { .. }, Some(Hit::GuideStar(id))) => self.toggle_favourite(id, actions),
             (Overlay::Guide { .. }, Some(Hit::GuideRow(id))) => {
-                if self.details == Details::Focused {
-                    self.details = Details::Open;
+                if self.guide.details == Details::Focused {
+                    self.guide.details = Details::Open;
                 }
                 self.watch_channel(id, actions);
             }
@@ -1077,7 +1041,7 @@ impl App {
             (Overlay::Ambilight { .. }, Some(Hit::Popup)) => {}
             (Overlay::Ambilight { .. }, _) => self.overlay = Overlay::None,
             (Overlay::AmbiColour { row, col }, Some(Hit::AmbiPick(x, y))) => {
-                self.pick = (x, y);
+                self.ambi.pick = (x, y);
                 self.prompt.clear();
                 self.ambi_set(row, col, actions);
             }

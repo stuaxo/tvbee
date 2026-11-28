@@ -54,6 +54,17 @@ impl BarAt {
     }
 }
 
+/// The scrollbars' state.
+#[derive(Default)]
+pub struct Bars {
+    /// One being dragged (until the button's let go, the mouse is its): it,
+    /// and where in its thumb it was grabbed.
+    pub drag: Option<(BarAt, u16)>,
+    /// Which item each row of the list pane or options is (None: a heading,
+    /// a gap), as last drawn: a dragged scrollbar picks by row.
+    pub rows: Vec<Option<usize>>,
+}
+
 /// Something on screen that responds to a click.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Hit {
@@ -580,12 +591,12 @@ impl App {
             (panel, top)
         };
         let mut body = body;
-        if self.preview_open {
+        if self.preview.open {
             let (panel, top) = below(body, (body.height / 2).clamp(6, 14));
             self.draw_preview(f, panel);
             body = top;
         }
-        if self.ambi_open && self.panel_id().is_some() {
+        if self.ambi.open && self.panel_id().is_some() {
             let (panel, top) = below(body, self.ambilight_height(body.width));
             self.draw_ambilight(f, panel);
             body = top;
@@ -617,14 +628,14 @@ impl App {
         {
             self.draw_dpad(f, r);
         }
-        if self.preview_open {
+        if self.preview.open {
             // about 16:9 in cells twice as tall as wide, and a border
             let want = (side.width.saturating_sub(2) * 9 / 32 + 3).max(6);
             if let Some(r) = take(want) {
                 self.draw_preview(f, r);
             }
         }
-        if self.ambi_open
+        if self.ambi.open
             && self.panel_id().is_some()
             && let Some(r) = take(self.ambilight_height(side.width))
         {
