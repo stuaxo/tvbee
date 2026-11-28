@@ -387,7 +387,7 @@ impl App {
         }
         text.push(Line::default());
         text.push(Line::from(cmp));
-        text.push(Line::from("arrows or click pick  type a name or #hex  ⏎ set  esc back").fg(Color::DarkGray));
+        text.push(Line::from("type a name or #hex").fg(Color::DarkGray));
         let r = popup(f, &format!(" {} colour ", self.panel_title()), text, Color::Yellow);
         self.hits.push((r, Hit::Popup));
         for (line, x, w, gx, gy) in spots {

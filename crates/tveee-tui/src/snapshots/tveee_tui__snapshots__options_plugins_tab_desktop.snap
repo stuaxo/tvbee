@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 417
+assertion_line: 424
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -12,22 +12,22 @@ expression: s
 │do        t  list   /  search                                          │1342 MB                                      ││
 │                                                                       │                                             ││
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │last 0s                                      ││
-│              ┌ options ──────────────────────────────────────────────────────────────────────────────┐              ││
-│              │ Options   Plugins                                                                     │              ││
-│              │                                                                                       │──────────────┘│
-│              │ vendor                                                                                │               │
-│              │ [x] philips               Philips TV features via the JointSpace API  (auto)          │               │
-│              │ [x] kodi                  Kodi: what it's playing, exact seeking                      │               │
-│              │ [ ] youtube               the YouTube app: what's on, search  (auto)                  │               │
-│              │                                                                                       │               │
-│              │ built in (always on)                                                                  │               │
-│              │ [x] apps                  launching and managing Android apps                         │               │
-│              │ [x] media                 playback keys, volume and mute                              │               │
-│              │ [x] power                 sleep, wake, reboot, shutdown                               │               │
-│              │                                                                                       │               │
-│              │↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes  │               │
-│              │changes apply from tveee's next start                                                  │               │
-│              └───────────────────────────────────────────────────────────────────────────────────────┘               │
+│                  ┌ options ──────────────────────────────────────────────────────────────────────┐                  ││
+│                  │ Options   Plugins                                                             │                  ││
+│                  │                                                                               │──────────────────┘│
+│                  │ vendor                                                                        │                   │
+│                  │ [x] philips               Philips TV features via the JointSpace API  (auto)  │                   │
+│                  │ [x] kodi                  Kodi: what it's playing, exact seeking              │                   │
+│                  │ [ ] youtube               the YouTube app: what's on, search  (auto)          │                   │
+│                  │                                                                               │                   │
+│                  │ built in (always on)                                                          │                   │
+│                  │ [x] apps                  launching and managing Android apps                 │                   │
+│                  │ [x] media                 playback keys, volume and mute                      │                   │
+│                  │ [x] power                 sleep, wake, reboot, shutdown                       │                   │
+│                  │                                                                               │                   │
+│                  │space toggles  a: auto (found on the TV)  tab: options                         │                   │
+│                  │changes apply from tveee's next start                                          │                   │
+│                  └───────────────────────────────────────────────────────────────────────────────┘                   │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

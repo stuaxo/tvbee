@@ -195,7 +195,7 @@ impl App {
             (Some(_), Some(_)) => format!(" log - {picked} lines selected ", ),
             (Some(cur), None) => format!(" log - line {} of {} ", cur - first + 1, lines.len()),
         };
-        let keys = if from.is_some() { " y/⏎ copy them  esc lets go  s save the log " } else { " ↑↓ pgup pgdn home  shift/v select  y copy  s save  end: newest  esc closes " };
+        let keys = if from.is_some() { " y copy them  s save the log " } else { " shift/v select  y copy  s save  end follows new lines " };
         let block = Block::bordered().title(title).title_bottom(Line::from(keys).right_aligned()).border_style(Style::new().fg(Color::DarkGray));
         f.render_widget(Paragraph::new(shown).block(block), r);
         let bar = scrollbar(f, Bar::Log, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), lines.len(), top.saturating_sub(first));
@@ -212,7 +212,7 @@ impl App {
             Line::from("Save the log (all the lines kept) to:"),
             Line::from(vec![Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray))]),
             Line::default(),
-            Line::from("⏎ save   esc back   ~/ is your home; else where tveee was started").fg(Color::DarkGray),
+            Line::from("~/ is your home; else where tveee was started").fg(Color::DarkGray),
         ];
         let r = popup(f, " save the log ", text, Color::Blue);
         self.hits.push((r, Hit::Popup));

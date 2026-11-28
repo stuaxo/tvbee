@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 1195
+assertion_line: 1198
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -16,14 +16,14 @@ expression: s
 │                                                                       │load     4.82 3.10 2.40                      ││
 │                                                                       └─────────────────────────────────────────────┘│
 │                                                                                                                      │
-│┌ Albums (Kodi) ──────────────────────────────────────────────────────────────────────────────────────────── 2 of 3 ┐ │
-││type to filter                                                                                                     │ │
-││   Dummy/                                                                                Portishead                │ │
-││   A Polished Solid/                                                                    Luke Vibert                │ │
-││   Mezzanine/                                                                        Massive Attack                │ │
-││                                                                                                                   │ │
-││↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  ^L location  ^S sync folder: off  type to filter  esc closes  │ │
-│└───────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
+│       ┌ Albums (Kodi) ─────────────────────────────────────────────────────────────────────────────── 2 of 3 ┐       │
+│       │type to filter                                                                                        │       │
+│       │   Dummy/                                                                                Portishead   │       │
+│       │   A Polished Solid/                                                                    Luke Vibert   │       │
+│       │   Mezzanine/                                                                        Massive Attack   │       │
+│       │                                                                                                      │       │
+│       │⌫/alt+↑ up  ^L location  ^S sync folder: off  type to filter                                          │       │
+│       └──────────────────────────────────────────────────────────────────────────────────────────────────────┘       │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

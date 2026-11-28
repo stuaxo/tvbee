@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 867
+assertion_line: 872
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -13,21 +13,21 @@ expression: s
 │                                                                       │          comfort   relax                    ││
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │ambi+hue  on   off                           ││
 │                                                                       │          sync Hue bulbs with the TV         ││
-│                            ┌ panel colour ──────────────────────────────────────────────┐         │                 ││
-│                            │Colour for every light                                      │───────────────────────────┘│
-│                            │for  ▕all▏             │             tab: the next          │───────────────────────────┐│
-│                            │                                                            │                           ││
-│                            │                                     lighter                │org.xbmc.kodi              ││
-│                            │                                     full                   │ MB used, 310 MB free      ││
-│                            │                                     darker                 │                           ││
-│                            │ white   warm   off                                         │                           ││
-│                            │                                                            │                           ││
-│                            │or type: warm█                                              │6/512 MB                   ││
-│                            │red                                                         │ 2.40                      ││
-│                            │                                                            │───────────────────────────┘│
-│                            │now (each its own)  →       #ff9329                         │                            │
-│                            │arrows or click pick  type a name or #hex  ⏎ set  esc back  │                            │
-│                            └────────────────────────────────────────────────────────────┘                            │
+│                                ┌ panel colour ──────────────────────────────────────┐             │                 ││
+│                                │Colour for every light                              │───────────────────────────────┘│
+│                                │for  ▕all▏             │             tab: the next  │des ───────────────────────────┐│
+│                                │                                                    │                               ││
+│                                │                                     lighter        │er] org.xbmc.kodi              ││
+│                                │                                     full           │1342 MB used, 310 MB free      ││
+│                                │                                     darker         │                               ││
+│                                │ white   warm   off                                 │                               ││
+│                                │                                                    │                               ││
+│                                │or type: warm█                                      │─ 316/512 MB                   ││
+│                                │red                                                 │3.10 2.40                      ││
+│                                │                                                    │───────────────────────────────┘│
+│                                │now (each its own)  →       #ff9329                 │                                │
+│                                │type a name or #hex                                 │                                │
+│                                └────────────────────────────────────────────────────┘                                │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
