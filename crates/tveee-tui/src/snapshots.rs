@@ -1677,3 +1677,16 @@ fn remote_preview_says_the_tracks() {
     let s = screen(&mut a, DESKTOP);
     assert_eq!(s.matches(&line).count(), 0, "{s}");
 }
+
+#[test]
+fn a_link_in_the_palette_opens_on_the_tv() {
+    let (mut a, rx, h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    a.open_palette();
+    a.palette.query = "https://youtu.be/gwLRWgOWhBs".into();
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("open this link on the TV"), "{s}");
+    a.palette_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { id: "apps.open_link", args } if args == &["https://youtu.be/gwLRWgOWhBs"])));
+    assert_eq!(a.overlay, Overlay::None);
+}
