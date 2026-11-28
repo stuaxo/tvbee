@@ -10,7 +10,7 @@
 use super::{call, Result, Tv};
 use serde_json::Value;
 use tveee_core::more::Go;
-use tveee_core::provider::{ContextList, ListItem, ListPlace};
+use tveee_core::provider::{ContextList, ListCrumb, ListItem, ListPlace};
 
 /// Most rows read (a library of thousands: the first ones).
 const MAX: usize = 500;
@@ -159,10 +159,107 @@ pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
         .map(|r| ListItem { section: None, id: r.path.clone(), label: r.label.clone(), meta: Some(r.label2.clone()).filter(|m| !m.is_empty()), folder: r.folder, go: go_for(r, p.window) })
         .collect();
     let title = if p.name.is_empty() { p.path.clone() } else { p.name.clone() };
-    let mut l = ContextList { title, kind: "folder", key: key_of(p), items, playing: None, at: None, up, reopen: Some(reopen) };
+    let (crumbs, crumbs_whole) = path_crumbs(p.window, &p.path);
+    let w = window_name(p.window).unwrap_or("videos");
+    let mut l = ContextList {
+        title,
+        kind: "folder",
+        key: key_of(p),
+        items,
+        playing: None,
+        at: None,
+        up,
+        reopen: Some(reopen),
+        crumbs,
+        crumbs_whole,
+        location: Some(p.path.clone()),
+        open_location: Some(format!("kodi-window:{w}|{{}}")),
+    };
     // the highlighted row: by its path, else its label
     l.at = l.find(&list_place(p));
     l
+}
+
+/// `%20` and friends in a path, back to what they stand for.
+fn unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The library's sections, as their paths name them.
+fn section_name(part: &str) -> String {
+    match part {
+        "top100" => "Top 100".into(),
+        "recentlyaddedalbums" => "Recently added albums".into(),
+        "recentlyplayedalbums" => "Recently played albums".into(),
+        "singles" => "Singles".into(),
+        "tvshows" => "TV shows".into(),
+        "musicvideos" => "Music videos".into(),
+        "inprogresstvshows" => "In progress TV shows".into(),
+        other => {
+            let mut c = other.chars();
+            c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+        }
+    }
+}
+
+/// The lists a folder is in, named from its path (outermost first, not
+/// itself), and whether they go all the way to it: a share's or a folder's
+/// path names every step (`smb://nas/music/Artist/Album/`); the library's
+/// only its section (`musicdb://albums/251/` -> Albums, then a number);
+/// an add-on's nothing. The window's own top comes first.
+pub fn path_crumbs(window: u64, path: &str) -> (Vec<ListCrumb>, bool) {
+    let Some(w) = window_name(window) else { return (Vec::new(), false) };
+    let top_title = {
+        let mut c = w.chars();
+        c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect::<String>())
+    };
+    let crumb = |title: String, p: &str| ListCrumb { title, key: format!("{window}|{}", bare(p)), go: Some(Go::Link(if p.is_empty() { format!("kodi-window:{w}") } else { format!("kodi-window:{w}|{p}") })) };
+    let mut out = vec![crumb(top_title, "")];
+    let path = bare(path);
+    if path.is_empty() {
+        // the window's top itself
+        return (Vec::new(), true);
+    }
+    let (scheme, rest) = path.split_once("://").map_or(("", path), |(s, r)| (s, r));
+    match scheme {
+        "musicdb" | "videodb" => {
+            let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+            if let Some(first) = parts.first() {
+                if parts.len() > 1 {
+                    out.push(crumb(section_name(first), &format!("{scheme}://{first}/")));
+                }
+            }
+            (out, parts.len() <= 1)
+        }
+        "plugin" | "addons" => (out, false),
+        // a share or a folder: every step has a name
+        _ => {
+            let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+            let lead = if scheme.is_empty() { "/".to_string() } else { format!("{scheme}://") };
+            let mut so_far = lead.clone();
+            for part in parts.iter().take(parts.len().saturating_sub(1)) {
+                so_far.push_str(part);
+                so_far.push('/');
+                out.push(crumb(unescape(part), &so_far));
+            }
+            (out, true)
+        }
+    }
 }
 
 /// What a list is: its window and folder (another folder, another list;
@@ -202,6 +299,25 @@ pub fn list(tv: &Tv) -> Result<Option<ContextList>> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn crumbs_from_the_path() {
+        let titles = |(c, whole): (Vec<ListCrumb>, bool)| (c.iter().map(|x| x.title.clone()).collect::<Vec<_>>(), whole);
+        // a share: every folder, named, the whole way
+        let (c, whole) = path_crumbs(10502, "smb://nas/music/Aphex%20Twin/Selected%20Ambient%20Works/");
+        assert_eq!(titles((c.clone(), whole)), (vec!["Music".to_string(), "nas".into(), "music".into(), "Aphex Twin".into()], true));
+        assert_eq!(c[3].go, Some(Go::Link("kodi-window:music|smb://nas/music/Aphex%20Twin/".into())));
+        assert_eq!(c[0].go, Some(Go::Link("kodi-window:music".into())));
+        // the library: its section, then numbers (not the whole way)
+        assert_eq!(titles(path_crumbs(10502, "musicdb://albums/251/-2/?albumid=251&discid=1")), (vec!["Music".to_string(), "Albums".into()], false));
+        assert_eq!(titles(path_crumbs(10502, "musicdb://albums/")), (vec!["Music".to_string()], true));
+        // the window's top: nothing above it
+        assert_eq!(titles(path_crumbs(10502, "")), (vec![], true));
+        // an add-on: only the window
+        assert_eq!(titles(path_crumbs(10025, "plugin://plugin.video.x/?a=b")), (vec!["Videos".to_string()], false));
+        assert_eq!(unescape("Aphex%20Twin"), "Aphex Twin");
+    }
+
     use super::*;
     use serde_json::json;
 

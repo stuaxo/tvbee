@@ -73,6 +73,8 @@ struct App {
     apps_tab: AppTab,
     /// The trail to the list shown (its breadcrumbs).
     crumbs: Vec<ctxlist::Crumb>,
+    /// A location being typed in the list pane (^L), if one is.
+    location: Option<String>,
     /// Where the colour picker is (column, row).
     pick: (usize, usize),
     /// Where the progress bar stays after a pause, seek or stop asked for
@@ -540,6 +542,7 @@ impl App {
             wide: false,
             apps_tab: AppTab::Known,
             crumbs: Vec::new(),
+            location: None,
             pick: (0, 1),
             frozen: None,
             log_back: None,

@@ -8,16 +8,32 @@
 //! Kodi's highlight is followed while it moves.
 
 use super::*;
-use tveee_core::more::Go;
 use tveee_core::provider::{ContextList, ListPlace};
 
 /// A step of the trail to the list shown (the breadcrumbs): its title, its
-/// key, and how to go back to it (the list's own reopen).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Crumb {
-    pub title: String,
-    pub key: String,
-    pub go: Option<Go>,
+/// key, and how to go back to it.
+pub use tveee_core::provider::ListCrumb as Crumb;
+
+/// The breadcrumbs for list `l` arriving: the steps its app names from
+/// where it is (a share's path: every step), then the trail's own steps
+/// below the last of those (the library's albums, gone through here), or
+/// "…" for the steps between that weren't seen; then `l` itself.
+pub fn breadcrumbs(trail: &[Crumb], l: &ContextList) -> Vec<Crumb> {
+    let t = next_trail(trail, l);
+    if l.crumbs.is_empty() {
+        return t;
+    }
+    let here = t.last().cloned().unwrap_or(Crumb { title: l.title.clone(), key: l.key.clone(), go: l.reopen.clone() });
+    let mut out = l.crumbs.clone();
+    if !l.crumbs_whole {
+        let last = l.crumbs.last().map(|c| c.key.clone()).unwrap_or_default();
+        match t.iter().position(|c| c.key == last) {
+            Some(i) => out.extend(t[i + 1..t.len().saturating_sub(1)].iter().cloned()),
+            None => out.push(Crumb { title: "…".into(), key: String::new(), go: None }),
+        }
+    }
+    out.push(here);
+    out
 }
 
 /// The trail after list `l` arrives: back along it if `l` is on it already;
@@ -76,6 +92,7 @@ impl App {
     pub(super) fn close_list(&mut self, actions: &Handle) {
         self.overlay = Overlay::None;
         self.prompt.clear();
+        self.location = None;
         if self.list_watching {
             let _ = actions.send(Action::WatchList(false));
             self.list_watching = false;
@@ -85,6 +102,17 @@ impl App {
     /// Keys in the list pane: the list keys move (through what the filter
     /// shows), ⏎ chooses, typing filters, Esc closes.
     pub(super) fn list_key(&mut self, sel: usize, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
+        // typing a location (^L): keys go to it
+        if self.location.is_some() {
+            return self.location_key(code, mods, actions);
+        }
+        if code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL) {
+            match self.list_ok().filter(|l| l.open_location.is_some()) {
+                Some(l) => self.location = Some(l.location.clone().unwrap_or_default()),
+                None => self.note = "this list can't be opened at a typed location".into(),
+            }
+            return;
+        }
         let shown = self.list_shown();
         let pos = shown.iter().position(|&i| i == sel).unwrap_or(0);
         match code {
@@ -110,6 +138,32 @@ impl App {
         let shown = self.list_shown();
         if !shown.contains(&sel) {
             self.overlay = Overlay::List { sel: shown.first().copied().unwrap_or(0) };
+        }
+    }
+
+    /// Keys while typing a location: ⏎ opens it (in the app: Kodi opens any
+    /// path it knows, smb://, /storage/..., musicdb://albums/), Esc goes
+    /// back to the list.
+    pub(super) fn location_key(&mut self, code: KeyCode, mods: KeyModifiers, actions: &Handle) {
+        let Some(text) = self.location.as_mut() else { return };
+        match code {
+            KeyCode::Esc => self.location = None,
+            KeyCode::Enter => {
+                let typed = text.trim().to_string();
+                let template = self.list_ok().and_then(|l| l.open_location.clone());
+                if let (false, Some(t)) = (typed.is_empty(), template) {
+                    self.note = format!("opening {typed}...");
+                    self.prompt.clear();
+                    let _ = actions.send(Action::ListGo(tveee_core::more::Go::Link(t.replace("{}", &typed))));
+                }
+                self.location = None;
+            }
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => text.clear(),
+            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => text.push(c),
+            _ => {}
         }
     }
 
@@ -162,7 +216,7 @@ impl App {
         // a new list came: start where the app is in it
         if change == Change::List {
             if let Some(l) = self.list_ok().cloned() {
-                self.crumbs = next_trail(&self.crumbs, &l);
+                self.crumbs = breadcrumbs(&self.crumbs, &l);
             }
             if let Some(l) = self.list_ok() {
                 let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id))).or(l.at).or(l.playing).unwrap_or(0);
@@ -225,8 +279,16 @@ impl App {
             Some(Ok(Some(l))) => {
                 let shown = self.list_shown();
                 let pos = shown.iter().position(|&i| i == sel);
-                // the trail to here (the last one is here), each to click
-                if self.crumbs.len() > 1 {
+                // typing a location (^L): it, in place of the breadcrumbs
+                if let Some(typed) = &self.location {
+                    text.push(Line::from(vec![
+                        Span::styled("location ", dim),
+                        Span::styled(format!("{typed}█"), Style::new().fg(Color::White).bg(Color::DarkGray)),
+                        Span::styled("  ⏎ open  esc back", dim),
+                    ]));
+                    rows_at.push(None);
+                } else if self.crumbs.len() > 1 {
+                    // the trail to here (the last one is here), each to click
                     let mut spans = Vec::new();
                     let mut x = 0u16;
                     for (i, c) in self.crumbs.iter().enumerate() {
@@ -301,7 +363,9 @@ impl App {
                 text.push(Line::default());
                 rows_at.push(None);
                 let reading = if self.st.list_loading { "  reading..." } else { "" };
-                text.push(Line::from(format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  type to filter  esc closes{more}{reading}")).fg(Color::DarkGray));
+                // ^L only where a location can be typed (Kodi's folders)
+                let loc = if l.open_location.is_some() { "^L location  " } else { "" };
+                text.push(Line::from(format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  {loc}type to filter  esc closes{more}{reading}")).fg(Color::DarkGray));
                 rows_at.push(None);
                 let count = match pos {
                     Some(p) => format!(" {} of {} ", p + 1, shown.len()),
