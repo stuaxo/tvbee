@@ -431,6 +431,11 @@ pub trait Player: Sync {
     fn playing(&self, tv: &crate::tv::Tv) -> Outcome<Playing>;
     /// Move what's playing; returns the new position in seconds.
     fn seek(&self, tv: &crate::tv::Tv, to: crate::devtools::SeekTo) -> Outcome<f64>;
+    /// Go to the next item queued (`forward`) or the one before (a playlist,
+    /// an album); returns what's said. Fallback: the remote's media keys.
+    fn skip_item(&self, _tv: &crate::tv::Tv, _forward: bool) -> Outcome<String> {
+        Outcome::Fallback
+    }
     fn play_pause(&self, _tv: &crate::tv::Tv) -> Outcome<()> {
         Outcome::Fallback
     }

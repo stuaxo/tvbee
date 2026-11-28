@@ -8,6 +8,8 @@
 //! | A folder to browse in tveee | `music\|Name\|musicdb://albums/1/` |
 //! | A file to play from its folder | `kodi-play:0\|musicdb://albums/1/\|smb://…/01.mp3` |
 //! | A window on Kodi's screen | `kodi-window:music` or `kodi-window:music\|smb://…/` |
+//! | The queue playing | `kodi-queue:0` |
+//! | An item of it, to play from | `kodi-goto:3` |
 
 use super::library::Media;
 use std::fmt;
@@ -24,11 +26,17 @@ pub enum Link {
     Play { playlist: u32, dir: String, file: String },
     /// A window on Kodi's screen, at a folder or its own start.
     Window { window: String, path: Option<String> },
+    /// The queue playing (Kodi's playlist `playlist`).
+    Queue { playlist: u32 },
+    /// Item `position` of the queue playing: play from there.
+    GoTo { position: usize },
 }
 
 const ROOT: &str = "kodi|";
 const PLAY: &str = "kodi-play:";
 const WINDOW: &str = "kodi-window:";
+const QUEUE: &str = "kodi-queue:";
+const GOTO: &str = "kodi-goto:";
 
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -39,6 +47,8 @@ impl fmt::Display for Link {
             Link::Play { playlist, dir, file } => write!(f, "{PLAY}{playlist}|{dir}|{file}"),
             Link::Window { window, path: None } => write!(f, "{WINDOW}{window}"),
             Link::Window { window, path: Some(p) } => write!(f, "{WINDOW}{window}|{p}"),
+            Link::Queue { playlist } => write!(f, "{QUEUE}{playlist}"),
+            Link::GoTo { position } => write!(f, "{GOTO}{position}"),
         }
     }
 }
@@ -56,6 +66,12 @@ impl Link {
                 (Some(playlist), Some(dir), Some(file)) => Some(Link::Play { playlist, dir: dir.to_string(), file: file.to_string() }),
                 _ => None,
             };
+        }
+        if let Some(n) = s.strip_prefix(QUEUE) {
+            return n.parse().ok().map(|playlist| Link::Queue { playlist });
+        }
+        if let Some(n) = s.strip_prefix(GOTO) {
+            return n.parse().ok().map(|position| Link::GoTo { position });
         }
         if let Some(rest) = s.strip_prefix(WINDOW) {
             return Some(match rest.split_once('|') {
@@ -103,6 +119,8 @@ mod tests {
             Link::Play { playlist: 1, dir: String::new(), file: "x.mkv".into() },
             Link::window("music", None),
             Link::window("videos", Some("videodb://movies/titles/")),
+            Link::Queue { playlist: 0 },
+            Link::GoTo { position: 3 },
         ];
         for l in links {
             assert_eq!(Link::parse(&l.to_string()), Some(l.clone()), "{l}");

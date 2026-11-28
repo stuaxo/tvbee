@@ -166,9 +166,11 @@ Type 'tveee <command> --help' (or 'tveee help <command>') for help on a command.
 [media]
     ff           fast-forward by an amount (alias: ffw)
     mute         mute (no-op if already muted)
+    next         the next track or item queued
     pause        media pause
     play         media play
     playpause    toggle play/pause
+    previous     the track or item before (alias: prev)
     rw           rewind by an amount (alias: rew)
     seek         jump to a position (time or percent of the way through)
     stop         media stop
