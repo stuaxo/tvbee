@@ -42,6 +42,36 @@ pub fn front_flag(fronts: Option<Front>, args: &[String]) -> (bool, Vec<String>)
     (!no, rest)
 }
 
+/// How the command line shows what an action says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Say {
+    /// Its message on stdout (errors on stderr, and the exit code).
+    Plain,
+    /// Nothing on success (`-q`, `--quiet`, or `TVEEE_QUIET=1`): errors and
+    /// the exit code still say when it failed.
+    Quiet,
+    /// One line of JSON on stdout: `{"ok":true,"message":"..."}`, or
+    /// `{"ok":false,"error":"..."}` (`--json`).
+    Json,
+}
+
+/// The command line's output flags taken out of `args` (not after `--`:
+/// those are the action's own); `quiet_env`: `TVEEE_QUIET`'s value.
+pub fn say_flags(args: &[String], quiet_env: Option<&str>) -> (Say, Vec<String>) {
+    let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    let ours = |i: usize, a: &str| i < end && matches!(a, "-q" | "--quiet" | "--json");
+    let json = args[..end].iter().any(|a| a == "--json");
+    let quiet = args[..end].iter().any(|a| a == "-q" || a == "--quiet") || quiet_env.is_some_and(|v| !v.is_empty() && v != "0");
+    let say = if json {
+        Say::Json
+    } else if quiet {
+        Say::Quiet
+    } else {
+        Say::Plain
+    };
+    (say, args.iter().enumerate().filter(|(i, a)| !ours(*i, a)).map(|(_, a)| a.clone()).collect())
+}
+
 /// What an action did, to show (status line, or stdout for the CLI).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Output {
@@ -76,21 +106,34 @@ pub enum Run {
 
 impl Run {
     /// Run it from the command line: what a [`Run::Do`] action says goes to
-    /// stdout (when it says anything). `fronts`: the app it brings to the
-    /// front, if it does (then `--no-front` is taken out and kept from it).
+    /// stdout as [`Say`] has it (`-q`/`--quiet`, `--json`, else plain).
+    /// `fronts`: the app it brings to the front, if it does (then
+    /// `--no-front` is taken out and kept from it).
     pub fn call(self, fronts: Option<Front>, c: &Ctx, args: &[String]) -> Result<()> {
         let (front, args) = front_flag(fronts, args);
-        let args = &args[..];
         match self {
-            Run::Terminal(f) => f(c, args),
+            Run::Terminal(f) => f(c, &args),
             Run::Do(f) => {
-                let out = f(&Cx { tv: &c.tv, front }, args)?;
-                if !out.text.is_empty() {
-                    println!("{}", out.text);
+                let (say, args) = say_flags(&args, std::env::var("TVEEE_QUIET").ok().as_deref());
+                let result = f(&Cx { tv: &c.tv, front }, &args);
+                if let Some(line) = said(say, &result) {
+                    println!("{line}");
                 }
-                Ok(())
+                result.map(drop)
             }
         }
+    }
+}
+
+/// What the command line prints for an action's `result`, as `say` has it
+/// (None: nothing). A failure's plain message is the caller's to print
+/// (on stderr); in JSON it's on stdout too.
+pub fn said(say: Say, result: &Result<Output>) -> Option<String> {
+    match (say, result) {
+        (Say::Plain, Ok(out)) if !out.text.is_empty() => Some(out.text.clone()),
+        (Say::Json, Ok(out)) => Some(serde_json::json!({ "ok": true, "message": out.text }).to_string()),
+        (Say::Json, Err(e)) => Some(serde_json::json!({ "ok": false, "error": e.to_string() }).to_string()),
+        _ => None,
     }
 }
 
@@ -298,6 +341,35 @@ pub fn suggest(actions: &[ActionDescriptor], id: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn output_flags() {
+        let v = |a: &[&str]| a.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(say_flags(&v(&["up"]), None), (Say::Plain, v(&["up"])));
+        assert_eq!(say_flags(&v(&["-q", "up"]), None), (Say::Quiet, v(&["up"])));
+        assert_eq!(say_flags(&v(&["up", "--quiet"]), None), (Say::Quiet, v(&["up"])));
+        assert_eq!(say_flags(&v(&["--json", "-q"]), None), (Say::Json, v(&[])));
+        // after --: the action's own
+        assert_eq!(say_flags(&v(&["--", "--json"]), None), (Say::Plain, v(&["--", "--json"])));
+        // TVEEE_QUIET: quiet unless empty or 0
+        assert_eq!(say_flags(&v(&[]), Some("1")).0, Say::Quiet);
+        assert_eq!(say_flags(&v(&[]), Some("0")).0, Say::Plain);
+        assert_eq!(say_flags(&v(&["--json"]), Some("1")).0, Say::Json);
+    }
+
+    #[test]
+    fn what_is_said() {
+        let ok: Result<Output> = Ok("muted".into());
+        let quiet_ok: Result<Output> = Ok(Output::default());
+        let bad: Result<Output> = crate::error::failed("the TV isn't answering");
+        assert_eq!(crate::actions::said(Say::Plain, &ok).as_deref(), Some("muted"));
+        assert_eq!(crate::actions::said(Say::Plain, &quiet_ok), None);
+        assert_eq!(crate::actions::said(Say::Quiet, &ok), None);
+        // a plain failure is said on stderr by the caller, not here
+        assert_eq!(crate::actions::said(Say::Plain, &bad), None);
+        assert_eq!(crate::actions::said(Say::Json, &ok).as_deref(), Some(r#"{"message":"muted","ok":true}"#));
+        assert_eq!(crate::actions::said(Say::Json, &bad).as_deref(), Some(r#"{"error":"the TV isn't answering","ok":false}"#));
+    }
 
     #[test]
     fn no_front_flag() {

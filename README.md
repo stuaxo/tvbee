@@ -105,7 +105,12 @@ A few examples:
     tveee ui                          # full-screen remote (needs the ui feature)
     tveee debloat apply --dry-run     # what the debloat profile would change
 
-Every command takes `--help`. The full list, from `tveee help`:
+Every command takes `--help`. Commands that do something (mute, volume,
+play, a channel, ...) say what they did on stdout; errors go to stderr, with
+exit code 1 (2 for a mistake in the command). In scripts, `-q` (or
+`--quiet`, or `TVEEE_QUIET=1`) says nothing unless it fails, and `--json`
+prints one line: `{"ok":true,"message":"muted"}` or
+`{"ok":false,"error":"..."}`. The full list, from `tveee help`:
 
 <!-- commands:start (checked by a test: cargo test readme) -->
 ```text
