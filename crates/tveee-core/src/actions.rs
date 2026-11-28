@@ -102,6 +102,9 @@ pub type Terminal = fn(&Ctx, &[String]) -> Result<()>;
 pub enum Run {
     Do(Do),
     Terminal(Terminal),
+    /// Something the interactive remote does itself (opens its guide, shows
+    /// its log, ...): listed with the rest, run only there.
+    Ui,
 }
 
 impl Run {
@@ -113,6 +116,7 @@ impl Run {
         let (front, args) = front_flag(fronts, args);
         match self {
             Run::Terminal(f) => f(c, &args),
+            Run::Ui => crate::error::failed("that's done in the interactive remote ('tveee ui')"),
             Run::Do(f) => {
                 let (say, args) = say_flags(&args, std::env::var("TVEEE_QUIET").ok().as_deref());
                 let result = f(&Cx { tv: &c.tv, front }, &args);
@@ -229,6 +233,20 @@ impl ActionDescriptor {
             words: &[],
             run: Run::Terminal(run),
         }
+    }
+
+    /// Something the interactive remote does itself ([`Run::Ui`]), in the
+    /// "ui" category.
+    pub const fn ui(id: &'static str, title: &'static str) -> Self {
+        let mut a = Self::terminal(id, "ui", title, |_, _| Ok(()));
+        a.run = Run::Ui;
+        a
+    }
+
+    /// Whether an interactive front end's palette lists it: it runs there
+    /// (not one that prints for itself on the command line).
+    pub fn in_palette(&self) -> bool {
+        matches!(self.run, Run::Do(_) | Run::Ui)
     }
 
     /// More words a palette finds it by (see [`ActionDescriptor::words`]).
@@ -350,6 +368,7 @@ impl ActionDescriptor {
         match self.run {
             Run::Do(f) => f(&Cx { tv, front: true }, args),
             Run::Terminal(_) => crate::error::failed(format!("{} only runs from the command line", self.title)),
+            Run::Ui => crate::error::failed(format!("{} is done in the interactive remote itself", self.title)),
         }
     }
 

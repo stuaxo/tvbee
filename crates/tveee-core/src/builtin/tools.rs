@@ -142,7 +142,7 @@ fn actions_all(c: &Ctx) -> String {
         out.push_str(&format!("\n[{}]{off}\n", p.name));
         for a in acts {
             let mut where_ = Vec::new();
-            if matches!(a.run, crate::actions::Run::Do(_)) {
+            if a.in_palette() {
                 where_.push("palette".to_string());
             }
             if let Some(cli) = a.cli {

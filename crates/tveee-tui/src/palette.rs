@@ -9,34 +9,69 @@ use tveee_core::actions::Run;
 /// How many matches the palette lists at once.
 const ROWS: usize = 12;
 
-/// What the ui itself can do, listed in the palette with the plugins'
-/// actions (as ui: ...).
-/// The ui's own entries: what it says, its key on the main screen ("": none),
-/// what it does, and more words it's found by (not shown). (The music
-/// visualiser is the media.visualiser action.)
-pub const UI: &[(&str, &str, Input, &str)] = &[
-    ("ui: show the log (what tveee did lately)", "", Input::ShowLogs, "history debug"),
-    ("ui: all keys (help)", "?", Input::ToggleHelp, "keys shortcuts"),
-    ("ui: live TV guide", "g", Input::OpenGuide, "epg channels schedule programmes tv"),
-    ("ui: the list the app shows (Kodi's folder)", "t", Input::OpenList, "folder library browse chapters queue tracks"),
-    ("ui: launch an app", "a", Input::OpenApps, "apps open start"),
-    ("ui: search the app in front", "/", Input::OpenSearch, "find"),
-    ("ui: options", ",", Input::OpenOptions, "settings preferences plugins"),
-    ("ui: preview on/off", "v", Input::TogglePreview, "picture screenshot screen"),
-    ("ui: system info on/off", "i", Input::ToggleInfo, "memory ram load storage"),
-    ("ui: show the whole link / shorten it", "u", Input::ToggleUrl, "url"),
-    ("ui: copy the link", "y", Input::CopyUrl, "url clipboard"),
-    ("ui: open the link in the browser", "", Input::OpenUrl, "url web"),
-    ("ui: remote / player mode", "tab", Input::ToggleMode, "keyboard dpad arrows"),
-    ("ui: quit", "q", Input::Quit, "exit close"),
+/// Something the ui does itself, listed in the palette with the plugins'
+/// actions (as "ui: ..."), and published as a [`tveee_core::actions::Run::Ui`]
+/// action so listings (`tveee do --all`) have it too.
+pub struct UiEntry {
+    /// Its action id: "ui.guide".
+    pub id: &'static str,
+    /// What it says.
+    pub title: &'static str,
+    /// Its key on the main screen ("": none).
+    pub key: &'static str,
+    /// What it does.
+    pub input: Input,
+    /// More words it's found by (not shown).
+    pub words: &'static [&'static str],
+}
+
+/// The ui's own entries. (The music visualiser is the media.visualiser action.)
+pub const UI: &[UiEntry] = &[
+    UiEntry { id: "ui.log", title: "ui: show the log (what tveee did lately)", key: "", input: Input::ShowLogs, words: &["history", "debug"] },
+    UiEntry { id: "ui.help", title: "ui: all keys (help)", key: "?", input: Input::ToggleHelp, words: &["keys", "shortcuts"] },
+    UiEntry { id: "ui.guide", title: "ui: live TV guide", key: "g", input: Input::OpenGuide, words: &["epg", "channels", "schedule", "programmes", "tv"] },
+    UiEntry {
+        id: "ui.list",
+        title: "ui: the list the app shows (Kodi's folder)",
+        key: "t",
+        input: Input::OpenList,
+        words: &["folder", "library", "browse", "chapters", "queue", "tracks"],
+    },
+    UiEntry { id: "ui.apps", title: "ui: launch an app", key: "a", input: Input::OpenApps, words: &["apps", "open", "start"] },
+    UiEntry { id: "ui.search", title: "ui: search the app in front", key: "/", input: Input::OpenSearch, words: &["find"] },
+    UiEntry { id: "ui.options", title: "ui: options", key: ",", input: Input::OpenOptions, words: &["settings", "preferences", "plugins"] },
+    UiEntry { id: "ui.preview", title: "ui: preview on/off", key: "v", input: Input::TogglePreview, words: &["picture", "screenshot", "screen"] },
+    UiEntry { id: "ui.info", title: "ui: system info on/off", key: "i", input: Input::ToggleInfo, words: &["memory", "ram", "load", "storage"] },
+    UiEntry { id: "ui.link_whole", title: "ui: show the whole link / shorten it", key: "u", input: Input::ToggleUrl, words: &["url"] },
+    UiEntry { id: "ui.copy_link", title: "ui: copy the link", key: "y", input: Input::CopyUrl, words: &["url", "clipboard"] },
+    UiEntry { id: "ui.open_link", title: "ui: open the link in the browser", key: "", input: Input::OpenUrl, words: &["url", "web"] },
+    UiEntry { id: "ui.mode", title: "ui: remote / player mode", key: "tab", input: Input::ToggleMode, words: &["keyboard", "dpad", "arrows"] },
+    UiEntry { id: "ui.quit", title: "ui: quit", key: "q", input: Input::Quit, words: &["exit", "close"] },
 ];
+
+/// The ui's own entries as actions (the ui plugin's, and the palette's).
+pub fn ui_actions() -> Vec<ActionDescriptor> {
+    UI.iter().map(|u| ActionDescriptor::ui(u.id, u.title).words(u.words)).collect()
+}
+
+/// The plugins' actions with the ui's own after them (once, whatever was
+/// given): what the palette lists.
+pub fn with_ui(mut actions: Vec<ActionDescriptor>) -> Vec<ActionDescriptor> {
+    actions.retain(|a| !matches!(a.run, Run::Ui));
+    actions.extend(ui_actions());
+    actions
+}
+
+/// The ui entry with action id `id`.
+pub fn ui_entry(id: &str) -> Option<&'static UiEntry> {
+    UI.iter().find(|u| u.id == id)
+}
 
 /// A palette entry: a plugin's action (index into the actions), or
 /// something the ui does (index into [`UI`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     Action(usize),
-    Ui(usize),
     /// What's typed is a link: open it on the TV.
     Link,
 }
@@ -93,15 +128,9 @@ pub fn palette_ranked(actions: &[ActionDescriptor], query: &str, now: &Now) -> V
     let rank = |item: &Item| match item {
         Item::Link => 0,
         Item::Action(i) => now.rank(&actions[*i]),
-        Item::Ui(_) => 2,
     };
     // (what's searched: the title as shown, and the id `tveee do` knows)
-    let all = actions
-        .iter()
-        .enumerate()
-        .filter(|(_, a)| matches!(a.run, Run::Do(_)))
-        .map(|(i, a)| (Item::Action(i), a.search_text()))
-        .chain(UI.iter().enumerate().map(|(i, (title, _, _, words))| (Item::Ui(i), format!("{title} {words}"))));
+    let all = actions.iter().enumerate().filter(|(_, a)| a.in_palette()).map(|(i, a)| (Item::Action(i), a.search_text()));
     let query = query.trim();
     if query.is_empty() {
         // the most relevant first; the rest in their order
@@ -202,6 +231,15 @@ impl App {
                 self.overlay = Overlay::Palette(to);
             }
             KeyCode::Enter => match self.palette_list().get(sel) {
+                Some(&Item::Action(i)) if matches!(self.actions[i].run, Run::Ui) => {
+                    self.overlay = Overlay::None;
+                    if let Some(u) = ui_entry(self.actions[i].id)
+                        && self.apply(u.input.clone(), actions)
+                    {
+                        self.quit = true;
+                    }
+                    self.palette_closed();
+                }
                 Some(&Item::Action(i)) => {
                     let (next, action) = choose(&self.actions[i]);
                     self.apply_overlay(next, action, actions);
@@ -209,13 +247,6 @@ impl App {
                     if !matches!(self.overlay, Overlay::Prompt(_) | Overlay::Confirm { .. }) {
                         self.palette_closed();
                     }
-                }
-                Some(&Item::Ui(i)) => {
-                    self.overlay = Overlay::None;
-                    if self.apply(UI[i].2.clone(), actions) {
-                        self.quit = true;
-                    }
-                    self.palette_closed();
                 }
                 Some(&Item::Link) => {
                     let link = self.palette.query.trim().to_string();
@@ -256,13 +287,16 @@ impl App {
             // the right column: its key (a menu key after `.`), then its category,
             // so the palette teaches the shortcuts
             let (left, key, right) = match item {
+                Item::Action(i) if matches!(self.actions[i].run, Run::Ui) => {
+                    let a = &self.actions[i];
+                    (a.title.to_string(), ui_entry(a.id).map_or("", |u| u.key).to_string(), "ui")
+                }
                 Item::Action(i) => {
                     let a = &self.actions[i];
                     let asks = needs_input(a) || a.confirm.is_some() || matches!(a.params, tveee_core::actions::Params::Choice(_));
                     let more = if asks { "…" } else { "" };
                     (format!("{}{more}", a.title), a.key.map(|k| format!(".{k}")).unwrap_or_default(), a.category)
                 }
-                Item::Ui(i) => (UI[i].0.to_string(), UI[i].1.to_string(), "ui"),
                 Item::Link => ("open this link on the TV".to_string(), String::new(), "apps"),
             };
             let right_text = if key.is_empty() { right.to_string() } else { format!("{key}  {right}") };
@@ -310,21 +344,30 @@ mod tests {
 
     #[test]
     fn finds_by_a_few_letters() {
-        let a = actions();
+        let a = with_ui(actions());
         let titles = |q| {
             palette_matches(&a, q)
                 .into_iter()
                 .filter_map(|i| match i {
-                    Item::Action(i) => Some(a[i].id),
-                    Item::Ui(_) | Item::Link => None,
+                    Item::Action(i) if !a[i].id.starts_with("ui.") => Some(a[i].id),
+                    _ => None,
                 })
                 .collect::<Vec<_>>()
         };
         // everything that can run here, in order; not what prints for itself
         assert_eq!(titles(""), ["kodi.subtitles", "kodi.audio", "power.off", "media.volume"]);
         // and the ui's own, after them
-        assert_eq!(palette_matches(&a, "").last(), Some(&Item::Ui(UI.len() - 1)));
-        assert_eq!(palette_matches(&a, "show the log").first(), Some(&Item::Ui(0)));
+        assert_eq!(palette_matches(&a, "").last(), Some(&Item::Action(a.len() - 1)));
+        assert_eq!(a[a.len() - 1].id, "ui.quit");
+        assert_eq!(
+            palette_matches(&a, "show the log").first().map(|i| match i {
+                Item::Action(i) => a[*i].id,
+                Item::Link => "link",
+            }),
+            Some("ui.log")
+        );
+        // given again (the plugins' list already has them): still once
+        assert_eq!(with_ui(a.clone()).len(), a.len());
         assert_eq!(titles("subs"), ["kodi.subtitles"]);
         assert_eq!(titles("aud"), ["kodi.audio"]);
         assert_eq!(titles("pwr off"), ["power.off"]);
@@ -383,18 +426,18 @@ mod tests {
     fn found_by_hidden_words_and_command_names() {
         use tveee_core::actions::ActionDescriptor as A;
         let ok = |_: &tveee_core::actions::Cx, _: &[String]| Ok("".into());
-        let a = vec![
+        let a = with_ui(vec![
             A::new("apps.open_link", "apps", "open a link", ok).words(&["url", "web"]),
             A::new("power.sleep", "power", "sleep (standby)", ok).cli("sleep", "", "").words(&["off"]),
             A::new("media.ffw", "media", "fast-forward", ok).cli("ff", "", "").aliases(&["ffw"]),
-        ];
+        ]);
         let first = |q: &str| palette_matches(&a, q).into_iter().next();
         // a word it isn't called, but is about
         assert_eq!(first("url"), Some(Item::Action(0)));
         // its command-line name
         assert_eq!(first("ff"), Some(Item::Action(2)));
         // the ui's own: the guide by "epg"
-        let guide = UI.iter().position(|u| u.0 == "ui: live TV guide").unwrap();
-        assert!(palette_matches(&a, "epg").contains(&Item::Ui(guide)));
+        let guide = a.iter().position(|u| u.id == "ui.guide").unwrap();
+        assert!(palette_matches(&a, "epg").contains(&Item::Action(guide)));
     }
 }

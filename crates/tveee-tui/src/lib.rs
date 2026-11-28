@@ -420,7 +420,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
 }
 
 pub fn actions() -> Vec<ActionDescriptor> {
-    vec![
+    let mut v = vec![
         ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui)
             .cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking")
             .long(
@@ -469,12 +469,16 @@ pub fn actions() -> Vec<ActionDescriptor> {
          the TV passes through, until the action has arrived and settled.\n\
          --no-settle shows every step as it comes (for debugging).",
             ),
-    ]
+    ];
+    // what the ui does itself (the palette's "ui: ..."), for listings
+    v.extend(palette::ui_actions());
+    v
 }
 
 impl App {
     /// A screen on `engine`'s state, nothing open yet.
     fn new(ip: String, engine: Handle, actions: Vec<ActionDescriptor>, settle: bool) -> App {
+        let actions = palette::with_ui(actions);
         App {
             ip,
             st: engine.state(),
