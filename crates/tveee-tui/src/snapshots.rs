@@ -1354,3 +1354,17 @@ fn scrollbars_drag_with_the_mouse() {
     assert!(!rx2.try_iter().any(|x| matches!(x, Action::ListOpen { .. } | Action::ListGo(_))));
     let _ = rx.try_iter().count();
 }
+
+#[test]
+fn update_frequency_is_a_choice() {
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let row = tveee_core::options::OPTIONS.iter().position(|o| o.name == tveee_core::options::LOW_BANDWIDTH).expect("the option");
+    a.overlay = Overlay::Options(row);
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("update frequency") && s.contains("‹responsive›") && s.contains(" low bandwidth "), "{s}");
+    a.toggle_option(row);
+    assert_eq!(a.note, "update frequency: low bandwidth");
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("‹low bandwidth›"), "{s}");
+}
