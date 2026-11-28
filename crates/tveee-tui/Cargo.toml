@@ -1,6 +1,6 @@
 [package]
 name = "tveee-tui"
-version = "0.3.0"
+version = "0.4.0"
 description = "tveee's terminal remote (tveee ui), on the core's engine"
 edition.workspace = true
 # ratatui needs 1.88, ratatui-image's quantette 1.90 (the rest of tveee

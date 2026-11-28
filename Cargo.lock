@@ -2056,7 +2056,7 @@ dependencies = [
 
 [[package]]
 name = "tveee"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "tveee-core",
@@ -2068,7 +2068,7 @@ dependencies = [
 
 [[package]]
 name = "tveee-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "diesel",
  "image",
@@ -2078,7 +2078,7 @@ dependencies = [
 
 [[package]]
 name = "tveee-plugin-kodi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2088,7 +2088,7 @@ dependencies = [
 
 [[package]]
 name = "tveee-plugin-philips"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "diesel",
  "serde_json",
@@ -2097,7 +2097,7 @@ dependencies = [
 
 [[package]]
 name = "tveee-plugin-youtube"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "tveee-core",
@@ -2105,7 +2105,7 @@ dependencies = [
 
 [[package]]
 name = "tveee-tui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "insta",
