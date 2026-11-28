@@ -1279,3 +1279,20 @@ fn long_lists_have_a_scrollbar() {
     let s = screen(&mut b, DESKTOP);
     assert!(s.lines().filter(|l| l.contains("Dummy/") || l.contains("Mezzanine/")).all(|l| !l.contains('┃')), "{s}");
 }
+
+#[test]
+fn options_scroll_when_short() {
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let last = tveee_core::options::OPTIONS.len() - 1;
+    let label = tveee_core::options::OPTIONS[last].label;
+    a.overlay = Overlay::Options(last);
+    let s = screen(&mut a, (100, 11));
+    // the chosen one in view, the tabs and keys still there, a bar beside the rows
+    assert!(s.contains(label) && s.contains("Options") && s.contains("esc closes"), "{s}");
+    assert!(!s.contains(tveee_core::options::OPTIONS[0].label), "the first scrolled out: {s}");
+    assert!(s.contains('┃'), "{s}");
+    // clicked where it's drawn: that one
+    let y = u16::try_from(s.lines().position(|l| l.contains(label)).unwrap()).unwrap();
+    assert!(a.hits.iter().any(|(r, h)| *h == Hit::OptionItem(last) && r.y == y), "{:?}", a.hits);
+}
