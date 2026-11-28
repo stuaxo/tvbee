@@ -303,8 +303,11 @@ pub struct ContextList {
     /// its items only need reading again when this changes.
     pub key: String,
     pub items: Vec<ListItem>,
-    /// The highlighted (or playing) item, if the app says.
+    /// The item the app has highlighted (its cursor), if it says: `›`.
     pub at: Option<usize>,
+    /// The item playing now, if one of them is (a song, the chapter
+    /// playing): `▶`, the same in every list (the guide's channel on now).
+    pub playing: Option<usize>,
     /// The list it's in, if it's in one (Kodi's ".." row): that list's
     /// [`ContextList::key`], and how to go there.
     pub up: Option<(String, crate::more::Go)>,
@@ -333,7 +336,12 @@ pub struct ListItem {
 impl ContextList {
     /// The item the app has highlighted, by its id, else its label.
     pub fn find(&self, p: &ListPlace) -> Option<usize> {
-        self.items.iter().position(|i| !p.focus_id.is_empty() && i.id == p.focus_id).or_else(|| self.items.iter().position(|i| i.label == p.focus_label))
+        self.items.iter().position(|i| !p.focus_id.is_empty() && i.id == p.focus_id).or_else(|| self.items.iter().position(|i| !p.focus_label.is_empty() && i.label == p.focus_label))
+    }
+
+    /// The item playing now, by its id (empty: none).
+    pub fn find_playing(&self, id: &str) -> Option<usize> {
+        (!id.is_empty()).then(|| self.items.iter().position(|i| i.id == id)).flatten()
     }
 }
 
@@ -345,6 +353,8 @@ pub struct ListPlace {
     pub key: String,
     pub focus_label: String,
     pub focus_id: String,
+    /// The id of the item playing now ([`ListItem::id`]), if one is.
+    pub playing_id: String,
 }
 
 /// An app tveee can ask what it's playing and tell what to do, through an

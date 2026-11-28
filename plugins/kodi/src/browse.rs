@@ -159,7 +159,7 @@ pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
         .map(|r| ListItem { section: None, id: r.path.clone(), label: r.label.clone(), meta: Some(r.label2.clone()).filter(|m| !m.is_empty()), folder: r.folder, go: go_for(r, p.window) })
         .collect();
     let title = if p.name.is_empty() { p.path.clone() } else { p.name.clone() };
-    let mut l = ContextList { title, kind: "folder", key: key_of(p), items, at: None, up, reopen: Some(reopen) };
+    let mut l = ContextList { title, kind: "folder", key: key_of(p), items, playing: None, at: None, up, reopen: Some(reopen) };
     // the highlighted row: by its path, else its label
     l.at = l.find(&list_place(p));
     l
@@ -173,13 +173,31 @@ pub fn key_of(p: &Place) -> String {
 
 /// Where Kodi's list is, for the ui to follow.
 pub fn list_place(p: &Place) -> ListPlace {
-    ListPlace { key: key_of(p), focus_label: p.focus.0.clone(), focus_id: p.focus.1.clone() }
+    ListPlace { key: key_of(p), focus_label: p.focus.0.clone(), focus_id: p.focus.1.clone(), playing_id: String::new() }
+}
+
+/// The file Kodi's player is playing, if it's playing one.
+pub fn playing_file(tv: &Tv) -> Option<String> {
+    let (id, _) = super::player_id(tv).ok()??;
+    let r = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":["file"]}}"#)).ok()?;
+    Some(r.pointer("/item/file")?.as_str()?.to_string()).filter(|f| !f.is_empty())
+}
+
+/// Where Kodi's list is, and what's playing in it (by its file).
+pub fn place_now(tv: &Tv) -> Result<Option<ListPlace>> {
+    let Some(p) = place(tv)? else { return Ok(None) };
+    let mut l = list_place(&p);
+    l.playing_id = playing_file(tv).unwrap_or_default();
+    Ok(Some(l))
 }
 
 /// The list Kodi is showing, if it's showing one.
 pub fn list(tv: &Tv) -> Result<Option<ContextList>> {
     let Some(p) = place(tv)? else { return Ok(None) };
-    Ok(Some(list_of(&p, &rows(tv, &p)?)))
+    let mut l = list_of(&p, &rows(tv, &p)?);
+    // the song (or video) playing, if it's one of these
+    l.playing = playing_file(tv).and_then(|f| l.find_playing(&f));
+    Ok(Some(l))
 }
 
 #[cfg(test)]

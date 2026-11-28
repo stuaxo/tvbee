@@ -596,7 +596,8 @@ pub fn list_lines(l: &crate::provider::ContextList, app: &str) -> Vec<String> {
             out.push(format!("─ {}", i.section.as_deref().unwrap_or_default()));
         }
         part.clone_from(&i.section);
-        let mark = if l.at == Some(n) { if l.kind == "folder" { "›" } else { "▶" } } else { " " };
+        // the same marks in every list: ▶ playing now, › the app's highlight
+        let mark = if l.playing == Some(n) { "▶" } else if l.at == Some(n) { "›" } else { " " };
         let name = format!("{}{}", i.label, if i.folder { "/" } else { "" });
         let meta = i.meta.as_deref().map(|m| format!("  {m}")).unwrap_or_default();
         out.push(format!("{mark} {:>3}  {name:<w$}{meta}", n + 1).trim_end().to_string());
@@ -801,11 +802,16 @@ mod tests {
     fn list_printed() {
         use crate::provider::{ContextList, ListItem};
         let item = |label: &str, folder, meta: Option<&str>| ListItem { section: None, id: String::new(), label: label.into(), meta: meta.map(str::to_string), folder, go: crate::more::Go::Link(String::new()) };
-        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], at: Some(1), up: None, reopen: None };
+        let l = ContextList { title: "Artists".into(), kind: "folder", key: String::new(), items: vec![item("Portishead", true, None), item("Radiohead", true, Some("9 albums")), item("Exit Music.flac", false, None)], playing: None, at: Some(1), up: None, reopen: None };
         let lines = list_lines(&l, "Kodi");
         assert_eq!(lines[0], "Artists (Kodi, 3 items)");
         assert_eq!(lines[1], "    1  Portishead/");
         assert_eq!(lines[2], "›   2  Radiohead/       9 albums");
+        // ▶ playing now, apart from the highlight (the same marks in every list)
+        let mut both = l.clone();
+        both.playing = Some(2);
+        let marks: Vec<String> = list_lines(&both, "Kodi").iter().skip(1).map(|x| x.chars().next().unwrap_or(' ').to_string()).collect();
+        assert_eq!(marks, [" ", "›", "▶"]);
         assert_eq!(lines[3], "    3  Exit Music.flac");
         // parts: a subheading where each starts
         let mut l = l;

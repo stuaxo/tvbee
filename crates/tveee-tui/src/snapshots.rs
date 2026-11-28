@@ -630,13 +630,13 @@ fn kodi_artists() -> TvState {
             item("musicdb://artists/9/", "Radiohead", true, Some("9 albums")),
             item("smb://nas/music/exit.flac", "Exit Music.flac", false, Some("4:24")),
         ],
-        at: Some(2),
+        playing: None, at: Some(2),
         up: None,
         reopen: None,
     };
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
-        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into() });
+        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into(), playing_id: String::new() });
     }
     st
 }
@@ -720,7 +720,7 @@ fn list_pane_follows_kodi() {
     a.list_sync(Change::Snapshot);
     // Kodi's highlight moves to Portishead: the pane follows
     let mut moved = st.clone();
-    moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Portishead".into(), focus_id: "musicdb://artists/7/".into() });
+    moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Portishead".into(), focus_id: "musicdb://artists/7/".into(), playing_id: String::new() });
     *held.lock().unwrap() = Arc::new(moved);
     a.st = h.state();
     a.list_sync(Change::Snapshot);
@@ -729,7 +729,7 @@ fn list_pane_follows_kodi() {
     assert!(rx.try_iter().next().is_none());
     // Kodi opens another folder: its items are read (once)
     let mut other = st;
-    other.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new() });
+    other.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/9/".into(), focus_label: "OK Computer".into(), focus_id: String::new(), playing_id: String::new() });
     *held.lock().unwrap() = Arc::new(other);
     a.st = h.state();
     a.list_sync(Change::Snapshot);
@@ -939,7 +939,7 @@ fn list_trail_and_going_up() {
         kind: "folder",
         key: key.into(),
         items: Vec::new(),
-        at: None,
+        playing: None, at: None,
         up: up.map(|(k, g)| (k.to_string(), Go::Link(g.into()))),
         reopen: Some(Go::Link(format!("open:{key}"))),
     };
@@ -983,4 +983,36 @@ fn list_trail_and_going_up() {
     a.list_key(0, KeyCode::Backspace, KeyModifiers::NONE, &h);
     assert_eq!(a.prompt, "r");
     assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
+}
+
+#[test]
+fn playing_marked_apart_from_the_highlight() {
+    use tveee_core::provider::ListPlace;
+    // Kodi's highlight on Radiohead (›), the file playing is another item (▶)
+    let mut st = kodi_artists();
+    if let Some(s) = st.snap.as_mut() {
+        s.list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: "Radiohead".into(), focus_id: "musicdb://artists/9/".into(), playing_id: "smb://nas/music/exit.flac".into() });
+    }
+    let (mut a, _rx, _h) = app_seeing(st.clone());
+    a.overlay = Overlay::List { sel: 0 };
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("› Radiohead/") && s.contains("▶ Exit Music.flac"), "{s}");
+
+    // no highlight of its own (YouTube): the pane follows what's playing
+    let (mut b, _rx, hb, held) = app_holding(st.clone());
+    let playing = |id: &str| {
+        let mut moved = st.clone();
+        moved.snap.as_mut().unwrap().list_place = Some(ListPlace { key: "10502|musicdb://artists/".into(), focus_label: String::new(), focus_id: String::new(), playing_id: id.into() });
+        *held.lock().unwrap() = Arc::new(moved);
+    };
+    b.overlay = Overlay::List { sel: 0 };
+    playing("musicdb://artists/7/");
+    b.st = hb.state();
+    b.list_sync(Change::Snapshot);
+    assert_eq!(b.overlay, Overlay::List { sel: 1 });
+    playing("smb://nas/music/exit.flac");
+    b.st = hb.state();
+    b.list_sync(Change::Snapshot);
+    assert_eq!(b.overlay, Overlay::List { sel: 3 });
 }

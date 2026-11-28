@@ -66,7 +66,7 @@ impl App {
     pub(super) fn open_list(&mut self, actions: &Handle) {
         self.prompt.clear();
         self.list_seen = None;
-        let at = self.list_ok().and_then(|l| l.at).unwrap_or(0);
+        let at = self.list_ok().and_then(|l| l.at.or(l.playing)).unwrap_or(0);
         self.overlay = Overlay::List { sel: at };
         let _ = actions.send(Action::WatchList(true));
         let _ = actions.send(Action::LoadList);
@@ -165,21 +165,29 @@ impl App {
                 self.crumbs = next_trail(&self.crumbs, &l);
             }
             if let Some(l) = self.list_ok() {
-                let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p)).or(l.at).unwrap_or(0);
+                let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id))).or(l.at).or(l.playing).unwrap_or(0);
                 self.overlay = Overlay::List { sel: at };
             }
             self.list_seen = place;
             return;
         }
         let Some(p) = place else { return };
+        // an app with a highlight of its own (Kodi) is followed by that;
+        // one without (YouTube) by what's playing
+        let has_focus = !p.focus_id.is_empty() || !p.focus_label.is_empty();
         if loaded.as_deref() != Some(p.key.as_str()) {
             // another list on the app's screen: its items, once
             if !self.st.list_loading {
                 let _ = self.engine.send(Action::LoadList);
             }
-        } else if self.list_seen.as_ref().is_none_or(|s| s.focus_id != p.focus_id || s.focus_label != p.focus_label) {
+        } else if has_focus && self.list_seen.as_ref().is_none_or(|s| s.focus_id != p.focus_id || s.focus_label != p.focus_label) {
             // the app's highlight moved: follow it
             if let Some(at) = self.list_ok().and_then(|l| l.find(&p)) {
+                self.overlay = Overlay::List { sel: at };
+            }
+        } else if !has_focus && self.list_seen.as_ref().is_none_or(|s| s.playing_id != p.playing_id) {
+            // no highlight of its own (YouTube): follow what's playing
+            if let Some(at) = self.list_ok().and_then(|l| l.find_playing(&p.playing_id)) {
                 self.overlay = Overlay::List { sel: at };
             }
         } else {
@@ -246,7 +254,10 @@ impl App {
                 });
                 rows_at.push(None);
                 // the app's own highlight, marked
-                let theirs = self.st.snap.as_ref().and_then(|s| s.list_place.as_ref()).filter(|p| p.key == l.key).and_then(|p| l.find(p)).or(l.at);
+                // the same marks in every list: ▶ playing now, › the app's own highlight
+                let place = self.st.snap.as_ref().and_then(|s| s.list_place.as_ref()).filter(|p| p.key == l.key);
+                let theirs = place.map_or(l.at, |p| l.find(p));
+                let playing = place.map_or(l.playing, |p| l.find_playing(&p.playing_id));
                 // rows that fit: heading, filter, hint and borders aside
                 let room = usize::from(area.height.saturating_sub(8)).max(3);
                 // the rows: the items shown, each part's subheading before it
@@ -278,7 +289,7 @@ impl App {
                         }
                     };
                     let item = &l.items[i];
-                    let mark = if theirs == Some(i) { "›" } else { " " };
+                    let mark = if playing == Some(i) { "▶" } else if theirs == Some(i) { "›" } else { " " };
                     let name = format!("{}{}", item.label, if item.folder { "/" } else { "" });
                     let name: String = if name.chars().count() > label_w { format!("{}…", name.chars().take(label_w.saturating_sub(1)).collect::<String>()) } else { name };
                     let meta = item.meta.clone().unwrap_or_default();

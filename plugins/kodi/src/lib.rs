@@ -524,8 +524,8 @@ impl tveee_core::provider::Player for Kodi {
         true
     }
     fn list_place(&self, tv: &Tv) -> Outcome<Option<tveee_core::provider::ListPlace>> {
-        match browse::place(tv) {
-            Ok(p) => Outcome::Handled(p.as_ref().map(browse::list_place)),
+        match browse::place_now(tv) {
+            Ok(p) => Outcome::Handled(p),
             Err(Error::Unavailable(_)) => Outcome::Fallback,
             Err(e) => Outcome::Failed(e),
         }
