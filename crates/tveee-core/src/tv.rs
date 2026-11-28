@@ -329,7 +329,7 @@ impl Tv {
 
 /// Owns its own `Tv` handle so it can outlive the borrow that made it.
 pub struct Forward {
-    tv: Tv,
+    pub(crate) tv: Tv,
     pub port: u16,
 }
 
