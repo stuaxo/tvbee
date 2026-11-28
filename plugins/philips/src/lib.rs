@@ -4,6 +4,7 @@
 //! enabled when the Philips system service package is installed.
 
 pub mod ambilight;
+pub mod nettv;
 
 use tveee_core::Ctx;
 use tveee_core::actions::ActionDescriptor;
@@ -752,12 +753,12 @@ pub fn tune_body(ch: &tveee_core::provider::Channel, list: &str) -> String {
     )
 }
 
-/// This plugin's providers: live TV.
+/// This plugin's providers: live TV, and the NetTV browser.
 pub fn providers() -> Vec<&'static dyn tveee_core::provider::Provider> {
-    vec![&FREEVIEW]
+    vec![&FREEVIEW, &nettv::NETTV]
 }
 
-/// This plugin's actions: live TV's, JointSpace's and the Ambilight's.
+/// This plugin's actions: live TV's, JointSpace's, the Ambilight's and NetTV's.
 pub fn actions() -> Vec<ActionDescriptor> {
     let mut v = vec![
         ActionDescriptor::terminal("philips.jointspace", CAT, "read a path of Philips' TV API (JointSpace)", jointspace)
@@ -771,6 +772,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             ),
     ];
     v.extend(crate::ambilight::actions());
+    v.extend(crate::nettv::actions());
     v
 }
 

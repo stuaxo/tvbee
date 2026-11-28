@@ -25,6 +25,14 @@ pub fn sockets(proc_net_unix: &str) -> Vec<String> {
     names
 }
 
+/// The devtools socket of a WebView in process `pid`
+/// (`webview_devtools_remote_<pid>`), if it has one: WebViews name theirs
+/// after their process.
+pub fn webview_socket(proc_net_unix: &str, pid: &str) -> Option<String> {
+    let name = format!("webview_devtools_remote_{}", pid.trim());
+    sockets(proc_net_unix).into_iter().find(|s| *s == name)
+}
+
 /// Keep connections open between calls (the ui, which asks every second);
 /// otherwise each call opens one and closes it (one-off commands).
 static KEEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -168,7 +176,15 @@ impl Conn {
     /// to another app are skipped.
     pub fn open(tv: &Tv, pkg: &str) -> Option<Conn> {
         let unix = tv.shell(&["cat", "/proc/net/unix"]).ok()?;
-        sockets(&unix).into_iter().find_map(|sock| {
+        let mut socks = sockets(&unix);
+        // a WebView's socket names its process: the app's own one first (a
+        // server that doesn't say whose it is would do otherwise)
+        let pid = tv.shell(&["pidof", pkg]).unwrap_or_default();
+        if let Some(own) = pid.split_whitespace().find_map(|p| webview_socket(&unix, p)) {
+            socks.retain(|s| *s != own);
+            socks.insert(0, own);
+        }
+        socks.into_iter().find_map(|sock| {
             let fwd = tv.forward_abstract(&sock).ok()?;
             let says = tv.ask(&Version { port: fwd.port }).ok()?;
             let theirs = says.is_some_and(|p| p != pkg);
@@ -202,6 +218,21 @@ impl Conn {
             }
         }
         failed("devtools: no page answered")
+    }
+
+    /// Run `expr` on each open page: (url, its string result, or why not).
+    pub fn eval_each(&self, expr: &str) -> Result<Vec<(String, Result<String>)>> {
+        Ok(self
+            .page_list()?
+            .into_iter()
+            .map(|(url, ws)| {
+                let r = match ws {
+                    Some(ws) => evaluate(self.fwd.port, &ws, expr),
+                    None => failed("devtools: the page has no debugger (another client may have it)"),
+                };
+                (url, r)
+            })
+            .collect())
     }
 
     /// Move the page's video: by `delta` seconds, or to `fraction` of its length.
@@ -401,6 +432,8 @@ mod tests {
 00000000: 00000003 00000000 00000000 0001 03 99 /dev/socket/zygote
 00000000: 00000002 00000000 00010000 0001 01 520623 @content_shell_devtools_remote";
         assert_eq!(sockets(unix), vec!["content_shell_devtools_remote", "webview_devtools_remote_2020"]);
+        assert_eq!(webview_socket(unix, "2020\n").as_deref(), Some("webview_devtools_remote_2020"));
+        assert_eq!(webview_socket(unix, "202"), None);
     }
 
     #[test]

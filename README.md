@@ -217,7 +217,14 @@ forward, since its keys only work there; `app kodi play` brings Kodi) take
 Not listed above: `ui` (built with `--features ui`), and commands from plugins
 that are enabled when the TV has what they're for: `jointspace` and `ambilight`
 (`philips`; Ambilight: power, styles, each light's colour, handing the lights
-to outside control). Those plugins
+to outside control), and for working on NetTV web apps (`philips`):
+`nettv-apps` lists the wrapper packages, `nettv-open <url>` opens a page in
+the NetTV browser, `nettv-inspect` and `nettv-eval <js>` look into its pages
+and run JavaScript there (when the TV lets its WebView be debugged),
+`nettv-log` reads its log, and `nettv-install <file.apk>` and
+`nettv-uninstall <package>` put wrappers of your own on and take them off.
+With the WebView debuggable, what a NetTV app plays shows its exact
+position and seeks exactly. Those plugins
 also add their apps: iPlayer, Arte, Dailymotion and live TV (`philips`),
 YouTube (`youtube`). The `kodi` plugin (when Kodi is installed) uses Kodi's own
 remote control, once it's on in Kodi (Settings > Services > Control > Allow
