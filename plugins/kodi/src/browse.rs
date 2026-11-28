@@ -5,7 +5,6 @@
 
 use super::{Result, Tv, call};
 use serde_json::Value;
-use tveee_core::more::Go;
 use tveee_core::provider::{ListCrumb, ListPlace};
 
 /// Where Kodi's screen is: its window, the folder shown and how many rows.
@@ -120,11 +119,7 @@ pub fn path_crumbs(window: u64, path: &str) -> (Vec<ListCrumb>, bool) {
         let mut c = w.chars();
         c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect::<String>())
     };
-    let crumb = |title: String, p: &str| ListCrumb {
-        title,
-        key: format!("{window}|{}", bare(p)),
-        go: Some(Go::Link(if p.is_empty() { format!("kodi-window:{w}") } else { format!("kodi-window:{w}|{p}") })),
-    };
+    let crumb = |title: String, p: &str| ListCrumb { title, key: format!("{window}|{}", bare(p)), go: Some(super::link::Link::window(w, Some(p)).go()) };
     let mut out = vec![crumb(top_title, "")];
     let path = bare(path);
     if path.is_empty() {
@@ -185,6 +180,7 @@ pub fn place_now(tv: &Tv) -> Result<Option<ListPlace>> {
 
 #[cfg(test)]
 mod tests {
+    use tveee_core::more::Go;
 
     #[test]
     fn crumbs_from_the_path() {

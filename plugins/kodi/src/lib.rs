@@ -20,6 +20,7 @@ pub const PACKAGE: &str = "org.xbmc.kodi";
 pub mod addons;
 pub mod browse;
 pub mod library;
+pub mod link;
 pub mod rpc;
 pub mod sideload;
 const PAIRING: &str = "kodi";
@@ -424,11 +425,11 @@ const PLACES: &[Place] = &[
 
 /// The GUI.ActivateWindow params for a `kodi-window:` link.
 pub fn window_params(link: &str) -> Option<Value> {
-    let w = link.strip_prefix("kodi-window:")?;
-    Some(match w.split_once('|') {
-        Some((window, param)) => serde_json::json!({ "window": window, "parameters": [param] }),
-        None => serde_json::json!({ "window": w }),
-    })
+    match link::Link::parse(link)? {
+        link::Link::Window { window, path: Some(p) } => Some(serde_json::json!({ "window": window, "parameters": [p] })),
+        link::Link::Window { window, path: None } => Some(serde_json::json!({ "window": window })),
+        _ => None,
+    }
 }
 
 /// Kodi in front, and its API answering (starting Kodi if need be).
@@ -553,18 +554,21 @@ impl tveee_core::provider::Player for Kodi {
         }
     }
     fn show_at(&self, tv: &Tv, at: &str) -> Outcome<()> {
-        // Kodi's top: its home screen
-        if at == library::ROOT {
-            return tveee_core::provider::Provider::open_here(self, tv, "kodi-window:home");
-        }
-        let (m, _, path) = library::parse(at);
-        let window = if path.is_empty() { format!("kodi-window:{}", m.window_name()) } else { format!("kodi-window:{}|{path}", m.window_name()) };
-        tveee_core::provider::Provider::open_here(self, tv, &window)
+        use link::Link;
+        let window = match Link::parse(at) {
+            // Kodi's top: its home screen
+            Some(Link::Root) => Link::window("home", None),
+            _ => {
+                let (m, _, path) = library::parse(at);
+                Link::window(m.window_name(), Some(&path))
+            }
+        };
+        tveee_core::provider::Provider::open_here(self, tv, &window.to_string())
     }
     fn go(&self, tv: &Tv, to: &tveee_core::more::Go) -> Outcome<String> {
         use tveee_core::provider::Provider;
         let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };
-        if link.starts_with(library::PLAY) {
+        if matches!(link::Link::parse(link), Some(link::Link::Play { .. })) {
             return library::play(tv, link).into();
         }
         // a folder (from the command line's list): shown on Kodi's screen
@@ -576,7 +580,7 @@ impl tveee_core::provider::Player for Kodi {
             };
         }
         match self.open_here(tv, link) {
-            Outcome::Handled(()) if link.starts_with("kodi-window:") => Outcome::Handled("opened it in Kodi".into()),
+            Outcome::Handled(()) if matches!(link::Link::parse(link), Some(link::Link::Window { .. })) => Outcome::Handled("opened it in Kodi".into()),
             Outcome::Handled(()) => Outcome::Handled("playing it in Kodi".into()),
             Outcome::Fallback => Outcome::Fallback,
             Outcome::Failed(e) => Outcome::Failed(e),
@@ -895,7 +899,7 @@ fn play(tv: &Tv, q: &str, front: bool) -> Result<String> {
         call_json(tv, "Player.Open", serde_json::json!({ "item": { "movieid": f.id } }))?;
         Ok(format!("playing {}", f.title))
     } else {
-        let link = format!("kodi-window:videos|videodb://tvshows/titles/{}/", f.id);
+        let link = link::Link::window("videos", Some(&format!("videodb://tvshows/titles/{}/", f.id))).to_string();
         call_json(tv, "GUI.ActivateWindow", window_params(&link).unwrap_or_default())?;
         Ok(format!("opened {} in Kodi", f.title))
     }
