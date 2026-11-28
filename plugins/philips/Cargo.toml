@@ -1,6 +1,6 @@
 [package]
 name = "tveee-plugin-philips"
-version = "0.2.0"
+version = "0.3.0"
 description = "tveee plugin: Philips TVs (JointSpace API, Ambilight, the live TV guide, NetTV apps)"
 edition.workspace = true
 rust-version.workspace = true
