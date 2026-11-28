@@ -10,6 +10,8 @@
 //! | A window on Kodi's screen | `kodi-window:music` or `kodi-window:music\|smb://…/` |
 //! | The queue playing | `kodi-queue:0` |
 //! | An item of it, to play from | `kodi-goto:3` |
+//! | The video's audio and subtitles | `kodi-tracks` |
+//! | One of them, to switch to | `kodi-track:audio:1`, `kodi-track:subtitle:off` |
 
 use super::library::Media;
 use std::fmt;
@@ -56,6 +58,15 @@ pub enum Link {
         /// Its position, from 0.
         position: usize,
     },
+    /// The video playing's audio streams and subtitles.
+    Tracks,
+    /// One of them, to switch to.
+    Track {
+        /// An audio stream (else a subtitle).
+        audio: bool,
+        /// Kodi's index (None: subtitles off).
+        index: Option<u64>,
+    },
 }
 
 const ROOT: &str = "kodi|";
@@ -63,6 +74,8 @@ const PLAY: &str = "kodi-play:";
 const WINDOW: &str = "kodi-window:";
 const QUEUE: &str = "kodi-queue:";
 const GOTO: &str = "kodi-goto:";
+const TRACKS: &str = "kodi-tracks";
+const TRACK: &str = "kodi-track:";
 
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -75,6 +88,14 @@ impl fmt::Display for Link {
             Link::Window { window, path: Some(p) } => write!(f, "{WINDOW}{window}|{p}"),
             Link::Queue { playlist } => write!(f, "{QUEUE}{playlist}"),
             Link::GoTo { position } => write!(f, "{GOTO}{position}"),
+            Link::Tracks => f.write_str(TRACKS),
+            Link::Track { audio, index } => {
+                let kind = if *audio { "audio" } else { "subtitle" };
+                match index {
+                    Some(n) => write!(f, "{TRACK}{kind}:{n}"),
+                    None => write!(f, "{TRACK}{kind}:off"),
+                }
+            }
         }
     }
 }
@@ -95,6 +116,19 @@ impl Link {
         }
         if let Some(n) = s.strip_prefix(QUEUE) {
             return n.parse().ok().map(|playlist| Link::Queue { playlist });
+        }
+        if s == TRACKS {
+            return Some(Link::Tracks);
+        }
+        if let Some(rest) = s.strip_prefix(TRACK) {
+            let (kind, n) = rest.split_once(':')?;
+            let audio = match kind {
+                "audio" => true,
+                "subtitle" => false,
+                _ => return None,
+            };
+            let index = if n == "off" { None } else { Some(n.parse().ok()?) };
+            return Some(Link::Track { audio, index });
         }
         if let Some(n) = s.strip_prefix(GOTO) {
             return n.parse().ok().map(|position| Link::GoTo { position });
@@ -147,6 +181,9 @@ mod tests {
             Link::window("videos", Some("videodb://movies/titles/")),
             Link::Queue { playlist: 0 },
             Link::GoTo { position: 3 },
+            Link::Tracks,
+            Link::Track { audio: true, index: Some(1) },
+            Link::Track { audio: false, index: None },
         ];
         for l in links {
             assert_eq!(Link::parse(&l.to_string()), Some(l.clone()), "{l}");
