@@ -359,6 +359,7 @@ pub(super) const HELP: &str = " everywhere
    : ctrl+p commands: everything tveee can do, found by typing a few letters
             (the ui's own too: the log of what tveee did lately, help, ...)
    F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
+   w        wake the TV (from standby)
    F        free memory (force-stop idle apps)   S  sleep   R  restart the app
             in front, coming back where it was (YouTube, Kodi)
    i        system info      a      launch an app (space there: front / restart / close)

@@ -921,7 +921,7 @@ impl App {
                     None => lines.push((Line::from("nothing playing that tveee recognises").italic(), None)),
                 }
                 if s.standby {
-                    lines.push((Line::from("press . then w to wake the TV").fg(Color::Yellow), None));
+                    lines.push((Line::from("press w to wake the TV").fg(Color::Yellow), None));
                 }
                 lines.push((Line::default(), None));
                 let vol_w = width.saturating_sub(9 + 8).clamp(10, 40);

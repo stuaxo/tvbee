@@ -91,6 +91,7 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char(':'), _) => Input::OpenPalette,
         (KeyCode::Char('F'), _) => act(Run { id: "apps.free", args: Vec::new() }),
         (KeyCode::Char('S'), _) => act(Run { id: "power.sleep", args: Vec::new() }),
+        (KeyCode::Char('w'), _) => act(Run { id: "power.wake", args: Vec::new() }),
         (KeyCode::Char('R'), _) => Input::RestartFront,
         (KeyCode::Char('u'), _) => Input::ToggleUrl,
         (KeyCode::Char('y'), _) => Input::CopyUrl,

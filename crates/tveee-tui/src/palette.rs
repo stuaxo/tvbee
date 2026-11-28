@@ -50,10 +50,15 @@ pub struct Now {
     pub provider: Option<(&'static str, bool)>,
     /// What's playing ("video", "audio"), if anything is.
     pub playing: Option<&'static str>,
+    /// The TV is in standby: waking it is what's wanted.
+    pub standby: bool,
 }
 
 impl Now {
     pub fn rank(&self, a: &ActionDescriptor) -> u8 {
+        if self.standby && a.id == "power.wake" {
+            return 0;
+        }
         let own = self.provider.is_some_and(|(id, guide)| a.category == id || (guide && a.category == "guide"));
         match (own, a.media) {
             (_, Some(m)) if self.playing != Some(m) => 3,
@@ -160,7 +165,7 @@ impl App {
         let pkg = snap.and_then(|s| s.focus.as_deref()).map(|f| f.split('/').next().unwrap_or(f).to_string());
         let provider = pkg.as_deref().and_then(tveee_core::provider::for_package).map(|p| (p.id(), p.guide().is_some()));
         let playing = snap.and_then(|s| s.activity.as_ref()).and_then(|a| a.media);
-        Now { provider, playing }
+        Now { provider, playing, standby: snap.is_some_and(|s| s.standby) }
     }
 
     /// Keys in the palette: typing narrows it, ↑/↓ choose, ⏎ runs (or asks
@@ -328,11 +333,17 @@ mod tests {
         // nothing in front: as listed (subtitles last: nothing's playing)
         assert_eq!(order(&Now::default()), ["power.sleep", "media.next", "kodi.find", "kodi.subtitles"]);
         // Kodi playing music: Kodi's own, then playback; subtitles last
-        let music = Now { provider: Some(("kodi", false)), playing: Some("audio") };
+        let music = Now { provider: Some(("kodi", false)), playing: Some("audio"), standby: false };
         assert_eq!(order(&music), ["kodi.find", "media.next", "power.sleep", "kodi.subtitles"]);
         // Kodi playing video: subtitles are relevant now
-        let video = Now { provider: Some(("kodi", false)), playing: Some("video") };
+        let video = Now { provider: Some(("kodi", false)), playing: Some("video"), standby: false };
         assert_eq!(order(&video)[..2], ["kodi.subtitles", "kodi.find"]);
+        // in standby, waking it first
+        let mut with_wake = a.clone();
+        with_wake.push(A::new("power.wake", "power", "wake", ok));
+        let asleep = Now { standby: true, ..Now::default() };
+        let first = palette_ranked(&with_wake, "", &asleep).into_iter().next();
+        assert_eq!(first, Some(Item::Action(with_wake.len() - 1)));
         // typed: the match comes first, relevance breaks ties
         assert_eq!(palette_ranked(&a, "sleep", &music).first(), Some(&Item::Action(0)));
     }
