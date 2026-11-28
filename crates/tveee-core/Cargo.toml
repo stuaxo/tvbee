@@ -1,6 +1,6 @@
 [package]
 name = "tveee-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "tveee's core: talking to the TV, actions, plugins' building blocks, and the engine front ends run on"
 edition.workspace = true
 rust-version.workspace = true
