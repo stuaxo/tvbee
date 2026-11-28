@@ -2,9 +2,119 @@
 //! panel, and pop-up helpers.
 
 use super::*;
+use ratatui::layout::Rect;
 
 /// Height of the memory graph.
 pub(super) const GRAPH_ROWS: u16 = 3;
+
+/// Whether the screen (inside its border) is wide enough for a column on
+/// the right for the panels.
+pub fn is_wide(area: Rect) -> bool {
+    area.width >= SIDE_FROM
+}
+
+/// What the main screen shows besides what's playing, each how tall it
+/// wants to be (the Ambilight's depends on its width).
+pub struct Wants<'a> {
+    /// The remote's D-pad (remote mode; wide screens only).
+    pub dpad: bool,
+    pub preview: bool,
+    pub ambilight: Option<&'a dyn Fn(u16) -> u16>,
+    /// The system panel, and its height.
+    pub system: Option<u16>,
+}
+
+/// Where everything on the main screen goes, worked out before anything is
+/// drawn (and testable without drawing).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MainLayout {
+    /// The top line: load, memory, the quick keys.
+    pub spine: Rect,
+    /// What's playing (the card), what's left after the panels.
+    pub body: Rect,
+    /// The row(s) of keys.
+    pub footer: Rect,
+    /// The status line.
+    pub status: Rect,
+    /// A column on the right for the panels (else they go below the card).
+    pub wide: bool,
+    pub dpad: Option<Rect>,
+    pub preview: Option<Rect>,
+    pub ambilight: Option<Rect>,
+    pub system: Option<Rect>,
+}
+
+/// Lay out the main screen in `area` (inside its border): a small screen
+/// (no gap above the keys), `footer_rows` of keys, and the panels `wants`
+/// asks for. Wide: a column on the right, top to bottom D-pad, preview,
+/// Ambilight, system, each as tall as it wants while there's room. Narrow:
+/// below the card, from the bottom up preview, Ambilight, system, each
+/// leaving the card at least 4 rows (no D-pad: the keys are the remote).
+pub fn main_layout(area: Rect, small: bool, footer_rows: u16, wants: &Wants) -> MainLayout {
+    let [spine, body, _, footer, status] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(4),
+        Constraint::Length(u16::from(!small)),
+        Constraint::Length(footer_rows),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    let wide = is_wide(area);
+    let mut out = MainLayout { spine, body, footer, status, wide, dpad: None, preview: None, ambilight: None, system: None };
+    if wide {
+        let w = (body.width * 2 / 5).clamp(44, 64);
+        let [left, side] = Layout::horizontal([Constraint::Min(50), Constraint::Length(w)]).areas(body);
+        out.body = left;
+        let mut rest = side;
+        let mut take = |want: u16| -> Option<Rect> {
+            if rest.height < 3 {
+                return None;
+            }
+            let h = want.min(rest.height);
+            let [top, more] = Layout::vertical([Constraint::Length(h), Constraint::Min(0)]).areas(rest);
+            rest = more;
+            Some(top)
+        };
+        if wants.dpad {
+            out.dpad = take(DPAD_ROWS);
+        }
+        if wants.preview {
+            // about 16:9 in cells twice as tall as wide, and a border
+            out.preview = take((side.width.saturating_sub(2) * 9 / 32 + 3).max(6));
+        }
+        if let Some(h) = wants.ambilight {
+            out.ambilight = take(h(side.width));
+        }
+        if let Some(h) = wants.system {
+            out.system = take(h);
+        }
+    } else {
+        // (rows below what's playing, the rest above)
+        let below = |body: Rect, want: u16| {
+            let h = want.min(body.height.saturating_sub(4));
+            let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
+            (panel, top)
+        };
+        let mut rest = body;
+        if wants.preview {
+            let (panel, top) = below(rest, (rest.height / 2).clamp(6, 14));
+            out.preview = Some(panel);
+            rest = top;
+        }
+        if let Some(h) = wants.ambilight {
+            let (panel, top) = below(rest, h(rest.width));
+            out.ambilight = Some(panel);
+            rest = top;
+        }
+        if let Some(h) = wants.system {
+            let (panel, top) = below(rest, h);
+            out.system = Some(panel);
+            rest = top;
+        }
+        out.body = rest;
+    }
+    out
+}
 
 /// Which pane a scrollbar scrolls.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -534,27 +644,30 @@ impl App {
         let bs = one_row(bs, area.width);
         let places = flow(&bs, area.width);
         let rows = places.iter().map(|(r, _)| r + 1).max().unwrap_or(1);
-        let [top, body, _, footer, status] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Min(4),
-            Constraint::Length(u16::from(!small)),
-            Constraint::Length(rows),
-            Constraint::Length(1),
-        ])
-        .areas(area);
-        self.draw_spine(f, top);
-
-        // wide: a column on the right for the D-pad (remote mode) and the
-        // panels; else the panels go below what's playing
-        self.wide = body.width >= SIDE_FROM;
-        let body = if self.wide {
-            let w = (body.width * 2 / 5).clamp(44, 64);
-            let [left, side] = Layout::horizontal([Constraint::Min(50), Constraint::Length(w)]).areas(body);
-            self.draw_side(f, side);
-            left
-        } else {
-            self.stack_panels(f, body)
+        // where everything goes, worked out before anything's drawn
+        self.wide = is_wide(area);
+        let ambi = |w: u16| self.ambilight_height(w);
+        let wants = Wants {
+            dpad: self.mode == Mode::Remote,
+            preview: self.preview.open,
+            ambilight: (self.ambi.open && self.panel_id().is_some()).then_some(&ambi as &dyn Fn(u16) -> u16),
+            system: self.info_shown().then(|| self.panel_height()),
         };
+        let layout = main_layout(area, small, rows, &wants);
+        let (top, body, footer, status) = (layout.spine, layout.body, layout.footer, layout.status);
+        self.draw_spine(f, top);
+        if let Some(r) = layout.dpad {
+            self.draw_dpad(f, r);
+        }
+        if let Some(r) = layout.preview {
+            self.draw_preview(f, r);
+        }
+        if let Some(r) = layout.ambilight {
+            self.draw_ambilight(f, r);
+        }
+        if let Some(r) = layout.system {
+            self.draw_panel(f, r);
+        }
         self.draw_body(f, body);
 
         // footer: one clickable button per action
@@ -591,74 +704,6 @@ impl App {
     pub(super) fn info_shown(&self) -> bool {
         let read = self.st.snap.as_ref().is_some_and(|s| s.system.mem.is_some() && !s.standby && !self.st.seeded);
         self.system.shown.unwrap_or(self.wide && read)
-    }
-
-    /// A narrow screen: the open panels below what's playing (preview,
-    /// Ambilight, system), each leaving it at least 4 rows. Returns what's
-    /// left for it.
-    pub(super) fn stack_panels(&mut self, f: &mut Frame, body: ratatui::layout::Rect) -> ratatui::layout::Rect {
-        // (rows below what's playing, the rest above)
-        let below = |body: ratatui::layout::Rect, want: u16| {
-            let h = want.min(body.height.saturating_sub(4));
-            let [top, panel] = Layout::vertical([Constraint::Min(4), Constraint::Length(h)]).areas(body);
-            (panel, top)
-        };
-        let mut body = body;
-        if self.preview.open {
-            let (panel, top) = below(body, (body.height / 2).clamp(6, 14));
-            self.draw_preview(f, panel);
-            body = top;
-        }
-        if self.ambi.open && self.panel_id().is_some() {
-            let (panel, top) = below(body, self.ambilight_height(body.width));
-            self.draw_ambilight(f, panel);
-            body = top;
-        }
-        if self.info_shown() {
-            let (panel, top) = below(body, self.panel_height());
-            self.draw_panel(f, panel);
-            body = top;
-        }
-        body
-    }
-
-    /// A wide screen's right-hand column, top to bottom: the D-pad (remote
-    /// mode), the preview, the Ambilight and the system panel, each as
-    /// tall as it wants while there's room.
-    pub(super) fn draw_side(&mut self, f: &mut Frame, side: ratatui::layout::Rect) {
-        let mut rest = side;
-        let mut take = |want: u16| -> Option<ratatui::layout::Rect> {
-            if rest.height < 3 {
-                return None;
-            }
-            let h = want.min(rest.height);
-            let [top, more] = Layout::vertical([Constraint::Length(h), Constraint::Min(0)]).areas(rest);
-            rest = more;
-            Some(top)
-        };
-        if self.mode == Mode::Remote
-            && let Some(r) = take(DPAD_ROWS)
-        {
-            self.draw_dpad(f, r);
-        }
-        if self.preview.open {
-            // about 16:9 in cells twice as tall as wide, and a border
-            let want = (side.width.saturating_sub(2) * 9 / 32 + 3).max(6);
-            if let Some(r) = take(want) {
-                self.draw_preview(f, r);
-            }
-        }
-        if self.ambi.open
-            && self.panel_id().is_some()
-            && let Some(r) = take(self.ambilight_height(side.width))
-        {
-            self.draw_ambilight(f, r);
-        }
-        if self.info_shown()
-            && let Some(r) = take(self.panel_height())
-        {
-            self.draw_panel(f, r);
-        }
     }
 
     /// The remote's keys to click (remote mode, wide screens): arrows and
