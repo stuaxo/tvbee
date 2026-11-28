@@ -121,6 +121,9 @@ struct App {
     options_on_tabs: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
     plugins: Vec<tveee_core::plugin::PluginState>,
+    /// Every plugin there is (from the start): what's installed again when
+    /// one is turned on or off. None in tests (nothing installed).
+    all_plugins: Option<fn() -> Vec<tveee_core::plugin::Plugin>>,
     /// What has been typed into the open prompt.
     prompt: String,
     /// The search box's app choices, made when it opens.
@@ -441,6 +444,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
     app.plugins = c.plugins.clone();
+    app.all_plugins = Some(c.all);
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -546,6 +550,7 @@ impl App {
             options_plugins: false,
             options_on_tabs: false,
             plugins: Vec::new(),
+            all_plugins: None,
             prompt: String::new(),
             search_targets: Vec::new(),
             settling: None,

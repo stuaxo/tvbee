@@ -134,6 +134,9 @@ pub enum Action {
     LoadList,
     /// Choose an item from it; its list is read again after.
     ListGo(crate::more::Go),
+    /// A plugin was turned on or off (installed again): what it offers
+    /// (panels) and what's shown are read again.
+    Replugged,
     /// Open a browsed list's folder (a link, see
     /// [`crate::provider::ContextList::browsed`]): read here, and shown on
     /// the app's screen too when `show`.

@@ -1445,3 +1445,22 @@ fn options_left_right_set_the_row() {
     a.options_key(0, KeyCode::Esc);
     assert_eq!(a.overlay, Overlay::None);
 }
+
+#[test]
+fn a_plugin_turned_off_goes_at_once() {
+    use tveee_core::plugin::{PluginState, Source};
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    a.plugins = vec![PluginState { name: "kodi", desc: "Kodi", enabled: true, source: Source::Cache }];
+    a.options_plugins = true;
+    a.overlay = Overlay::Options(0);
+    // ← turns it off: now, not at the next start
+    a.options_key(0, KeyCode::Left);
+    assert!(!a.plugins[0].enabled && a.plugins[0].source == Source::Override);
+    assert_eq!(a.note, "plugin kodi: off");
+    assert_eq!(a.plugin_opt("kodi"), Some(false));
+    let s = screen(&mut a, DESKTOP);
+    assert!(!s.contains("(from the next start)"), "{s}");
+    a.options_key(0, KeyCode::Right);
+    assert!(a.plugins[0].enabled);
+}

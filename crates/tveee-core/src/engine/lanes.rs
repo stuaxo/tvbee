@@ -661,7 +661,9 @@ impl Actor {
                 }
                 None => "jumping needs a video tveee can read (currently YouTube)".into(),
             },
-            Action::Run { id, args } => match crate::actions::find(&self.actions, id) {
+            // the enabled plugins' actions as installed now (a plugin turned
+            // on or off since the start), else the ones it started with
+            Action::Run { id, args } => match crate::actions::find(crate::actions::installed().unwrap_or(&self.actions), id) {
                 Some(a) if args.is_empty() && matches!(a.params, Params::Text { .. }) => "that needs some text".into(),
                 // one line, for a status line
                 Some(a) => a.run(&self.tv, &args)?.text.replace('\n', "; "),
@@ -739,6 +741,13 @@ impl Actor {
                 let l = p.list_at(&self.tv, &at).or_fallback().map_err(|e| e.to_string());
                 let _ = tx.send(Msg::List(l));
                 shown.unwrap_or_default()
+            }
+            Action::Replugged => {
+                // the panels the plugins on now offer; what's in front and
+                // what it's playing are read again after any action
+                let panels = crate::panel::all().iter().filter(|p| (p.available)(&self.tv)).map(|p| p.id).collect();
+                let _ = tx.send(Msg::Panels(panels));
+                String::new()
             }
             Action::Refresh => "refreshed".into(),
             // the refresh is woken after every action: nothing more to do

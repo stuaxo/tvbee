@@ -234,6 +234,18 @@ impl ActionDescriptor {
 }
 
 /// The action with this id.
+static REGISTRY: crate::plugin::Registry<ActionDescriptor> = crate::plugin::Registry::new();
+
+/// Set the enabled plugins' actions (see [`crate::plugin::install_enabled`]).
+pub fn install(actions: Vec<ActionDescriptor>) {
+    REGISTRY.install(actions);
+}
+
+/// The enabled plugins' actions, as last installed (None: not yet).
+pub fn installed() -> Option<&'static [ActionDescriptor]> {
+    REGISTRY.get()
+}
+
 pub fn find<'a>(actions: &'a [ActionDescriptor], id: &str) -> Option<&'a ActionDescriptor> {
     actions.iter().find(|a| a.id == id)
 }

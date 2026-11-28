@@ -462,11 +462,51 @@ impl App {
     /// Save vendor plugin row `i`'s choice (None: back to checking the TV).
     pub(super) fn plugin_choice(&mut self, i: usize, choice: Option<bool>) {
         let Some(p) = self.vendor_plugins().get(i).map(|p| p.name) else { return };
-        self.note = match tveee_core::options::set_plugin(p, choice) {
-            Ok(()) => format!("plugin {p}: {} (from tveee's next start)", tveee_core::options::choice_word(choice)),
+        let saved = match (&mut self.opts, choice) {
+            // a test's own options: changed here, not saved
+            (Some(v), Some(on)) => {
+                v.push((format!("plugin.{p}"), on));
+                Ok(())
+            }
+            (Some(v), None) => {
+                v.retain(|(k, _)| *k != format!("plugin.{p}"));
+                Ok(())
+            }
+            (None, _) => tveee_core::options::set_plugin(p, choice),
+        };
+        self.note = match saved {
+            Ok(()) if choice.is_none() => format!("plugin {p}: auto (checked on the TV from tveee's next start)"),
+            Ok(()) => format!("plugin {p}: {}", tveee_core::options::choice_word(choice)),
             Err(e) => format!("couldn't save it: {e}"),
         };
         self.overlay = Overlay::Options(i);
+        // on or off: at once
+        if let Some(on) = choice {
+            self.replug(p, on);
+        }
+    }
+
+    /// Turn plugin `name` on or off now: what the plugins bring installed
+    /// again (apps, the app in front's provider, panels, actions), the
+    /// menu and palette from them, and the TV read again, so nothing it
+    /// filled in (Kodi's "paused") stays, nor waits for the next start.
+    pub(super) fn replug(&mut self, name: &str, on: bool) {
+        if let Some(s) = self.plugins.iter_mut().find(|s| s.name == name) {
+            s.enabled = on;
+            // the user's choice now, not what was found on the TV
+            s.source = tveee_core::plugin::Source::Override;
+        }
+        let Some(all) = self.all_plugins.map(|f| f()) else { return };
+        // the states lined up with every plugin (by name)
+        let states: Vec<tveee_core::plugin::PluginState> = all
+            .iter()
+            .map(|p| {
+                self.plugins.iter().find(|s| s.name == p.name).cloned().unwrap_or(tveee_core::plugin::PluginState { name: p.name, desc: p.desc, enabled: false, source: tveee_core::plugin::Source::Unknown })
+            })
+            .collect();
+        self.actions = tveee_core::plugin::install_enabled(&all, &states);
+        self.menu = self.actions.iter().filter(|a| a.key.is_some()).copied().collect();
+        let _ = self.engine.send(Action::Replugged);
     }
 
     /// Change row `i` of the tab shown: flip an option, or a vendor
@@ -624,7 +664,7 @@ impl App {
             vec![
                 Line::default(),
                 Line::from("space toggles  a: auto (found on the TV)  tab: options").fg(Color::DarkGray),
-                Line::from("changes apply from tveee's next start").fg(Color::DarkGray),
+                Line::from("changes apply at once (auto: from the next start)").fg(Color::DarkGray),
             ]
         } else {
             for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
