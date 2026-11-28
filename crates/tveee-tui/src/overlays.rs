@@ -370,23 +370,59 @@ impl App {
         self.plugins.iter().filter(|p| p.source != tveee_core::plugin::Source::Builtin).collect()
     }
 
-    /// Keys in the options dialog: ↑/↓ choose, Space/Enter change it,
-    /// Tab/←/→ switch between options and plugins, Esc closes.
+    /// Keys in the options dialog (see [`super::listnav`]): ↑/↓ choose,
+    /// ←/→ set the row (off/on, or its first/second choice), Space/⏎ flip
+    /// it, Tab the other tab; on the tab bar (↑ from the first row) ←/→
+    /// switch tabs. Esc leaves the tab bar, else closes.
     pub(super) fn options_key(&mut self, i: usize, code: KeyCode) {
         let n = if self.options_plugins { self.vendor_plugins().len() } else { tveee_core::options::OPTIONS.len() }.max(1);
-        match code {
-            KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') | KeyCode::Backspace => self.overlay = Overlay::None,
-            KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => {
-                self.options_plugins = !self.options_plugins;
-                self.overlay = Overlay::Options(0);
+        let switch = |a: &mut Self| {
+            a.options_plugins = !a.options_plugins;
+            a.overlay = Overlay::Options(0);
+        };
+        if self.options_on_tabs {
+            match code {
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => switch(self),
+                KeyCode::Down | KeyCode::Enter | KeyCode::Esc => {
+                    self.options_on_tabs = false;
+                    self.overlay = Overlay::Options(0);
+                }
+                KeyCode::Char(',') | KeyCode::Char('q') => self.close_options(),
+                _ => {}
             }
+            return;
+        }
+        match code {
+            KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') | KeyCode::Backspace => self.close_options(),
+            KeyCode::Tab | KeyCode::BackTab => switch(self),
+            // up off the first row: the tab bar
+            KeyCode::Up if i == 0 => self.options_on_tabs = true,
             c if super::listnav::is_move(c) => {
                 let to = super::listnav::step(i, n, c).unwrap_or(i);
                 self.overlay = Overlay::Options(to)
             }
+            KeyCode::Left | KeyCode::Right => self.set_option_row(i, code == KeyCode::Right),
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
             KeyCode::Char('a') if self.options_plugins => self.plugin_choice(i, None),
             _ => {}
+        }
+    }
+
+    /// Close the options (off the tab bar for next time).
+    fn close_options(&mut self) {
+        self.options_on_tabs = false;
+        self.overlay = Overlay::None;
+    }
+
+    /// Set row `i` on (its second choice) or off (its first), if it isn't.
+    fn set_option_row(&mut self, i: usize, on: bool) {
+        let now = if self.options_plugins {
+            self.vendor_plugins().get(i).map(|p| self.plugin_ticked(p))
+        } else {
+            tveee_core::options::OPTIONS.get(i).map(|o| self.opt(o.name))
+        };
+        if now == Some(!on) {
+            self.toggle_option(i);
         }
     }
 
@@ -548,8 +584,18 @@ impl App {
         let tab = |name: &'static str, on: bool| {
             if on { Span::styled(format!(" {name} "), Style::new().fg(Color::Black).bg(Color::Blue).bold()) } else { Span::styled(format!(" {name} "), Style::new().fg(Color::Gray)) }
         };
+        // on the tab bar: the tab chosen marked, no row highlighted
+        let on_tabs = self.options_on_tabs;
+        let sel = if on_tabs { usize::MAX } else { sel };
         let labels = [("Options", false), ("Plugins", true)];
-        let head = vec![Line::from(labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options_plugins), Span::raw(" ")]).collect::<Vec<_>>()), Line::default()];
+        let mut tabs: Vec<Span> = labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options_plugins), Span::raw(" ")]).collect();
+        if on_tabs {
+            tabs.push(Span::styled(" ←→ switch", dim));
+            for t in tabs.iter_mut().filter(|t| t.style.bg == Some(Color::Blue)) {
+                t.style = t.style.underlined();
+            }
+        }
+        let head = vec![Line::from(tabs), Line::default()];
         // the rows between the tabs and the keys (they scroll), and which
         // body line each choosable row is on
         let mut body: Vec<Line> = Vec::new();
