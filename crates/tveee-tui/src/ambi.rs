@@ -4,14 +4,20 @@ use super::*;
 use tveee_core::panel::{Row, Run, View};
 
 /// An option as shown: a word (` on `), or a light's colour block with a
-/// space either side (`  ▆▆  `); the one with the cursor in brackets in
-/// those spaces (`[on]`, `[▆▆]`), so nothing moves. Green: in effect now.
+/// space either side (` ▆▆ `); the one with the cursor has thin bars in
+/// those spaces, against it (`▕on▏`, `▕▆▆▏`: the eighth blocks sit at a
+/// cell's right and left edge), so nothing moves. Green: in effect now.
 /// With its width.
 fn option_spans(choice: &tveee_core::panel::Choice, here: bool, current: bool) -> (Vec<Span<'static>>, u16) {
-    let (open, close) = if here { ("[", "]") } else { (" ", " ") };
+    let (open, close) = if here { ("▕", "▏") } else { (" ", " ") };
     let mark = Style::new().fg(Color::Yellow).bold();
     match choice.colour {
-        Some((r, g, b)) => (vec![Span::styled(open, mark), Span::styled("  ", Style::new().bg(Color::Rgb(r, g, b))), Span::styled(close, mark)], 4),
+        Some((r, g, b)) => {
+            // white bars frame a light best; yellow round one that's near white
+            let light = u32::from(r) + u32::from(g) + u32::from(b) > 600;
+            let bar = Style::new().fg(if light { Color::Yellow } else { Color::White }).bold();
+            (vec![Span::styled(open, bar), Span::styled("  ", Style::new().bg(Color::Rgb(r, g, b))), Span::styled(close, bar)], 4)
+        }
         None => {
             let mut st = Style::new();
             if current {

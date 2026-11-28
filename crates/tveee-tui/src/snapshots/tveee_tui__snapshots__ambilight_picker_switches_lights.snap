@@ -15,7 +15,7 @@ expression: s
 │                                                                       │          sync Hue bulbs with the TV         ││
 │                            ┌ panel colour ──────────────────────────────────────────────┐         │                 ││
 │                            │Colour for every light                                      │───────────────────────────┘│
-│                            │for  [all]             │             tab: the next          │───────────────────────────┐│
+│                            │for  ▕all▏             │             tab: the next          │───────────────────────────┐│
 │                            │                                                            │                           ││
 │                            │                                     lighter                │org.xbmc.kodi              ││
 │                            │                                     full                   │ MB used, 310 MB free      ││

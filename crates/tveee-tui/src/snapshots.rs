@@ -865,7 +865,7 @@ fn ambilight_picker_switches_lights() {
     }
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
-    assert!(s.contains("[all]") && s.contains("tab: the next"), "{s}");
+    assert!(s.contains("▕all▏") && s.contains("tab: the next"), "{s}");
     // click another light (in the panel): the picker is for that one now
     let spot = |a: &App, hit: Hit| a.hits.iter().rev().find(|(_, x)| *x == hit).map(|(r, _)| *r).expect("on screen");
     let r = spot(&a, Hit::AmbiOption(4, 3));
