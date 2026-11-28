@@ -38,7 +38,7 @@ pub fn route(actions: &Receiver<Action>, shared: &Shared, lanes: &[(Lane, Sender
         // not work for anyone: what the refresh should read. Opened, it's
         // read now (the user is looking), not at the next refresh
         if let Some(opened) = watch(&a, shared) {
-            if opened && let Some((_, to)) = lanes.iter().find(|(x, _)| *x == Lane::Act) {
+            if let Some((_, to)) = lanes.iter().find(|(x, _)| *x == Lane::Act).filter(|_| opened) {
                 let _ = to.send(Action::Wake);
             }
             continue;
