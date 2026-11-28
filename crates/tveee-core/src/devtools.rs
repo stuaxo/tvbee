@@ -98,6 +98,64 @@ pub fn parse_progress(s: &str) -> Option<Progress> {
     Some(Progress { position, duration, paused: *paused == "true", rate: 1.0 })
 }
 
+/// Which app a devtools server says it is (`/json/version`'s
+/// `Android-Package`; None: it doesn't say), at a forwarded `port`.
+pub struct Version {
+    pub port: u16,
+}
+
+impl crate::ask::Ask for Version {
+    type Answer = Option<String>;
+    fn name(&self) -> String {
+        "devtools /json/version".into()
+    }
+    fn request(&self, _: &Tv) -> Result<crate::ask::Request> {
+        Ok(crate::ask::Request::Get { host: "127.0.0.1".into(), port: self.port, path: "/json/version".into() })
+    }
+    fn parse(&self, reply: &crate::ask::Reply) -> Result<Option<Option<String>>> {
+        if reply.status != 200 {
+            return failed(format!("devtools: HTTP {} for /json/version", reply.status));
+        }
+        Ok(Some(http::json(&reply.body).and_then(|v| http::text(&v, "Android-Package"))))
+    }
+}
+
+/// The open pages of a devtools server at a forwarded `port`: (url,
+/// websocket path) of each (`/json`).
+pub struct Pages {
+    pub port: u16,
+}
+
+impl crate::ask::Ask for Pages {
+    type Answer = Vec<(String, Option<String>)>;
+    fn name(&self) -> String {
+        "devtools /json".into()
+    }
+    fn request(&self, _: &Tv) -> Result<crate::ask::Request> {
+        Ok(crate::ask::Request::Get { host: "127.0.0.1".into(), port: self.port, path: "/json".into() })
+    }
+    fn parse(&self, reply: &crate::ask::Reply) -> Result<Option<Self::Answer>> {
+        if reply.status != 200 {
+            return failed(format!("devtools: HTTP {} for /json", reply.status));
+        }
+        Ok(Some(pages_of(&reply.body)))
+    }
+}
+
+/// The pages in a `/json` reply.
+pub fn pages_of(list: &str) -> Vec<(String, Option<String>)> {
+    let list = http::json(list).unwrap_or_default();
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|o| http::text(o, "type").is_none_or(|t| t == "page"))
+        .filter_map(|o| {
+            let url = http::text(o, "url")?;
+            Some((url, http::text(o, "webSocketDebuggerUrl").and_then(|w| ws_path(&w))))
+        })
+        .collect()
+}
+
 /// A forwarded connection to one app's devtools server. Kept open, it makes
 /// repeated queries (a UI refreshing every second) cheap.
 pub struct Conn {
@@ -112,29 +170,15 @@ impl Conn {
         let unix = tv.shell(&["cat", "/proc/net/unix"]).ok()?;
         sockets(&unix).into_iter().find_map(|sock| {
             let fwd = tv.forward_abstract(&sock).ok()?;
-            let (status, v) = http::get("127.0.0.1", fwd.port, "/json/version").ok()?;
-            let theirs = http::json(&v).and_then(|v| http::text(&v, "Android-Package")).is_some_and(|p| p != pkg);
-            (status == 200 && !theirs).then(|| Conn { pkg: pkg.to_string(), fwd })
+            let says = tv.ask(&Version { port: fwd.port }).ok()?;
+            let theirs = says.is_some_and(|p| p != pkg);
+            (!theirs).then(|| Conn { pkg: pkg.to_string(), fwd })
         })
     }
 
     /// (url, websocket path) of each open page.
     fn page_list(&self) -> Result<Vec<(String, Option<String>)>> {
-        let (status, list) = http::get("127.0.0.1", self.fwd.port, "/json")?;
-        if status != 200 {
-            return failed(format!("devtools: HTTP {status} for /json"));
-        }
-        let list = http::json(&list).unwrap_or_default();
-        Ok(list
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|o| http::text(o, "type").is_none_or(|t| t == "page"))
-            .filter_map(|o| {
-                let url = http::text(o, "url")?;
-                Some((url, http::text(o, "webSocketDebuggerUrl").and_then(|w| ws_path(&w))))
-            })
-            .collect())
+        self.fwd.tv.ask(&Pages { port: self.fwd.port })
     }
 
     /// The open pages, with their video progress.
@@ -325,6 +369,16 @@ pub fn page_lines(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_list_from_json() {
+        let list = r#"[{"type":"page","url":"https://www.youtube.com/tv#/watch?v=x","webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/page/1"},{"type":"service_worker","url":"sw.js"}]"#;
+        let pages = pages_of(list);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].0, "https://www.youtube.com/tv#/watch?v=x");
+        assert!(pages[0].1.is_some());
+        assert!(pages_of("not json").is_empty());
+    }
 
     #[test]
     fn reads_page_items() {
