@@ -487,16 +487,15 @@ impl App {
             if on { Span::styled(format!(" {name} "), Style::new().fg(Color::Black).bg(Color::Blue).bold()) } else { Span::styled(format!(" {name} "), Style::new().fg(Color::Gray)) }
         };
         let labels = [("Options", false), ("Plugins", true)];
-        let mut text = vec![Line::from(labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options_plugins), Span::raw(" ")]).collect::<Vec<_>>()), Line::default()];
-        // rows that can be chosen start here
-        let first_row = text.len();
-        let rows;
+        let head = vec![Line::from(labels.iter().flat_map(|(n, p)| [tab(n, *p == self.options_plugins), Span::raw(" ")]).collect::<Vec<_>>()), Line::default()];
+        // the rows between the tabs and the keys (they scroll), and which
+        // body line each choosable row is on
+        let mut body: Vec<Line> = Vec::new();
+        let mut at: Vec<usize> = Vec::new();
+        let foot: Vec<Line>;
         if self.options_plugins {
             let vendor: Vec<_> = self.vendor_plugins().into_iter().cloned().collect();
-            rows = vendor.len();
-            text.push(Line::from(Span::styled(" vendor", dim)));
-            // the rows start under that heading
-            let first_row_shift = 1;
+            body.push(Line::from(Span::styled(" vendor", dim)));
             for (i, p) in vendor.iter().enumerate() {
                 let choice = self.plugin_opt(p.name);
                 let ticked = self.plugin_ticked(p);
@@ -507,41 +506,55 @@ impl App {
                     Some(_) => String::new(),
                 };
                 let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", p.name)), Span::styled(format!("  {}{note}", p.desc), dim)]);
-                text.push(if i == sel { line.reversed() } else { line });
+                at.push(body.len());
+                body.push(if i == sel { line.reversed() } else { line });
             }
-            text.push(Line::default());
-            text.push(Line::from(Span::styled(" built in (always on)", dim)));
+            body.push(Line::default());
+            body.push(Line::from(Span::styled(" built in (always on)", dim)));
             for p in self.plugins.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin) {
-                text.push(Line::from(Span::styled(format!(" [x] {:<20}  {}", p.name, p.desc), dim)));
+                body.push(Line::from(Span::styled(format!(" [x] {:<20}  {}", p.name, p.desc), dim)));
             }
-            text.push(Line::default());
-            text.push(Line::from("↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes").fg(Color::DarkGray));
-            text.push(Line::from("changes apply from tveee's next start").fg(Color::DarkGray));
-            let r = popup(f, " options ", text, Color::Blue);
-            self.option_hits(r, first_row + first_row_shift, rows);
+            foot = vec![
+                Line::default(),
+                Line::from("↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes").fg(Color::DarkGray),
+                Line::from("changes apply from tveee's next start").fg(Color::DarkGray),
+            ];
         } else {
-            rows = tveee_core::options::OPTIONS.len();
             for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
-                let tick = if tveee_core::options::get(o.name) { "[x]" } else { "[ ]" };
+                let tick = if self.opt(o.name) { "[x]" } else { "[ ]" };
                 let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), dim)]);
-                text.push(if i == sel { line.reversed() } else { line });
+                at.push(body.len());
+                body.push(if i == sel { line.reversed() } else { line });
             }
-            text.push(Line::default());
-            text.push(Line::from("↑/↓ choose  space/⏎/click toggle  tab: plugins  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray));
-            let r = popup(f, " options ", text, Color::Blue);
-            self.option_hits(r, first_row, rows);
+            foot = vec![Line::default(), Line::from("↑/↓ choose  space/⏎/click toggle  tab: plugins  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray)];
         }
+        // what fits: the tabs and keys stay; the rows scroll to keep the
+        // chosen one in view
+        let room = usize::from(f.area().height.saturating_sub(2)).saturating_sub(head.len() + foot.len()).max(3);
+        let sel_line = at.get(sel).copied().unwrap_or(0);
+        let start = sel_line.saturating_sub(room / 2).min(body.len().saturating_sub(room));
+        let total = body.len();
+        let shown = total.min(room);
+        let mut text = head.clone();
+        text.extend(body.into_iter().skip(start).take(room));
+        text.extend(foot);
+        let r = popup(f, " options ", text, Color::Blue);
+        let top = r.y + 1 + u16::try_from(head.len()).unwrap_or(0);
+        scrollbar(f, r.right().saturating_sub(1), top, u16::try_from(shown).unwrap_or(0), total, start);
+        // the rows in view, clickable where they are
+        let rows: Vec<(usize, usize)> = at.iter().enumerate().filter(|(_, l)| (start..start + room).contains(*l)).map(|(i, l)| (i, head.len() + l - start)).collect();
+        self.option_hits(r, &rows);
     }
 
-    /// The options dialog's clickable parts: its tabs, and `rows` rows from
-    /// text row `first`.
-    fn option_hits(&mut self, r: ratatui::layout::Rect, first: usize, rows: usize) {
+    /// The options dialog's clickable parts: its tabs, and its rows (each
+    /// row's index and text line).
+    fn option_hits(&mut self, r: ratatui::layout::Rect, rows: &[(usize, usize)]) {
         self.hits.push((r, Hit::Popup));
         let (opts, plugs) = (u16::try_from(" Options ".len()).unwrap_or(0), u16::try_from(" Plugins ".len()).unwrap_or(0));
         self.hits.push((ratatui::layout::Rect { x: r.x + 1, y: r.y + 1, width: opts, height: 1 }, Hit::OptionTab(false)));
         self.hits.push((ratatui::layout::Rect { x: r.x + 2 + opts, y: r.y + 1, width: plugs, height: 1 }, Hit::OptionTab(true)));
-        for i in 0..rows {
-            let y = r.y + 1 + u16::try_from(first + i).unwrap_or(0);
+        for &(i, line) in rows {
+            let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
             self.hits.push((ratatui::layout::Rect { x: r.x + 1, y, width: r.width.saturating_sub(2), height: 1 }, Hit::OptionItem(i)));
         }
     }
