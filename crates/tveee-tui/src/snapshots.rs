@@ -145,6 +145,13 @@ fn guide_filter_ctrl_u_clears() {
     // ctrl+u clears it, and no "u" is typed
     a.guide_key(tab, 0, KeyCode::Char('u'), KeyModifiers::CONTROL, &h);
     assert_eq!(a.prompt, "");
+    // Esc: the filter first, the guide staying open; then the guide
+    a.overlay = Overlay::Guide { tab, at: 0 };
+    a.guide_key(tab, 0, KeyCode::Char('b'), KeyModifiers::NONE, &h);
+    a.guide_key(tab, 0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert!(a.prompt.is_empty() && matches!(a.overlay, Overlay::Guide { .. }));
+    a.guide_key(tab, 0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::None);
 }
 
 #[test]
@@ -1611,4 +1618,24 @@ fn system_panel_pauses() {
     a.apply(Input::ToggleInfo, &h);
     a.apply(Input::ToggleInfo, &h);
     assert!(screen(&mut a, DESKTOP).contains("I pauses"));
+}
+
+#[test]
+fn esc_clears_the_filter_first() {
+    // the list pane
+    let (mut a, _rx, h) = app_seeing(kodi_artists());
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    a.list_key(0, KeyCode::Char('r'), KeyModifiers::NONE, &h);
+    a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert!(a.prompt.is_empty() && matches!(a.overlay, Overlay::List { .. }), "the filter cleared, still open");
+    a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::None);
+    // the palette
+    a.overlay = Overlay::Palette(0);
+    a.palette_key(0, KeyCode::Char('m'), KeyModifiers::NONE, &h);
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert!(a.prompt.is_empty() && matches!(a.overlay, Overlay::Palette(_)));
+    a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::None);
 }

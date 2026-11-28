@@ -158,6 +158,8 @@ impl App {
         let shown = self.list_shown();
         let pos = shown.iter().position(|&i| i == sel).unwrap_or(0);
         match code {
+            // Esc: the filter first, then the pane
+            KeyCode::Esc if !self.prompt.is_empty() => self.prompt.clear(),
             KeyCode::Esc => return self.close_list(actions),
             KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => return self.close_list(actions),
             KeyCode::Enter => return self.list_choose(sel, actions),
