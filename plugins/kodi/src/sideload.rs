@@ -33,14 +33,14 @@ fn attr(tag: &str, name: &str) -> Option<String> {
     while let Some(i) = rest.find(name) {
         let before = rest[..i].chars().last();
         let after = rest[i + name.len()..].trim_start();
-        if before.is_some_and(char::is_whitespace) {
-            if let Some(v) = after.strip_prefix('=') {
-                let v = v.trim_start();
-                let q = v.chars().next()?;
-                if q == '"' || q == '\'' {
-                    let end = v[1..].find(q)?;
-                    return Some(unescape(&v[1..1 + end]));
-                }
+        if before.is_some_and(char::is_whitespace)
+            && let Some(v) = after.strip_prefix('=')
+        {
+            let v = v.trim_start();
+            let q = v.chars().next()?;
+            if q == '"' || q == '\'' {
+                let end = v[1..].find(q)?;
+                return Some(unescape(&v[1..1 + end]));
             }
         }
         rest = &rest[i + name.len()..];
@@ -105,7 +105,13 @@ pub fn read_zip(path: &Path) -> Result<Package> {
     let mut tops = BTreeSet::new();
     for i in 0..z.len() {
         let mut entry = z.by_index(i).map_err(|e| tveee_core::error::Error::Failed(format!("{}: {e}", path.display())))?;
-        let Some(name) = entry.enclosed_name() else { return failed(format!("{}: {} would land outside the add-on's folder", path.display(), entry.name())) };
+        let Some(name) = entry.enclosed_name() else {
+            return failed(format!(
+                "{}: {} would land outside the add-on's folder",
+                path.display(),
+                entry.name().map_or_else(|_| "an entry".into(), |n| n.to_string())
+            ));
+        };
         if let Some(top) = name.components().next() {
             tops.insert(top.as_os_str().to_string_lossy().into_owned());
         }

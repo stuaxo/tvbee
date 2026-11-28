@@ -53,9 +53,9 @@ The release builds include the full-screen remote (`tveee ui`). From source:
     cargo install --git https://github.com/stuaxo/tveee              # plain
     cargo install --git https://github.com/stuaxo/tveee --features ui
 
-The plain build works with Debian 13's packaged Rust (`apt install cargo
-build-essential`: a C compiler builds the bundled SQLite that tveee caches the
-TV's guide in); `--features ui` needs Rust 1.90 or newer.
+The plain build needs Rust 1.89 or newer (rustup.rs), and a C compiler for the
+bundled SQLite that tveee caches the TV's guide in (`build-essential` on
+Debian and Ubuntu); `--features ui` needs Rust 1.90 or newer.
 
 On the TV, turn on network debugging (Developer options). `tveee findtv` finds
 it on the network; point tveee at it with `TV_IP` (see below) and accept the

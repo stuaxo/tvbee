@@ -177,10 +177,10 @@ impl tveee_core::provider::Player for YouTube {
     fn picture(&self, _tv: &Tv, art: &str, at: Option<f64>) -> Outcome<Vec<u8>> {
         let Some(id) = art.strip_prefix("youtube:") else { return Outcome::Fallback };
         let at = at.unwrap_or(0.0);
-        if let Some(copy) = copy_of(id) {
-            if let Some(jpeg) = frame_of(&copy, at) {
-                return Outcome::Handled(jpeg);
-            }
+        if let Some(copy) = copy_of(id)
+            && let Some(jpeg) = frame_of(&copy, at)
+        {
+            return Outcome::Handled(jpeg);
         }
         storyboard_frame(id, at).map_or(Outcome::Fallback, Outcome::Handled)
     }

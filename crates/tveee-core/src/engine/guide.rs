@@ -98,10 +98,10 @@ pub fn guide_items<'a>(groups: &[Option<&'a str>], sel: usize, room: usize) -> V
     let mut out: Vec<GuideItem> = all.iter().copied().skip(start).take(room).collect();
     // the top line mid-group: show the group instead (not over the selected
     // row, and only if the group carries on below it)
-    if let (Some(GuideItem::Row(i)), Some(GuideItem::Row(j)), true) = (out.first().copied(), out.get(1).copied(), start > 0) {
-        if let (Some(g), true) = (groups[i], i != sel && groups[j] == groups[i]) {
-            out[0] = GuideItem::Header(g);
-        }
+    if let (Some(GuideItem::Row(i)), Some(GuideItem::Row(j)), true) = (out.first().copied(), out.get(1).copied(), start > 0)
+        && let (Some(g), true) = (groups[i], i != sel && groups[j] == groups[i])
+    {
+        out[0] = GuideItem::Header(g);
     }
     out
 }

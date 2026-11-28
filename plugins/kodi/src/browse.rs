@@ -130,10 +130,10 @@ pub fn path_crumbs(window: u64, path: &str) -> (Vec<ListCrumb>, bool) {
     match scheme {
         "musicdb" | "videodb" => {
             let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
-            if let Some(first) = parts.first() {
-                if parts.len() > 1 {
-                    out.push(crumb(section_name(first), &format!("{scheme}://{first}/")));
-                }
+            if let Some(first) = parts.first()
+                && parts.len() > 1
+            {
+                out.push(crumb(section_name(first), &format!("{scheme}://{first}/")));
             }
             (out, parts.len() <= 1)
         }

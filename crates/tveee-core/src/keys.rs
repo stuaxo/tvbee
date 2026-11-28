@@ -399,15 +399,15 @@ pub fn press(tv: &Tv, presses: &[(u32, bool)]) -> Result<()> {
 /// `input text`.
 pub fn type_text(tv: &Tv, text: &str) -> Result<()> {
     let raw = fast().then(|| cached(tv).or_else(|| discover(tv).ok().inspect(|m| save(tv, m)))).flatten();
-    if let Some(m) = raw {
-        if let Some(cmd) = m.text_command(text) {
-            if !tv.shell(&[&guarded(&m.boot, &cmd)])?.contains("@@stale") {
-                return Ok(());
-            }
-            // another boot: work it out again next time
-            if let Some(f) = cache_file(&tv.ip) {
-                let _ = std::fs::remove_file(f);
-            }
+    if let Some(m) = raw
+        && let Some(cmd) = m.text_command(text)
+    {
+        if !tv.shell(&[&guarded(&m.boot, &cmd)])?.contains("@@stale") {
+            return Ok(());
+        }
+        // another boot: work it out again next time
+        if let Some(f) = cache_file(&tv.ip) {
+            let _ = std::fs::remove_file(f);
         }
     }
     tv.shell(&["input", "text", &crate::builtin::input::escape_text(text)]).map(drop)

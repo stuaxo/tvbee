@@ -196,10 +196,10 @@ impl Handle {
             Action::LoadGuide => self.update(|s| s.guide_loading = true),
             Action::LoadList | Action::ListGo(_) | Action::ListOpen { .. } => self.update(|s| s.list_loading = true),
             Action::Favourite(ch, on) => self.update(|s| {
-                if let Some(Ok(g)) = s.guide.as_mut().map(Arc::make_mut) {
-                    if let Some(row) = g.rows.iter_mut().find(|r| r.channel.id == ch.id) {
-                        row.channel.favourite = *on;
-                    }
+                if let Some(Ok(g)) = s.guide.as_mut().map(Arc::make_mut)
+                    && let Some(row) = g.rows.iter_mut().find(|r| r.channel.id == ch.id)
+                {
+                    row.channel.favourite = *on;
                 }
             }),
             _ => {}

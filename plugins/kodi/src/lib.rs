@@ -308,10 +308,10 @@ impl Tracks {
 pub fn tracks_said(props: &Value) -> String {
     let t = Tracks::of(props);
     let mut said = String::new();
-    if t.audio.is_some_and(|a| a > 0) {
-        if let Some(a) = track_name(props.get("currentaudiostream")) {
-            said += &format!(", {a} audio");
-        }
+    if t.audio.is_some_and(|a| a > 0)
+        && let Some(a) = track_name(props.get("currentaudiostream"))
+    {
+        said += &format!(", {a} audio");
     }
     if t.subtitles_on {
         said += &format!(", {} subtitles", track_name(props.get("currentsubtitle")).unwrap_or_else(|| "with".into()));
@@ -329,10 +329,10 @@ pub fn tracks_said(props: &Value) -> String {
 fn put_back(tv: &Tv, tracks: Option<&Tracks>, secs: u64) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
     let id = loop {
-        if let Ok(Some((id, kind))) = player_id(tv) {
-            if kind == "video" {
-                break id;
-            }
+        if let Ok(Some((id, kind))) = player_id(tv)
+            && kind == "video"
+        {
+            break id;
         }
         if std::time::Instant::now() >= deadline {
             tveee_core::tlog!("kodi: the video didn't start; not brought to the front, tracks not put back");
@@ -696,11 +696,11 @@ impl Kodi {
             cmd.args(["--config", "-"]).stdin(std::process::Stdio::piped());
         }
         let mut child = cmd.arg(&url).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn()?;
-        if !pass.is_empty() {
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                let _ = writeln!(stdin, "user = {}", quote(&format!("{user}:{pass}")));
-            }
+        if !pass.is_empty()
+            && let Some(mut stdin) = child.stdin.take()
+        {
+            use std::io::Write;
+            let _ = writeln!(stdin, "user = {}", quote(&format!("{user}:{pass}")));
         }
         let out = child.wait_with_output()?;
         if !out.status.success() || out.stdout.is_empty() {

@@ -350,10 +350,10 @@ pub fn rows(state: &State, lights: &[Light]) -> Vec<tveee_core::panel::Row> {
     let setting = state.setting.as_deref();
     // the setting to keep when going back to a style: the one it had, if this was it
     let keep = |s: &str, table: &[(&'static str, &'static str)], default: &'static str| -> &'static str {
-        if style == Some(s) {
-            if let Some((_, tv)) = table.iter().find(|(_, tv)| Some(*tv) == setting) {
-                return tv;
-            }
+        if style == Some(s)
+            && let Some((_, tv)) = table.iter().find(|(_, tv)| Some(*tv) == setting)
+        {
+            return tv;
         }
         default
     };

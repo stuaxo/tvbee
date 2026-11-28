@@ -548,10 +548,10 @@ pub fn before_link(tv: &Tv, pkg: &str) -> Result<bool> {
 /// front): Ok(true), and the caller has nothing more to do. Otherwise the app
 /// is got ready for a link ([`before_link`]) and the caller sends it.
 pub fn link_here_or_prepare(tv: &Tv, pkg: &str, url: &str) -> Result<bool> {
-    if let Some(p) = crate::provider::for_package(pkg) {
-        if p.open_here(tv, url).or_fallback()?.is_some() {
-            return Ok(true);
-        }
+    if let Some(p) = crate::provider::for_package(pkg)
+        && p.open_here(tv, url).or_fallback()?.is_some()
+    {
+        return Ok(true);
     }
     before_link(tv, pkg)?;
     Ok(false)

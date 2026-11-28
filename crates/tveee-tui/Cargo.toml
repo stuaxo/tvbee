@@ -4,7 +4,7 @@ version = "0.3.0"
 description = "tveee's terminal remote (tveee ui), on the core's engine"
 edition.workspace = true
 # ratatui needs 1.88, ratatui-image's quantette 1.90 (the rest of tveee
-# builds with Debian 13's 1.85)
+# builds with 1.89)
 rust-version = "1.90"
 license.workspace = true
 authors.workspace = true

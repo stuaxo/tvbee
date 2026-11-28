@@ -25,19 +25,6 @@ confidence-threshold = 0.9
 [advisories]
 # a crate no longer maintained is worth knowing, not a failure
 unmaintained = "workspace"
-# Only advisories that can't touch tveee are ignored, each saying why. The
-# rest stay visible (CI reports them without failing): their fixes need
-# newer Rust than our minimum (1.85, Debian 13's), a decision to make.
-ignore = [
-    # Diesel's MySQL backend: tveee uses SQLite only
-    { id = "RUSTSEC-2026-0134", reason = "MySQL backend only; tveee uses SQLite" },
-    # SqliteConnection::deserialize_readonly_database: never called
-    { id = "RUSTSEC-2026-0172", reason = "deserialize_readonly_database isn't used" },
-    # zip's extract(): tveee reads entries itself (enclosed_name, no
-    # permissions or symlinks written); fixed in zip 8/9 (Rust 1.88+)
-    { id = "RUSTSEC-2026-0367", reason = "extract() isn't used; entries read in memory" },
-    { id = "RUSTSEC-2026-0368", reason = "extract() isn't used; no symlinks made" },
-]
 
 [bans]
 # the same crate twice in different versions: worth seeing, not a failure
