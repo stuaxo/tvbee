@@ -272,25 +272,6 @@ pub fn list_place(p: &Place) -> ListPlace {
     ListPlace { key: key_of(p), focus_label: p.focus.0.clone(), focus_id: p.focus.1.clone(), playing_id: String::new() }
 }
 
-/// Most rows moved at once (a page in a long list is a few hundred).
-const MOST_MOVED: i64 = 1000;
-
-/// The body asking Kodi to press ↓ (or ↑) `n` times: one request, a batch.
-pub fn presses(by: i64) -> String {
-    let method = if by >= 0 { "Input.Down" } else { "Input.Up" };
-    let n = by.unsigned_abs().min(MOST_MOVED as u64);
-    let calls: Vec<String> = (0..n).map(|i| format!(r#"{{"jsonrpc":"2.0","id":{i},"method":"{method}"}}"#)).collect();
-    format!("[{}]", calls.join(","))
-}
-
-/// Move Kodi's highlight by `by` rows: its own ↓ / ↑, all in one request.
-pub fn move_by(tv: &Tv, by: i64) -> Result<()> {
-    if by == 0 {
-        return Ok(());
-    }
-    super::post(tv, &super::login(tv), &presses(by)).map(drop)
-}
-
 /// The file Kodi's player is playing, if it's playing one.
 pub fn playing_file(tv: &Tv) -> Option<String> {
     let (id, _) = super::player_id(tv).ok()??;
@@ -317,13 +298,6 @@ pub fn list(tv: &Tv) -> Result<Option<ContextList>> {
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn moves_in_one_request() {
-        assert_eq!(presses(2), r#"[{"jsonrpc":"2.0","id":0,"method":"Input.Down"},{"jsonrpc":"2.0","id":1,"method":"Input.Down"}]"#);
-        assert_eq!(presses(-1), r#"[{"jsonrpc":"2.0","id":0,"method":"Input.Up"}]"#);
-        assert_eq!(presses(5000).matches("Input.Down").count(), 1000);
-    }
 
     #[test]
     fn crumbs_from_the_path() {

@@ -134,9 +134,6 @@ pub enum Action {
     LoadList,
     /// Choose an item from it; its list is read again after.
     ListGo(crate::more::Go),
-    /// Move the app's highlight in its list by this many rows (the list
-    /// pane moved): several in a row are one move.
-    ListMove(i64),
     Refresh,
     /// Read the TV now, saying nothing: something the refresh feeds (the
     /// list pane, a panel) was just opened, and shouldn't wait for the next

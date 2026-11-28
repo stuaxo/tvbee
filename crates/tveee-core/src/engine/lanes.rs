@@ -120,7 +120,6 @@ pub fn coalesce(actions: Vec<Action>) -> Vec<Action> {
         match (out.last_mut(), &a) {
             (Some(Action::Seek(x)), Action::Seek(y)) => *x += y,
             (Some(Action::Volume(x)), Action::Volume(y)) => *x += y,
-            (Some(Action::ListMove(x)), Action::ListMove(y)) => *x += y,
             (Some(Action::Refresh), Action::Refresh) => {}
             // typing quickly: one round trip
             (Some(Action::Text(x)), Action::Text(y)) => x.push_str(y),
@@ -730,13 +729,6 @@ impl Actor {
                 let _ = tx.send(Msg::List(read_list(&self.shared, &self.tv)));
                 said
             }
-            Action::ListMove(by) => {
-                let pkg = lock(&self.shared.pkg).clone().unwrap_or_default();
-                if let Some(p) = crate::provider::for_package(&pkg).and_then(|p| p.player()) {
-                    p.move_highlight(&self.tv, by).or_fallback()?;
-                }
-                String::new()
-            }
             Action::Refresh => "refreshed".into(),
             // the refresh is woken after every action: nothing more to do
             Action::Wake => String::new(),
@@ -914,12 +906,6 @@ pub fn push_lane(shared: &Shared, wake: &Sender<()>) {
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn list_moves_in_a_row_are_one() {
-        use super::*;
-        assert_eq!(coalesce(vec![Action::ListMove(1), Action::ListMove(1), Action::ListMove(-3)]), vec![Action::ListMove(-1)]);
-    }
 
     #[test]
     fn opening_reads_now() {

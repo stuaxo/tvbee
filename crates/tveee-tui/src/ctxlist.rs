@@ -36,19 +36,6 @@ pub fn breadcrumbs(trail: &[Crumb], l: &ContextList) -> Vec<Crumb> {
     out
 }
 
-/// How long a move made in the pane has to show in the app's readings
-/// before the pane follows the app again.
-const MOVE_SETTLES: std::time::Duration = std::time::Duration::from_millis(2500);
-
-/// Where the app's highlight is in list `l`: its item, or -1 on ".." (the
-/// way up, not an item, just above the first).
-fn app_row(l: &ContextList, p: &ListPlace) -> Option<i64> {
-    if p.focus_label == ".." && l.up.is_some() {
-        return Some(-1);
-    }
-    l.find(p).map(|i| i as i64)
-}
-
 /// The trail after list `l` arrives: back along it if `l` is on it already;
 /// one step on if `l` is inside its last list (or any on it); else a new
 /// trail, starting from where `l` is (its way up, if it has one).
@@ -96,8 +83,6 @@ impl App {
         self.prompt.clear();
         self.list_seen = None;
         let at = self.list_ok().and_then(|l| l.at.or(l.playing)).unwrap_or(0);
-        self.list_told = self.list_ok().and_then(|l| l.at).map(|a| a as i64);
-        self.list_moved = None;
         self.overlay = Overlay::List { sel: at };
         let _ = actions.send(Action::WatchList(true));
         let _ = actions.send(Action::LoadList);
@@ -158,7 +143,6 @@ impl App {
             c if listnav::is_move(c) => {
                 if let Some(to) = listnav::step(pos, shown.len(), c) {
                     self.overlay = Overlay::List { sel: shown[to] };
-                    self.move_app_highlight(shown[to], actions);
                 }
                 return;
             }
@@ -175,19 +159,6 @@ impl App {
         let shown = self.list_shown();
         if !shown.contains(&sel) {
             self.overlay = Overlay::List { sel: shown.first().copied().unwrap_or(0) };
-        }
-    }
-
-    /// The pane's highlight moved to item `to`: move the app's own (Kodi's)
-    /// there too, from where it was, so its screen follows the pane.
-    fn move_app_highlight(&mut self, to: usize, actions: &Handle) {
-        let follows = self.list_seen.as_ref().is_some_and(|p| !p.focus_id.is_empty() || !p.focus_label.is_empty());
-        let Some(from) = self.list_told.filter(|_| follows) else { return };
-        let by = to as i64 - from;
-        if by != 0 {
-            let _ = actions.send(Action::ListMove(by));
-            self.list_told = Some(to as i64);
-            self.list_moved = Some(std::time::Instant::now());
         }
     }
 
@@ -293,11 +264,7 @@ impl App {
             }
             if let Some(l) = self.list_ok() {
                 let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id))).or(l.at).or(l.playing).unwrap_or(0);
-                // where the app's highlight is: moves in the pane go from there
-                let told = place.as_ref().filter(|p| p.key == l.key).and_then(|p| app_row(l, p)).or(l.at.map(|a| a as i64));
                 self.overlay = Overlay::List { sel: at };
-                self.list_told = told;
-                self.list_moved = None;
             }
             self.list_seen = place;
             return;
@@ -311,27 +278,10 @@ impl App {
             if !self.st.list_loading {
                 let _ = self.engine.send(Action::LoadList);
             }
-        } else if has_focus {
-            let app = self.list_ok().and_then(|l| app_row(l, &p));
-            // just moved from here: a reading from before the move mustn't
-            // pull the pane back (one showing the move ends the wait)
-            let waiting = self.list_moved.is_some_and(|t| t.elapsed() < MOVE_SETTLES);
-            if waiting && app == self.list_told {
-                self.list_moved = None;
-            }
-            let moved = self.list_seen.as_ref().is_none_or(|s| s.focus_id != p.focus_id || s.focus_label != p.focus_label);
-            if !waiting && app.is_some() && (moved || app != self.list_told) {
-                // the app's highlight moved (the remote), or the pane's move
-                // didn't land: follow the app
-                if let Some(at) = app.and_then(|a| usize::try_from(a).ok()) {
-                    self.overlay = Overlay::List { sel: at };
-                } else {
-                    self.overlay = Overlay::List { sel };
-                }
-                self.list_told = app;
-                self.list_moved = None;
-            } else {
-                self.overlay = Overlay::List { sel };
+        } else if has_focus && self.list_seen.as_ref().is_none_or(|s| s.focus_id != p.focus_id || s.focus_label != p.focus_label) {
+            // the app's highlight moved: follow it
+            if let Some(at) = self.list_ok().and_then(|l| l.find(&p)) {
+                self.overlay = Overlay::List { sel: at };
             }
         } else if !has_focus && self.list_seen.as_ref().is_none_or(|s| s.playing_id != p.playing_id) {
             // no highlight of its own (YouTube): follow what's playing

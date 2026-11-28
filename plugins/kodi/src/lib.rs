@@ -538,9 +538,6 @@ impl tveee_core::provider::Player for Kodi {
             Err(e) => Outcome::Failed(e),
         }
     }
-    fn move_highlight(&self, tv: &Tv, by: i64) -> Outcome<()> {
-        browse::move_by(tv, by).into()
-    }
     fn go(&self, tv: &Tv, to: &tveee_core::more::Go) -> Outcome<String> {
         use tveee_core::provider::Provider;
         let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };

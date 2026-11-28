@@ -104,12 +104,6 @@ struct App {
     /// Where the app's list was at the last refresh (the list pane follows
     /// its highlight when it moves).
     list_seen: Option<tveee_core::provider::ListPlace>,
-    /// Where the app's own highlight is, as far as the list pane knows
-    /// (its item; -1 on ".."): moving in the pane moves it from there.
-    list_told: Option<i64>,
-    /// When the pane last moved the app's highlight: readings from before
-    /// it arrives don't pull the pane back for a moment.
-    list_moved: Option<std::time::Instant>,
     /// The refresh has been asked to read where the list is.
     list_watching: bool,
     /// The options dialog's tab: its options, or the plugins.
@@ -562,8 +556,6 @@ impl App {
             system_watching: false,
             under: None,
             list_seen: None,
-            list_told: None,
-            list_moved: None,
             list_watching: false,
             options_plugins: false,
             plugins: Vec::new(),
