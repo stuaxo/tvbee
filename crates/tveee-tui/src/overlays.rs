@@ -335,6 +335,17 @@ impl App {
         self.plugin_opt(p.name).unwrap_or(p.enabled)
     }
 
+    /// Set option `name` (saved; a test's own options only changed here).
+    pub(super) fn set_opt(&mut self, name: &str, on: bool) -> tveee_core::error::Result<()> {
+        match &mut self.opts {
+            Some(v) => {
+                v.push((name.to_string(), on));
+                Ok(())
+            }
+            None => tveee_core::options::set(name, on),
+        }
+    }
+
     /// Option `name` (see [`App::opts`]).
     pub(super) fn opt(&self, name: &str) -> bool {
         match &self.opts {
@@ -371,14 +382,7 @@ impl App {
         }
         let Some(o) = tveee_core::options::OPTIONS.get(i) else { return };
         let on = !self.opt(o.name);
-        let saved = match &mut self.opts {
-            // this app's own options (tests): changed here, not saved
-            Some(v) => {
-                v.push((o.name.to_string(), on));
-                Ok(())
-            }
-            None => tveee_core::options::set(o.name, on),
-        };
+        let saved = self.set_opt(o.name, on);
         self.note = match saved {
             Ok(()) => format!("{}: {}", o.label, if on { "on" } else { "off" }),
             Err(e) => format!("couldn't save the option: {e}"),

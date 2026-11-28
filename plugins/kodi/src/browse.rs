@@ -174,6 +174,7 @@ pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
         crumbs_whole,
         location: Some(p.path.clone()),
         open_location: Some(format!("kodi-window:{w}|{{}}")),
+        browsed: false,
     };
     // the highlighted row: by its path, else its label
     l.at = l.find(&list_place(p));
@@ -181,7 +182,7 @@ pub fn list_of(p: &Place, rows: &[Row]) -> ContextList {
 }
 
 /// `%20` and friends in a path, back to what they stand for.
-fn unescape(s: &str) -> String {
+pub fn unescape(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -200,7 +201,7 @@ fn unescape(s: &str) -> String {
 }
 
 /// The library's sections, as their paths name them.
-fn section_name(part: &str) -> String {
+pub fn section_name(part: &str) -> String {
     match part {
         "top100" => "Top 100".into(),
         "recentlyaddedalbums" => "Recently added albums".into(),

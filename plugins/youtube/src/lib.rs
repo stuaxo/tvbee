@@ -539,7 +539,7 @@ pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_
         return None;
     }
     let title = if d.chapters.is_empty() { "Links" } else { "Chapters and links" };
-    Some(ContextList { title: title.into(), kind: "chapters", key: link.to_string(), items, playing: pos.and_then(|p| chapter_at(&d.chapters, p)), at: None, up: None, reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None })
+    Some(ContextList { title: title.into(), kind: "chapters", key: link.to_string(), items, playing: pos.and_then(|p| chapter_at(&d.chapters, p)), at: None, up: None, reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None, browsed: false })
 }
 
 /// The video playing: its link and position (devtools).

@@ -19,6 +19,7 @@ pub const PACKAGE: &str = "org.xbmc.kodi";
 
 pub mod addons;
 pub mod browse;
+pub mod library;
 pub mod sideload;
 const PAIRING: &str = "kodi";
 const DEFAULT_PORT: u16 = 8080;
@@ -531,16 +532,39 @@ impl tveee_core::provider::Player for Kodi {
         }
     }
     fn list(&self, tv: &Tv) -> Outcome<tveee_core::provider::ContextList> {
-        match browse::list(tv) {
-            Ok(Some(l)) => Outcome::Handled(l),
-            // not showing a list (or its API is off): nothing here
-            Ok(None) | Err(Error::Unavailable(_)) => Outcome::Fallback,
+        // browsed here, from where Kodi is (its library's top if elsewhere)
+        match library::start(tv) {
+            Ok(l) => Outcome::Handled(l),
+            // its API is off: nothing here
+            Err(Error::Unavailable(_)) => Outcome::Fallback,
             Err(e) => Outcome::Failed(e),
         }
+    }
+    fn list_at(&self, tv: &Tv, at: &str) -> Outcome<tveee_core::provider::ContextList> {
+        match library::list_at(tv, at) {
+            Err(Error::Unavailable(_)) => Outcome::Fallback,
+            r => r.into(),
+        }
+    }
+    fn show_at(&self, tv: &Tv, at: &str) -> Outcome<()> {
+        let (m, _, path) = library::parse(at);
+        let window = if path.is_empty() { format!("kodi-window:{}", m.window_name()) } else { format!("kodi-window:{}|{path}", m.window_name()) };
+        tveee_core::provider::Provider::open_here(self, tv, &window)
     }
     fn go(&self, tv: &Tv, to: &tveee_core::more::Go) -> Outcome<String> {
         use tveee_core::provider::Provider;
         let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };
+        if link.starts_with(library::PLAY) {
+            return library::play(tv, link).into();
+        }
+        // a folder (from the command line's list): shown on Kodi's screen
+        if library::is_link(link) {
+            return match tveee_core::provider::Player::show_at(self, tv, link) {
+                Outcome::Handled(()) => Outcome::Handled("opened it in Kodi".into()),
+                Outcome::Fallback => Outcome::Fallback,
+                Outcome::Failed(e) => Outcome::Failed(e),
+            };
+        }
         if link == browse::UP {
             return call(tv, "Input.ExecuteAction", r#"{"action":"parentdir"}"#).map(|_| "up a folder in Kodi".to_string()).into();
         }
