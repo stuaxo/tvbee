@@ -71,6 +71,8 @@ struct App {
     wide: bool,
     /// The launcher tab used last.
     apps_tab: AppTab,
+    /// The trail to the list shown (its breadcrumbs).
+    crumbs: Vec<ctxlist::Crumb>,
     /// Where the colour picker is (column, row).
     pick: (usize, usize),
     /// Where the progress bar stays after a pause, seek or stop asked for
@@ -537,6 +539,7 @@ impl App {
             info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            crumbs: Vec::new(),
             pick: (0, 1),
             frozen: None,
             log_back: None,
@@ -938,6 +941,7 @@ impl App {
             // clicking outside closes it
             (Overlay::Guide { .. }, _) => self.overlay = Overlay::None,
             (Overlay::List { .. }, Some(Hit::ListRow(i))) => self.list_choose(i, actions),
+            (Overlay::List { .. }, Some(Hit::Crumb(i))) => self.list_crumb(i, actions),
             (Overlay::List { .. }, Some(Hit::Popup)) => {}
             (Overlay::List { .. }, _) => self.close_list(actions),
             (Overlay::Apps { tab, .. }, Some(Hit::AppItem(i))) => {

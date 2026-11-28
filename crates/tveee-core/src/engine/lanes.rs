@@ -319,11 +319,17 @@ pub fn system_wanted(shown: bool, low: bool, last_read: Option<Duration>) -> boo
     shown && last_read.is_none_or(|ago| !low || ago >= super::SYSTEM_LOW)
 }
 
+/// For how long after the user does something the refresh keeps its
+/// one-second pace even with low bandwidth on: what they did takes a moment
+/// to finish on the TV, and they're watching for it.
+pub const BUSY_FOR: Duration = Duration::from_secs(5);
+
 /// How long the refresh waits for its next read: a second; with low
-/// bandwidth on, four, or just after what's playing should end if that's
+/// bandwidth on, four (a second for a while after the user did something:
+/// `since_input`), or just after what's playing should end if that's
 /// sooner (so the end shows on time). `left`: how long it has to go.
-pub fn next_wait(low: bool, left: Option<Duration>) -> Duration {
-    if !low {
+pub fn next_wait(low: bool, left: Option<Duration>, since_input: Duration) -> Duration {
+    if !low || since_input < BUSY_FOR {
         return REFRESH;
     }
     match left {
@@ -363,7 +369,8 @@ impl Refresher {
         // every REFRESH, or when woken; until the action lane has gone
         loop {
             let low = crate::options::get(crate::options::LOW_BANDWIDTH);
-            let wait = next_wait(low, time_left(self.last_activity.as_ref(), self.read_at.elapsed()));
+            let since_input = lock(&self.shared.input_at).elapsed();
+            let wait = next_wait(low, time_left(self.last_activity.as_ref(), self.read_at.elapsed()), since_input);
             if let Err(RecvTimeoutError::Disconnected) = wake.recv_timeout(wait) {
                 break;
             }
@@ -705,14 +712,20 @@ impl Actor {
             Action::ListGo(to) => {
                 let pkg = lock(&self.shared.pkg).clone().unwrap_or_default();
                 let player = crate::provider::for_package(&pkg).and_then(|p| p.player());
+                let place = || player.filter(|p| p.has_list()).and_then(|p| p.list_place(&self.tv).handled().flatten()).map(|p| p.key);
+                let before = place();
                 let said = match player.map(|p| p.go(&self.tv, &to).or_fallback()) {
                     Some(Ok(Some(said))) => said,
                     Some(Err(e)) => return Err(e),
                     _ => crate::builtin::info::go(&self.tv, &pkg, &to)?,
                 };
-                // it changed what the app shows: its list, read again now
-                // rather than waiting for the refresh to notice
-                std::thread::sleep(Duration::from_millis(600));
+                // it changed what the app shows: its list, read as soon as the
+                // app shows another (a folder takes it a moment), not left for
+                // the refresh to notice (4s with low bandwidth)
+                let until = Instant::now() + Duration::from_secs(4);
+                while before.is_some() && place() == before && Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(300));
+                }
                 let _ = tx.send(Msg::List(read_list(&self.shared, &self.tv)));
                 said
             }
@@ -919,14 +932,18 @@ mod tests {
     fn low_bandwidth_waits() {
         use std::time::Duration;
         let secs = Duration::from_secs;
+        // just after the user did something: a second, low bandwidth or not
+        assert_eq!(super::next_wait(true, None, secs(2)), secs(1));
+        assert_eq!(super::next_wait(true, None, secs(6)), secs(4));
+        let next_wait = |low, left| super::next_wait(low, left, secs(60));
         // responsive: every second, whatever plays
-        assert_eq!(super::next_wait(false, None), secs(1));
-        assert_eq!(super::next_wait(false, Some(secs(30))), secs(1));
+        assert_eq!(next_wait(false, None), secs(1));
+        assert_eq!(next_wait(false, Some(secs(30))), secs(1));
         // low bandwidth: every four, or just after the end when that's sooner
-        assert_eq!(super::next_wait(true, None), secs(4));
-        assert_eq!(super::next_wait(true, Some(secs(60))), secs(4));
-        assert_eq!(super::next_wait(true, Some(Duration::from_millis(2000))), Duration::from_millis(2500));
-        assert_eq!(super::next_wait(true, Some(secs(0))), secs(1));
+        assert_eq!(next_wait(true, None), secs(4));
+        assert_eq!(next_wait(true, Some(secs(60))), secs(4));
+        assert_eq!(next_wait(true, Some(Duration::from_millis(2000))), Duration::from_millis(2500));
+        assert_eq!(next_wait(true, Some(secs(0))), secs(1));
     }
 
     #[test]

@@ -8,7 +8,41 @@
 //! Kodi's highlight is followed while it moves.
 
 use super::*;
+use tveee_core::more::Go;
 use tveee_core::provider::{ContextList, ListPlace};
+
+/// A step of the trail to the list shown (the breadcrumbs): its title, its
+/// key, and how to go back to it (the list's own reopen).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Crumb {
+    pub title: String,
+    pub key: String,
+    pub go: Option<Go>,
+}
+
+/// The trail after list `l` arrives: back along it if `l` is on it already;
+/// one step on if `l` is inside its last list (or any on it); else a new
+/// trail, starting from where `l` is (its way up, if it has one).
+pub fn next_trail(trail: &[Crumb], l: &ContextList) -> Vec<Crumb> {
+    let here = Crumb { title: l.title.clone(), key: l.key.clone(), go: l.reopen.clone() };
+    let mut out: Vec<Crumb> = trail.to_vec();
+    if let Some(i) = out.iter().position(|c| c.key == l.key) {
+        out.truncate(i + 1);
+        out[i].title.clone_from(&l.title);
+        return out;
+    }
+    match &l.up {
+        Some((up, go)) => match out.iter().position(|c| c.key == *up) {
+            Some(i) => {
+                out.truncate(i + 1);
+                out.push(here);
+                out
+            }
+            None => vec![Crumb { title: "‹ up".into(), key: up.clone(), go: Some(go.clone()) }, here],
+        },
+        None => vec![here],
+    }
+}
 
 /// Whether `label` has every word of `filter` (any case).
 pub fn list_matches(label: &str, filter: &str) -> bool {
@@ -63,6 +97,8 @@ impl App {
                 }
                 return;
             }
+            // nothing typed: back to the list this one's in
+            KeyCode::Backspace | KeyCode::Left if self.prompt.is_empty() => return self.list_up(actions),
             KeyCode::Backspace => {
                 self.prompt.pop();
             }
@@ -74,6 +110,26 @@ impl App {
         let shown = self.list_shown();
         if !shown.contains(&sel) {
             self.overlay = Overlay::List { sel: shown.first().copied().unwrap_or(0) };
+        }
+    }
+
+    /// Go up: to the list this one's in (Kodi's "..").
+    pub(super) fn list_up(&mut self, actions: &Handle) {
+        match self.list_ok().and_then(|l| l.up.clone()) {
+            Some((_, go)) => {
+                self.note = "up...".into();
+                let _ = actions.send(Action::ListGo(go));
+            }
+            None => self.note = "this list isn't inside another".into(),
+        }
+    }
+
+    /// Go back along the trail to crumb `i`.
+    pub(super) fn list_crumb(&mut self, i: usize, actions: &Handle) {
+        if let Some(go) = self.crumbs.get(i).and_then(|c| c.go.clone()) {
+            self.prompt.clear();
+            self.note = format!("{}...", self.crumbs[i].title);
+            let _ = actions.send(Action::ListGo(go));
         }
     }
 
@@ -105,6 +161,9 @@ impl App {
         let loaded = self.list_ok().map(|l| l.key.clone());
         // a new list came: start where the app is in it
         if change == Change::List {
+            if let Some(l) = self.list_ok().cloned() {
+                self.crumbs = next_trail(&self.crumbs, &l);
+            }
             if let Some(l) = self.list_ok() {
                 let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p)).or(l.at).unwrap_or(0);
                 self.overlay = Overlay::List { sel: at };
@@ -139,6 +198,9 @@ impl App {
         let app_name = self.st.snap.as_ref().and_then(front_pkg).map(|p| tveee_core::builtin::apps::by_package(&p).map_or(p.clone(), |a| a.name.to_string())).unwrap_or_else(|| "the app".into());
         let mut text: Vec<Line> = Vec::new();
         let mut rows_at: Vec<Option<usize>> = Vec::new();
+        // the breadcrumbs: which text line, and each clickable crumb (x, width, crumb)
+        let mut crumb_line: Option<usize> = None;
+        let mut crumb_spots: Vec<(u16, u16, usize)> = Vec::new();
         let (title, right) = match self.st.list.as_deref() {
             None => {
                 text.push(Line::from("reading the list...").italic());
@@ -155,6 +217,28 @@ impl App {
             Some(Ok(Some(l))) => {
                 let shown = self.list_shown();
                 let pos = shown.iter().position(|&i| i == sel);
+                // the trail to here (the last one is here), each to click
+                if self.crumbs.len() > 1 {
+                    let mut spans = Vec::new();
+                    let mut x = 0u16;
+                    for (i, c) in self.crumbs.iter().enumerate() {
+                        if i > 0 {
+                            spans.push(Span::styled(" › ", dim));
+                            x += 3;
+                        }
+                        let last = i + 1 == self.crumbs.len();
+                        let st = if last { Style::new().bold() } else { Style::new().fg(Color::Cyan) };
+                        let w = u16::try_from(c.title.chars().count()).unwrap_or(0);
+                        if !last && c.go.is_some() {
+                            crumb_spots.push((x, w, i));
+                        }
+                        spans.push(Span::styled(c.title.clone(), st));
+                        x += w;
+                    }
+                    crumb_line = Some(text.len());
+                    text.push(Line::from(spans));
+                    rows_at.push(None);
+                }
                 text.push(if self.prompt.is_empty() {
                     Line::from(Span::styled("type to filter", dim))
                 } else {
@@ -206,7 +290,7 @@ impl App {
                 text.push(Line::default());
                 rows_at.push(None);
                 let reading = if self.st.list_loading { "  reading..." } else { "" };
-                text.push(Line::from(format!("↑↓ pgup pgdn home end  ⏎/click choose  type to filter  esc closes{more}{reading}")).fg(Color::DarkGray));
+                text.push(Line::from(format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  type to filter  esc closes{more}{reading}")).fg(Color::DarkGray));
                 rows_at.push(None);
                 let count = match pos {
                     Some(p) => format!(" {} of {} ", p + 1, shown.len()),
@@ -222,6 +306,12 @@ impl App {
         }
         let r = popup_titled(f, &title, &right, text, Color::Magenta);
         self.hits.push((r, Hit::Popup));
+        if let Some(line) = crumb_line {
+            let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
+            for (x, w, i) in crumb_spots {
+                self.hits.push((ratatui::layout::Rect { x: r.x + 1 + x, y, width: w, height: 1 }, Hit::Crumb(i)));
+            }
+        }
         for (row, at) in rows_at.into_iter().enumerate() {
             if let Some(i) = at {
                 let y = r.y + 1 + u16::try_from(row).unwrap_or(0);

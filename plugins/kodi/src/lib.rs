@@ -541,6 +541,9 @@ impl tveee_core::provider::Player for Kodi {
     fn go(&self, tv: &Tv, to: &tveee_core::more::Go) -> Outcome<String> {
         use tveee_core::provider::Provider;
         let tveee_core::more::Go::Link(link) = to else { return Outcome::Fallback };
+        if link == browse::UP {
+            return call(tv, "Input.ExecuteAction", r#"{"action":"parentdir"}"#).map(|_| "up a folder in Kodi".to_string()).into();
+        }
         match self.open_here(tv, link) {
             Outcome::Handled(()) if link.starts_with("kodi-window:") => Outcome::Handled("opened it in Kodi".into()),
             Outcome::Handled(()) => Outcome::Handled("playing it in Kodi".into()),

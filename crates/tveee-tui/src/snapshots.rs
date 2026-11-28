@@ -631,6 +631,8 @@ fn kodi_artists() -> TvState {
             item("smb://nas/music/exit.flac", "Exit Music.flac", false, Some("4:24")),
         ],
         at: Some(2),
+        up: None,
+        reopen: None,
     };
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
@@ -925,4 +927,60 @@ fn links_under_a_pop_up_stay_under_it() {
     a.overlay = Overlay::Help(0);
     let frame = term.draw(|f| a.draw(f)).unwrap();
     assert!(super::links::showing(&a.links, frame.buffer).is_empty(), "the link would show through help");
+}
+
+#[test]
+fn list_trail_and_going_up() {
+    use super::ctxlist::{next_trail, Crumb};
+    use tveee_core::more::Go;
+    use tveee_core::provider::ContextList;
+    let list = |title: &str, key: &str, up: Option<(&str, &str)>| ContextList {
+        title: title.into(),
+        kind: "folder",
+        key: key.into(),
+        items: Vec::new(),
+        at: None,
+        up: up.map(|(k, g)| (k.to_string(), Go::Link(g.into()))),
+        reopen: Some(Go::Link(format!("open:{key}"))),
+    };
+    let music = list("Music", "10502|", None);
+    let albums = list("Albums", "10502|musicdb://albums/", Some(("10502|", "kodi-window:music")));
+    let album = list("A Love Supreme", "10502|musicdb://albums/7/", Some(("10502|musicdb://albums/", "kodi-window:music|musicdb://albums/")));
+    // down: each one's way up teaches how to get back to the one before
+    let t = next_trail(&[], &music);
+    let t = next_trail(&t, &albums);
+    let t = next_trail(&t, &album);
+    assert_eq!(t.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["Music", "Albums", "A Love Supreme"]);
+    // each crumb goes back to its own list
+    assert_eq!(t[0].go, Some(Go::Link("open:10502|".into())));
+    assert_eq!(t[1].go, Some(Go::Link("open:10502|musicdb://albums/".into())));
+    // back to one on the trail: it's cut there
+    let back = next_trail(&t, &albums);
+    assert_eq!(back.len(), 2);
+    // a list not on it (opened in Kodi straight away): "‹ up", then it
+    let fresh = next_trail(&[], &album);
+    assert_eq!(fresh[0], Crumb { title: "‹ up".into(), key: "10502|musicdb://albums/".into(), go: Some(Go::Link("kodi-window:music|musicdb://albums/".into())) });
+
+    // in the pane: the crumbs drawn, ⌫ goes up, a crumb click goes back to it
+    let mut st = kodi_artists();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        l.up = Some(("10502|".into(), Go::Link("kodi-window:music".into())));
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, rx, h) = app_seeing(st);
+    a.crumbs = vec![Crumb { title: "Music".into(), key: "10502|".into(), go: Some(Go::Link("kodi-window:music".into())) }, Crumb { title: "Artists".into(), key: "10502|musicdb://artists/".into(), go: None }];
+    a.overlay = Overlay::List { sel: 0 };
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("Music › Artists"), "{s}");
+    a.list_key(0, KeyCode::Backspace, KeyModifiers::NONE, &h);
+    assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-window:music".into()))));
+    let r = a.hits.iter().find(|(_, x)| *x == Hit::Crumb(0)).map(|(r, _)| *r).expect("Music to click");
+    a.click(r.x, r.y, &h);
+    assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-window:music".into()))));
+    // typing: ⌫ takes a letter off, not up
+    a.prompt = "ra".into();
+    a.list_key(0, KeyCode::Backspace, KeyModifiers::NONE, &h);
+    assert_eq!(a.prompt, "r");
+    assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
 }
