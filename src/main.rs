@@ -19,7 +19,7 @@ fn main() {
     let all = plugins::all();
 
     let sub = match args.first().map(String::as_str) {
-        None | Some("-h") | Some("--help") => "help",
+        None | Some("-h" | "--help") => "help",
         Some(s) => s,
     };
     let rest = args.get(1..).unwrap_or_default();
@@ -43,7 +43,7 @@ fn main() {
 
     // `tveee <cmd> --help`: any command, enabled or not, without the TV
     if help {
-        let every: Vec<Command> = all.iter().flat_map(|p| p.commands()).collect();
+        let every: Vec<Command> = all.iter().flat_map(tveee_core::plugin::Plugin::commands).collect();
         if let Some(cmd) = registry::find(&every, sub) {
             print!("{}", registry::help_for(cmd));
             let disabled = all.iter().find(|p| p.command_names().contains(&sub));
@@ -105,8 +105,11 @@ mod tests {
         let end = "```\n<!-- commands:end -->";
         let from = readme.find(start).expect("README: commands:start marker") + start.len();
         let to = from + readme[from..].find(end).expect("README: commands:end marker");
-        let cmds: Vec<Command> =
-            plugins::all().iter().filter(|p| matches!(p.enable, plugin::Enable::Always) && p.name != "ui").flat_map(|p| p.commands()).collect();
+        let cmds: Vec<Command> = plugins::all()
+            .iter()
+            .filter(|p| matches!(p.enable, plugin::Enable::Always) && p.name != "ui")
+            .flat_map(tveee_core::plugin::Plugin::commands)
+            .collect();
         let want = registry::usage_text(&cmds);
         assert!(readme[from..to] == want, "README's command list is out of date; replace the block between the commands markers with:\n\n{want}");
     }
@@ -133,7 +136,7 @@ mod tests {
     #[test]
     fn names_and_aliases_are_unique() {
         let mut seen = HashSet::new();
-        for c in plugins::all().iter().flat_map(|p| p.commands()) {
+        for c in plugins::all().iter().flat_map(tveee_core::plugin::Plugin::commands) {
             for n in std::iter::once(c.name).chain(c.aliases.iter().copied()) {
                 assert!(seen.insert(n), "duplicate command or alias: {n}");
             }

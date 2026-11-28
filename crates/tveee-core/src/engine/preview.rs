@@ -78,7 +78,7 @@ pub fn preview_lane(shared: &Shared, tx: &Sender<Msg>) {
                 if shown_art.as_ref() != Some(&key) {
                     let provider = crate::provider::for_package(&a.pkg);
                     let got = provider.and_then(|p| p.player()).map(|p| p.picture(&tv, &a.art, at));
-                    match got.map(|g| g.or_fallback()) {
+                    match got.map(super::super::provider::Outcome::or_fallback) {
                         Some(Ok(Some(bytes))) => match image::load_from_memory(&bytes) {
                             Ok(img) => {
                                 let rgb = img.to_rgb8();

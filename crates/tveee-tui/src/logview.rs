@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn lines_picked() {
-        let lines: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        let lines: Vec<String> = ["a", "b", "c", "d"].iter().map(std::string::ToString::to_string).collect();
         // numbered from 10: lines 11 to 13, either way round
         assert_eq!(lines_between(10, &lines, 11, 13), "b\nc\nd");
         assert_eq!(lines_between(10, &lines, 13, 11), "b\nc\nd");

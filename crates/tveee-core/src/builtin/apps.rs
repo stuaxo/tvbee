@@ -225,7 +225,7 @@ cmd package query-activities --brief -a android.intent.action.MAIN -c android.in
 /// Placeholders that claim everything; never worth naming.
 const NOT_APPS: &[&str] = &["android", "com.google.android.tv.frameworkpackagestubs"];
 
-/// Work out kinds from [`GUESS_CMD`] output. A home screen that can also
+/// Work out kinds from `GUESS_CMD` output. A home screen that can also
 /// show videos (as a wallpaper) is still a home screen: home > store > player.
 pub fn parse_guesses(out: &str) -> Vec<Guess> {
     let parts: Vec<Vec<String>> = out.split("@@").map(super::open::parse_candidates).collect();
@@ -533,11 +533,11 @@ fn foreground(c: &Ctx, args: &[String]) -> Result<()> {
 /// (`fresh_for_links`) are closed first if they're running. Returns whether
 /// it closed the app.
 pub fn before_link(tv: &Tv, pkg: &str) -> Result<bool> {
-    if !crate::provider::for_package(pkg).is_some_and(|p| p.fresh_for_links()) {
+    if !crate::provider::for_package(pkg).is_some_and(super::super::provider::Provider::fresh_for_links) {
         return Ok(false);
     }
     // pidof exits 1 when the app isn't running
-    let running = tv.shell(&["pidof", pkg]).map(|o| !o.trim().is_empty()).unwrap_or(false);
+    let running = tv.shell(&["pidof", pkg]).is_ok_and(|o| !o.trim().is_empty());
     if running {
         tv.shell(&["am", "force-stop", pkg])?;
     }
@@ -736,7 +736,7 @@ fn app_cmd(c: &Ctx, args: &[String]) -> Result<()> {
                 Some(p) => println!("  tveee knows: {}", crate::provider::capabilities(p).join(", ")),
                 None => println!("  nothing special: tveee launches, closes and searches it like any app"),
             }
-            let sessions = provider.is_some_and(|p| p.has_sessions());
+            let sessions = provider.is_some_and(super::super::provider::Provider::has_sessions);
             println!(
                 "  --restart{}   close it and start it again{}",
                 if sessions { " [--disable-restore]" } else { "" },
@@ -932,7 +932,7 @@ mod tests {
         aliases.dedup();
         assert_eq!(aliases.len(), n, "duplicate alias");
         // one entry per package (several home screens share a name, not a package)
-        let mut pkgs: Vec<_> = all().iter().filter(|a| a.target != "@home").map(|a| a.package()).collect();
+        let mut pkgs: Vec<_> = all().iter().filter(|a| a.target != "@home").map(super::App::package).collect();
         let n = pkgs.len();
         pkgs.sort();
         pkgs.dedup();
@@ -1019,7 +1019,7 @@ mod tests {
 
     #[test]
     fn app_options() {
-        let a = |v: &[&str]| parse_app_args(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let a = |v: &[&str]| parse_app_args(&v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>());
         assert_eq!(a(&[]), Ok(AppAsk::Info));
         assert_eq!(a(&["--restart"]), Ok(AppAsk::Restart { restore: true }));
         assert_eq!(a(&["--disable-restore", "--restart"]), Ok(AppAsk::Restart { restore: false }));

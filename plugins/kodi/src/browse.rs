@@ -61,7 +61,7 @@ pub fn place(tv: &Tv) -> Result<Option<Place>> {
     let window = w.pointer("/currentwindow/id").and_then(Value::as_u64).unwrap_or(0);
     let names: Vec<String> = ["Container.FolderPath", "Container.FolderName", "Container.NumItems", "ListItem.Label", "ListItem.FileNameAndPath"]
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
     Ok(place_of(window, &labels(tv, &names)?))
 }

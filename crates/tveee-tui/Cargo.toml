@@ -24,3 +24,6 @@ tveee-plugin-philips.workspace = true
 tveee-plugin-youtube.workspace = true
 tveee-plugin-kodi.workspace = true
 insta = "1.49.0"
+
+[lints]
+workspace = true

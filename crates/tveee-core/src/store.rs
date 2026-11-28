@@ -4,7 +4,7 @@
 //! Everything here is a copy of something on a TV, kept with where it came
 //! from (`source`, e.g. the broadcast guide) and when it was read
 //! (`fetches`), so it can always be read again: there are no migrations.
-//! When [`SCHEMA`] changes, the old database is dropped and rebuilt. What
+//! When `SCHEMA` changes, the old database is dropped and rebuilt. What
 //! only the user has (options, pairings, favourite changes not on the TV
 //! yet) stays in files in the config folder instead.
 //!

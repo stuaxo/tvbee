@@ -149,7 +149,7 @@ impl tveee_core::provider::Player for YouTube {
         }
     }
     fn playing(&self, tv: &Tv) -> Outcome<Playing> {
-        let pages = match devtools::with_conn(tv, PACKAGE, |c| c.pages()) {
+        let pages = match devtools::with_conn(tv, PACKAGE, tveee_core::devtools::Conn::pages) {
             Ok(p) => p,
             Err(e) => return Outcome::from(Err::<Playing, _>(e)),
         };
@@ -377,7 +377,7 @@ pub fn storyboard(id: &str) -> Option<Storyboard> {
 }
 
 /// Of the storyboard sheets here (file name, last changed), those to delete:
-/// all but those of the [`KEEP`] videos used last.
+/// all but those of the `KEEP` videos used last.
 pub fn sheets_to_remove(sheets: &[(String, std::time::SystemTime)]) -> Vec<String> {
     let video = |name: &str| name.rfind("-sb").map(|i| name[..i].to_string());
     let mut last_used: HashMap<String, std::time::SystemTime> = HashMap::new();
@@ -448,7 +448,7 @@ pub fn video_id(link: &str) -> Option<String> {
 /// yt-dlp output templates: one JSON value per line, in this order.
 const FIELDS: &[&str] = &["title", "channel", "uploader_id", "channel_url", "upload_date", "view_count", "like_count", "duration", "chapters", "description"];
 
-/// Turn yt-dlp's lines (see [`FIELDS`]) into details.
+/// Turn yt-dlp's lines (see `FIELDS`) into details.
 pub fn parse_details(out: &str) -> Details {
     let lines: Vec<&str> = out.lines().collect();
     let get = |k: &str| FIELDS.iter().position(|f| *f == k).and_then(|i| lines.get(i)).copied().unwrap_or("NA");
@@ -569,7 +569,7 @@ pub fn chapters_list(link: &str, d: &Details, pos: Option<f64>) -> Option<tveee_
 
 /// The video playing: its link and position (devtools).
 fn link_and_position(tv: &Tv) -> Option<(String, Option<f64>)> {
-    let pages = devtools::with_conn(tv, PACKAGE, |c| c.pages()).ok()?;
+    let pages = devtools::with_conn(tv, PACKAGE, tveee_core::devtools::Conn::pages).ok()?;
     let link = pages.iter().find_map(|p| watch_link(&p.url))?;
     Some((link, pages.iter().find_map(|p| p.progress).map(|p| p.position)))
 }

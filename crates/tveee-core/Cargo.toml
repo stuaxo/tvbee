@@ -19,3 +19,6 @@ image = { workspace = true, optional = true }
 default = []
 # the engine front ends run on: what's on, actions, previews, on worker threads
 engine = ["dep:image"]
+
+[lints]
+workspace = true

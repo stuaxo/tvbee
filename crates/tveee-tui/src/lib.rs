@@ -184,9 +184,9 @@ const SETTLE_MAX: Duration = Duration::from_secs(12);
 /// loading), and the "what" line shows `label` instead of them. It ends when
 /// the action has arrived (the expected app is in front, or something
 /// changed, and it has something to say: an app coming up shows nothing at
-/// first) and then stayed the same for [`SETTLE_STEADY`]; when something
-/// unexpected comes up; when nothing changes for [`SETTLE`]; or after
-/// [`SETTLE_MAX`] in all. Then the latest snapshot is shown as it is.
+/// first) and then stayed the same for `SETTLE_STEADY`; when something
+/// unexpected comes up; when nothing changes for `SETTLE`; or after
+/// `SETTLE_MAX` in all. Then the latest snapshot is shown as it is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settling {
     /// e.g. "launching Netflix..."

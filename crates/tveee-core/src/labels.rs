@@ -33,7 +33,7 @@ pub struct Found {
     pub apk: String,
 }
 
-/// Apps from [`QUERY`]'s (verbose) output: the activity's label if it has
+/// Apps from `QUERY`'s (verbose) output: the activity's label if it has
 /// one, else its application's; the first activity of a package counts.
 pub fn parse_query(out: &str) -> Vec<Found> {
     let mut list: Vec<Found> = Vec::new();

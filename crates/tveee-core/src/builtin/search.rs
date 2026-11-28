@@ -56,7 +56,7 @@ fn mine<'a>(list: &'a [String], p: &str) -> Vec<&'a String> {
     list.iter().filter(|c| c.split('/').next() == Some(p)).collect()
 }
 
-/// Searchable apps from [`QUERY_CMD`] output plus the link-searchable apps
+/// Searchable apps from `QUERY_CMD` output plus the link-searchable apps
 /// that are installed (`installed`: `pm list packages` output, or None to skip).
 pub fn parse_searchable(out: &str, installed: Option<&str>) -> Vec<Searchable> {
     let parts: Vec<Vec<String>> = out.split("@@").map(parse_candidates).collect();

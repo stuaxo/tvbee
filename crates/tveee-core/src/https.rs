@@ -15,7 +15,7 @@ pub struct Request<'a> {
     pub digest: Option<(&'a str, &'a str)>,
     /// Basic authentication (user, password), e.g. Kodi's.
     pub basic: Option<(&'a str, &'a str)>,
-    /// Keep trying a refused connection for a while (see [`RETRY_FOR`]) if
+    /// Keep trying a refused connection for a while (see `RETRY_FOR`) if
     /// this says it's worth it: asked once, at the first refusal (a TV in
     /// standby refuses too, and won't come back by itself).
     pub retry: Option<&'a dyn Fn() -> bool>,
@@ -71,7 +71,7 @@ pub fn split_status(out: &str) -> Option<(u16, String)> {
 const RETRY_FOR: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Make the request; returns (status, body). A refused connection is retried
-/// for a while (see [`RETRY_FOR`]).
+/// for a while (see `RETRY_FOR`).
 pub fn request(r: &Request) -> Result<(u16, String)> {
     // answered from a recording (`crate::mock`), or recorded
     let what = ["https", crate::mock::url_key(r.url), r.body.unwrap_or("")];
@@ -101,9 +101,9 @@ fn request_live(r: &Request) -> Result<(u16, String)> {
         );
         match reply {
             Err(Refused(_)) if start.elapsed() < RETRY_FOR && *worth_it.get_or_insert_with(|| r.retry.is_some_and(|f| f())) => {
-                std::thread::sleep(std::time::Duration::from_millis(700))
+                std::thread::sleep(std::time::Duration::from_millis(700));
             }
-            Err(Refused(e)) | Err(Other(e)) => return Err(e),
+            Err(Refused(e) | Other(e)) => return Err(e),
             Ok(reply) => return Ok(reply),
         }
     }

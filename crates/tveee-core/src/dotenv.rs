@@ -88,7 +88,12 @@ pub fn load() {
         // SAFETY: called at the very start of main, while the process is
         // still single-threaded, so nothing else can be reading the
         // environment concurrently.
-        unsafe { std::env::set_var(&k, v) };
+        // set_var is unsafe in Rust 2024 (other threads reading the
+        // environment): this runs first, before any thread starts
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var(&k, v);
+        };
         loaded.push((k, file));
     }
     let _ = LOADED.set(loaded);

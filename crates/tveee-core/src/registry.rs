@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn spots_help_requests() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let a = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         assert!(wants_help(&a(&["--help"])));
         assert!(wants_help(&a(&["-h"])));
         assert!(wants_help(&a(&["youtube", "--help"])));

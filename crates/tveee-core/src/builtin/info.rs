@@ -378,7 +378,7 @@ fn flag(s: Option<&str>) -> Option<bool> {
     }
 }
 
-/// Parse the output of [`CLOCK_CMD`]: the date line, auto_time, auto_time_zone, timezone.
+/// Parse the output of `CLOCK_CMD`: the date line, auto_time, auto_time_zone, timezone.
 pub fn parse_clock(out: &str) -> Option<TvClock> {
     let mut lines = out.lines();
     let mut f = lines.next()?.split_whitespace();
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn watch_args() {
-        let a = |v: &[&str]| parse_watch_args("status", &v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let a = |v: &[&str]| parse_watch_args("status", &v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>());
         assert_eq!(a(&[]).unwrap(), None);
         assert_eq!(a(&["--watch"]).unwrap(), Some(2.0));
         assert_eq!(a(&["-n", "5"]).unwrap(), Some(5.0));

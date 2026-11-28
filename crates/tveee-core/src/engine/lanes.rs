@@ -457,7 +457,7 @@ impl Refresher {
             let y = sc.spawn(|| if want_system { info::read_system(tv).map(Some) } else { Ok(None) });
             let a = tv.audio_text();
             let j = |h: std::thread::ScopedJoinHandle<'_, Result<String>>| h.join().unwrap_or_else(|_| Ok(String::new()));
-            let y = y.join().ok().and_then(|r| r.ok()).flatten();
+            let y = y.join().ok().and_then(std::result::Result::ok).flatten();
             let p = p.join().unwrap_or(Ok(None));
             let w = w.join().unwrap_or(Ok(None));
             (p, w, j(m), a, y, l.join().unwrap_or_default())

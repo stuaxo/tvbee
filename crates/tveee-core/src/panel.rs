@@ -76,7 +76,7 @@ pub enum Run {
 
 impl Choice {
     pub fn act(label: impl Into<String>, id: &'static str, args: &[&str]) -> Choice {
-        Choice { label: label.into(), colour: None, run: Run::Act { id, args: args.iter().map(|a| a.to_string()).collect() } }
+        Choice { label: label.into(), colour: None, run: Run::Act { id, args: args.iter().map(std::string::ToString::to_string).collect() } }
     }
 }
 
