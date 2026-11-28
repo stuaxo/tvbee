@@ -461,8 +461,10 @@ impl App {
         } else {
             (" keys - any key closes ", String::new())
         };
+        let total = lines.len();
         let text: Vec<Line> = lines.into_iter().skip(top).take(room).map(Line::from).collect();
         let r = popup_titled(f, title, &right, text, Color::DarkGray);
+        scrollbar(f, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), total, top);
         self.hits.push((r, Hit::Popup));
     }
 

@@ -198,6 +198,7 @@ impl App {
         let keys = if from.is_some() { " y/⏎ copy them  esc lets go  s save the log " } else { " ↑↓ pgup pgdn home  shift/v select  y copy  s save  end: newest  esc closes " };
         let block = Block::bordered().title(title).title_bottom(Line::from(keys).right_aligned()).border_style(Style::new().fg(Color::DarkGray));
         f.render_widget(Paragraph::new(shown).block(block), r);
+        scrollbar(f, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), lines.len(), top.saturating_sub(first));
         self.hits.push((r, Hit::Popup));
         for (i, (n, _)) in rows.iter().enumerate() {
             let y = r.y + 1 + u16::try_from(i).unwrap_or(0);

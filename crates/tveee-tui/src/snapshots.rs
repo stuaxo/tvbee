@@ -1254,3 +1254,28 @@ fn a_failed_read_keeps_the_list() {
     assert!(s.contains("couldn't read it again (timed out): showing it as it was"), "{s}");
     assert!(s.contains("A Polished Solid"), "{s}");
 }
+
+#[test]
+fn long_lists_have_a_scrollbar() {
+    use tveee_core::more::Go;
+    use tveee_core::provider::ListItem;
+    let mut st = kodi_albums_browsed();
+    if let Some(Ok(Some(mut l))) = st.list.as_deref().cloned() {
+        l.items = (0..60).map(|n| ListItem { section: None, id: format!("musicdb://albums/{n}/"), label: format!("Album {n}"), meta: None, folder: true, go: Go::Link(format!("music||musicdb://albums/{n}/")) }).collect();
+        st.list = Some(Arc::new(Ok(Some(l))));
+    }
+    let (mut a, _rx, h) = app_seeing(st);
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    let s = screen(&mut a, CORNER);
+    assert!(s.contains('┃'), "a thumb beside the rows: {s}");
+    // at the top: the thumb starts at the first row
+    let first_row = s.lines().position(|l| l.contains("Album 0/")).expect("the first album");
+    assert!(s.lines().nth(first_row).is_some_and(|l| l.contains('┃')), "{s}");
+    // a short list: none
+    let (mut b, _rx, h) = app_seeing(kodi_albums_browsed());
+    b.opts = Some(Vec::new());
+    b.open_list(&h);
+    let s = screen(&mut b, DESKTOP);
+    assert!(s.lines().filter(|l| l.contains("Dummy/") || l.contains("Mezzanine/")).all(|l| !l.contains('┃')), "{s}");
+}

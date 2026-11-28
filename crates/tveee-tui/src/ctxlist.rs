@@ -354,6 +354,8 @@ impl App {
         // the breadcrumbs: which text line, and each clickable crumb (x, width, crumb)
         let mut crumb_line: Option<usize> = None;
         let mut crumb_spots: Vec<(u16, u16, usize)> = Vec::new();
+        // the rows: their first text line, how many shown, of how many, from
+        let mut bar: Option<(usize, usize, usize, usize)> = None;
         let (title, right) = match self.st.list.as_deref() {
             None => {
                 text.push(Line::from("reading the list...").italic());
@@ -444,6 +446,8 @@ impl App {
                     text.push(Line::from(if l.items.is_empty() { "(empty)" } else { "nothing matches" }).italic());
                     rows_at.push(None);
                 }
+                // where the rows are, for the scrollbar beside them
+                bar = Some((text.len(), rows.len().min(room), rows.len(), start));
                 for row in rows.iter().skip(start).take(room) {
                     let i = match row {
                         Ok(i) => *i,
@@ -462,7 +466,6 @@ impl App {
                     text.push(if i == sel { line.reversed() } else { line });
                     rows_at.push(Some(i));
                 }
-                let more = if rows.len() > room { "  (scrolls)" } else { "" };
                 text.push(Line::default());
                 rows_at.push(None);
                 let reading = if self.st.list_loading { "  reading..." } else { "" };
@@ -477,7 +480,7 @@ impl App {
                 let hint = if self.crumb_at.is_some() {
                     format!("←→ choose a step  ⏎ go there  {loc}tab/↓/esc back to the list")
                 } else {
-                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  {tab}{loc}{sync}type to filter  esc closes{more}{reading}")
+                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  {tab}{loc}{sync}type to filter  esc closes{reading}")
                 };
                 text.push(Line::from(hint).fg(Color::DarkGray));
                 rows_at.push(None);
@@ -496,6 +499,10 @@ impl App {
             first.spans.push(Span::raw(" ".repeat(total.saturating_sub(w))));
         }
         let r = popup_titled(f, &title, &right, text, Color::Magenta);
+        if let Some((line, shown, total, start)) = bar {
+            let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
+            scrollbar(f, r.right().saturating_sub(1), y, u16::try_from(shown).unwrap_or(0), total, start);
+        }
         self.hits.push((r, Hit::Popup));
         if let Some(line) = crumb_line {
             let y = r.y + 1 + u16::try_from(line).unwrap_or(0);
