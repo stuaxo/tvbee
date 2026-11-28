@@ -403,6 +403,11 @@ pub trait Player: Sync {
     fn list(&self, _tv: &crate::tv::Tv) -> Outcome<ContextList> {
         Outcome::Fallback
     }
+    /// Move the app's own highlight in its list by `by` rows (down when
+    /// positive): the ui's list pane moved, the app's screen follows.
+    fn move_highlight(&self, _tv: &crate::tv::Tv, _by: i64) -> Outcome<()> {
+        Outcome::Fallback
+    }
     /// Choose an item from [`Player::list`] (fall back: do it the usual way
     /// for a [`crate::more::Go`]).
     fn go(&self, _tv: &crate::tv::Tv, _to: &crate::more::Go) -> Outcome<String> {
