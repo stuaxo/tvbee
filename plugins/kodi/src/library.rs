@@ -7,7 +7,7 @@
 //! typed location); something to play is `kodi-play:playlist|folder|file`.
 
 use super::browse::{bare, path_crumbs, section_name, unescape};
-use super::{Result, Tv, call, quote};
+use super::{Result, Tv};
 use serde_json::Value;
 use tveee_core::more::Go;
 use tveee_core::provider::{ContextList, ListCrumb, ListItem, ListPlace};
@@ -220,13 +220,12 @@ pub fn list_at(tv: &Tv, at: &str) -> Result<ContextList> {
     let (m, name, path) = parse(at);
     let path = if bare(&path) == m.db() { String::new() } else { path };
     let dir = if path.is_empty() { m.db().to_string() } else { path.clone() };
-    let props = r#"["title","artist","duration","track"]"#;
-    let r = call(tv, "Files.GetDirectory", &format!(r#"{{"directory":{},"media":"{}","properties":{props}}}"#, quote(&dir), m.name()))?;
+    let r = super::rpc::ask(tv, &super::rpc::GetDirectory { directory: &dir, media: m.name() })?;
     let mut items;
     if path.is_empty() {
         // the top: the library, then the shares and folders added to Kodi
         items = items_of(m, &dir, &r, "files", Some("Library"));
-        if let Ok(s) = call(tv, "Files.GetSources", &format!(r#"{{"media":"{}"}}"#, m.name())) {
+        if let Ok(s) = super::rpc::ask(tv, &super::rpc::GetSources { media: m.name() }) {
             items.extend(items_of(m, &dir, &s, "sources", Some("Files")));
         }
     } else {
@@ -301,14 +300,15 @@ pub fn play(tv: &Tv, link: &str) -> Result<String> {
         if dir.is_empty() {
             return Ok(None);
         }
-        call(tv, "Playlist.Clear", &format!(r#"{{"playlistid":{pl}}}"#))?;
-        call(tv, "Playlist.Add", &format!(r#"{{"playlistid":{pl},"item":{{"directory":{},"media":"{media}"}}}}"#, quote(&dir)))?;
-        let r = call(tv, "Playlist.GetItems", &format!(r#"{{"playlistid":{pl},"properties":["file"]}}"#))?;
-        Ok(r.get("items").and_then(Value::as_array).and_then(|a| a.iter().position(|i| i.get("file").and_then(Value::as_str) == Some(file.as_str()))))
+        use super::rpc::{PlaylistAddDirectory, PlaylistClear, PlaylistFiles, ask};
+        ask(tv, &PlaylistClear(pl))?;
+        ask(tv, &PlaylistAddDirectory { playlist: pl, directory: &dir, media })?;
+        let files = ask(tv, &PlaylistFiles(pl))?;
+        Ok(files.iter().position(|f| *f == file))
     };
     match queued() {
-        Ok(Some(n)) => call(tv, "Player.Open", &format!(r#"{{"item":{{"playlistid":{pl},"position":{n}}}}}"#))?,
-        _ => call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}}}"#, quote(&file)))?,
+        Ok(Some(n)) => super::rpc::ask(tv, &super::rpc::Open::Playlist { playlist: pl, position: n })?,
+        _ => super::rpc::ask(tv, &super::rpc::Open::File(&file))?,
     };
     let _ = tveee_core::builtin::apps::bring_to_front(tv, super::PACKAGE);
     Ok("playing it in Kodi".into())

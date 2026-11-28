@@ -20,6 +20,7 @@ pub const PACKAGE: &str = "org.xbmc.kodi";
 pub mod addons;
 pub mod browse;
 pub mod library;
+pub mod rpc;
 pub mod sideload;
 const PAIRING: &str = "kodi";
 const DEFAULT_PORT: u16 = 8080;
@@ -51,9 +52,9 @@ pub fn seconds(time: &Value) -> Option<f64> {
 }
 
 /// Seconds as Kodi's time object.
-pub fn time_json(secs: f64) -> String {
+pub fn time_json(secs: f64) -> Value {
     let ms = (secs.max(0.0) * 1000.0).round() as u64;
-    format!(r#"{{"hours":{},"minutes":{},"seconds":{},"milliseconds":{}}}"#, ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+    serde_json::json!({ "hours": ms / 3_600_000, "minutes": ms / 60_000 % 60, "seconds": ms / 1000 % 60, "milliseconds": ms % 1000 })
 }
 
 /// `s` as a JSON string.
@@ -116,24 +117,18 @@ fn post_within(tv: &Tv, login: &(u16, String, String), body: &str, secs: u32) ->
     }
 }
 
-/// Call `method` with `params` (a JSON object); returns its `result`.
+/// Call `method` with `params` (a JSON object); returns its `result`
+/// (through [`rpc`], as every call to Kodi goes).
 pub fn call(tv: &Tv, method: &str, params: &str) -> Result<Value> {
-    let body = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"{method}","params":{params}}}"#);
-    let reply = post(tv, &login(tv), &body)?;
-    result_of(&reply, method)
+    let Ok(params) = serde_json::from_str::<Value>(params) else { return failed(format!("Kodi: {method}: params aren't JSON")) };
+    rpc::ask(tv, &rpc::Raw { method, params })
 }
 
-/// The `result` of a JSON-RPC reply, or its error.
-pub fn result_of(reply: &str, method: &str) -> Result<Value> {
-    let Ok(mut v) = serde_json::from_str::<Value>(reply) else { return failed(format!("Kodi: {method}: not JSON: {}", reply.trim())) };
-    if let Some(e) = v.get("error") {
-        let msg = str_of(e, "message").unwrap_or_else(|| e.to_string());
-        return failed(format!("Kodi: {method}: {msg}"));
-    }
-    match v.get_mut("result") {
-        Some(r) => Ok(r.take()),
-        None => failed(format!("Kodi: {method}: no result")),
-    }
+pub use rpc::result_of;
+
+/// Call `method` with `params` built as JSON (`json!`); returns its `result`.
+pub fn call_json(tv: &Tv, method: &str, params: Value) -> Result<Value> {
+    rpc::ask(tv, &rpc::Raw { method, params })
 }
 
 /// Whether Kodi's API answers now.
@@ -173,8 +168,8 @@ fn player_id(tv: &Tv) -> Result<Option<(u32, String)>> {
     Ok(first.and_then(|p| num_of(p, "playerid")).map(|id| (id as u32, first.and_then(|p| str_of(p, "type")).unwrap_or_default())))
 }
 
-const ITEM_FIELDS: &str = r#"["title","showtitle","season","episode","artist","album","year","file","art","thumbnail","fanart","streamdetails"]"#;
-const PLAYER_FIELDS: &str = r#"["time","totaltime","speed","currentaudiostream","currentsubtitle","subtitleenabled"]"#;
+const ITEM_FIELDS: &[&str] = &["title", "showtitle", "season", "episode", "artist", "album", "year", "file", "art", "thumbnail", "fanart", "streamdetails"];
+const PLAYER_FIELDS: &[&str] = &["time", "totaltime", "speed", "currentaudiostream", "currentsubtitle", "subtitleenabled"];
 
 /// What kind of thing a Kodi player plays, from its type.
 pub fn media_of(kind: &str) -> Option<&'static str> {
@@ -240,8 +235,8 @@ pub fn parse_playing(item: &Value, props: &Value) -> Playing {
 /// properties (its tracks, for sessions).
 fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>, Value)>> {
     let Some((id, kind)) = player_id(tv)? else { return Ok(None) };
-    let item = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{ITEM_FIELDS}}}"#))?;
-    let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":{PLAYER_FIELDS}}}"#))?;
+    let item = call_json(tv, "Player.GetItem", serde_json::json!({ "playerid": id, "properties": ITEM_FIELDS }))?;
+    let props = call_json(tv, "Player.GetProperties", serde_json::json!({ "playerid": id, "properties": PLAYER_FIELDS }))?;
     let file = item.get("item").and_then(|i| str_of(i, "file"));
     let mut playing = parse_playing(&item, &props);
     playing.media = media_of(&kind);
@@ -403,11 +398,12 @@ fn percent_decode(s: &str) -> String {
 
 /// The body that seeks to `to` (Kodi's own forms: relative seconds, a
 /// percentage, or a time).
-pub fn seek_value(to: SeekTo) -> String {
+pub fn seek_value(to: SeekTo) -> Value {
     match to {
-        SeekTo::By(d) => format!(r#"{{"seconds":{}}}"#, d.round() as i64),
-        SeekTo::Fraction(f) => format!(r#"{{"percentage":{:.3}}}"#, (f * 100.0).clamp(0.0, 100.0)),
-        SeekTo::At(t) => format!(r#"{{"time":{}}}"#, time_json(t)),
+        SeekTo::By(d) => serde_json::json!({ "seconds": d.round() as i64 }),
+        // to a thousandth of a percent, as before
+        SeekTo::Fraction(f) => serde_json::json!({ "percentage": ((f * 100.0).clamp(0.0, 100.0) * 1000.0).round() / 1000.0 }),
+        SeekTo::At(t) => serde_json::json!({ "time": time_json(t) }),
     }
 }
 
@@ -427,11 +423,11 @@ const PLACES: &[Place] = &[
 ];
 
 /// The GUI.ActivateWindow params for a `kodi-window:` link.
-pub fn window_params(link: &str) -> Option<String> {
+pub fn window_params(link: &str) -> Option<Value> {
     let w = link.strip_prefix("kodi-window:")?;
     Some(match w.split_once('|') {
-        Some((window, param)) => format!(r#"{{"window":{},"parameters":[{}]}}"#, quote(window), quote(param)),
-        None => format!(r#"{{"window":{}}}"#, quote(w)),
+        Some((window, param)) => serde_json::json!({ "window": window, "parameters": [param] }),
+        None => serde_json::json!({ "window": w }),
     })
 }
 
@@ -485,8 +481,11 @@ impl tveee_core::provider::Provider for Kodi {
         let restored = (|| {
             tveee_core::builtin::apps::start(tv, target)?;
             wait_ready(tv, 40)?;
-            let options = s.resume.map(|t| format!(r#","options":{{"resume":{}}}"#, time_json(t))).unwrap_or_default();
-            call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}{options}}}"#, quote(&s.link)))?;
+            let mut params = serde_json::json!({ "item": { "file": s.link } });
+            if let Some(t) = s.resume {
+                params["options"] = serde_json::json!({ "resume": time_json(t) });
+            }
+            call_json(tv, "Player.Open", params)?;
             put_back(tv, Tracks::from_extra(&s.extra).as_ref(), 20);
             Ok(())
         })();
@@ -501,7 +500,7 @@ impl tveee_core::provider::Provider for Kodi {
     fn open_here(&self, tv: &Tv, link: &str) -> Outcome<()> {
         if let Some(params) = window_params(link) {
             // only this way: not reaching Kodi is a failure
-            return match bring_up(tv).and_then(|()| call(tv, "GUI.ActivateWindow", &params)) {
+            return match bring_up(tv).and_then(|()| call_json(tv, "GUI.ActivateWindow", params)) {
                 Ok(_) => Outcome::Handled(()),
                 Err(e) => Outcome::Failed(Error::Failed(e.to_string())),
             };
@@ -510,7 +509,7 @@ impl tveee_core::provider::Provider for Kodi {
         if !ping(tv) {
             return Outcome::Fallback;
         }
-        let played = call(tv, "Player.Open", &format!(r#"{{"item":{{"file":{}}}}}"#, quote(link)));
+        let played = call_json(tv, "Player.Open", serde_json::json!({ "item": { "file": link } }));
         if played.is_ok() {
             let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
         }
@@ -596,7 +595,7 @@ impl tveee_core::provider::Player for Kodi {
         let seeked = player_id(tv).and_then(|p| {
             // nothing playing: keys won't do better, but they can't hurt
             let Some((id, _)) = p else { return Err(Error::Unavailable("Kodi isn't playing anything".into())) };
-            let r = call(tv, "Player.Seek", &format!(r#"{{"playerid":{id},"value":{}}}"#, seek_value(to)))?;
+            let r = call_json(tv, "Player.Seek", serde_json::json!({ "playerid": id, "value": seek_value(to) }))?;
             r.get("time").and_then(seconds).map_or_else(|| failed("Kodi didn't say where it seeked to"), Ok)
         });
         seeked.into()
@@ -604,7 +603,7 @@ impl tveee_core::provider::Player for Kodi {
     fn play_pause(&self, tv: &Tv) -> Outcome<()> {
         let done = player_id(tv).and_then(|p| {
             let Some((id, _)) = p else { return Err(Error::Unavailable("Kodi isn't playing anything".into())) };
-            call(tv, "Player.PlayPause", &format!(r#"{{"playerid":{id}}}"#)).map(drop)
+            call_json(tv, "Player.PlayPause", serde_json::json!({ "playerid": id })).map(drop)
         });
         done.into()
     }
@@ -682,7 +681,7 @@ fn watch_notifications(tv: &Tv, on: &dyn Fn(&str), go: &dyn Fn() -> bool) -> Res
 impl Kodi {
     /// Kodi's picture `art` (an image:// address), fetched from it.
     fn art_bytes(&self, tv: &Tv, art: &str) -> Result<Vec<u8>> {
-        let r = call(tv, "Files.PrepareDownload", &format!(r#"{{"path":{}}}"#, quote(art)))?;
+        let r = call_json(tv, "Files.PrepareDownload", serde_json::json!({ "path": art }))?;
         let Some(path) = r.get("details").and_then(|d| str_of(d, "path")) else { return failed("Kodi didn't offer the picture") };
         let (port, user, pass) = login(tv);
         let url = format!("http://{}:{port}/{}", tv.ip, path.trim_start_matches('/'));
@@ -709,8 +708,23 @@ impl Kodi {
 
 // --- details ----------------------------------------------------------------------
 
-const DETAIL_FIELDS: &str =
-    r#"["title","showtitle","season","episode","year","plot","tagline","rating","genre","director","cast","studio","runtime","streamdetails","file"]"#;
+const DETAIL_FIELDS: &[&str] = &[
+    "title",
+    "showtitle",
+    "season",
+    "episode",
+    "year",
+    "plot",
+    "tagline",
+    "rating",
+    "genre",
+    "director",
+    "cast",
+    "studio",
+    "runtime",
+    "streamdetails",
+    "file",
+];
 
 /// Names in a JSON list of strings, joined; None if there are none.
 fn names(v: &Value, key: &str) -> Option<String> {
@@ -788,13 +802,13 @@ impl tveee_core::provider::Details for Kodi {
     // `link` is the file: what's playing if it's that, else what Kodi knows of the file
     fn details(&self, tv: &Tv, link: &str) -> Result<tveee_core::more::Details> {
         if let Some((id, _)) = player_id(tv)? {
-            let r = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":{DETAIL_FIELDS}}}"#))?;
+            let r = call_json(tv, "Player.GetItem", serde_json::json!({ "playerid": id, "properties": DETAIL_FIELDS }))?;
             let item = r.get("item").cloned().unwrap_or_default();
             if str_of(&item, "file").as_deref() == Some(link) {
                 return Ok(parse_details(&item));
             }
         }
-        let r = call(tv, "Files.GetFileDetails", &format!(r#"{{"file":{},"media":"video","properties":{DETAIL_FIELDS}}}"#, quote(link)))?;
+        let r = call_json(tv, "Files.GetFileDetails", serde_json::json!({ "file": link, "media": "video", "properties": DETAIL_FIELDS }))?;
         Ok(parse_details(r.get("filedetails").unwrap_or(&Value::Null)))
     }
 }
@@ -813,10 +827,11 @@ pub struct Found {
 
 /// The library's movies and TV shows with `q` in their title.
 fn search_library(tv: &Tv, q: &str) -> Result<Vec<Found>> {
-    let filter = format!(r#"{{"filter":{{"field":"title","operator":"contains","value":{}}},"properties":["title","year"],"limits":{{"end":25}}}}"#, quote(q));
+    let filter =
+        serde_json::json!({ "filter": { "field": "title", "operator": "contains", "value": q }, "properties": ["title", "year"], "limits": { "end": 25 } });
     let mut out = Vec::new();
     for (kind, method, list, id) in [("movie", "VideoLibrary.GetMovies", "movies", "movieid"), ("tvshow", "VideoLibrary.GetTVShows", "tvshows", "tvshowid")] {
-        let r = call(tv, method, &filter)?;
+        let r = call_json(tv, method, filter.clone())?;
         out.extend(parse_found(&r, kind, list, id));
     }
     Ok(out)
@@ -877,11 +892,11 @@ fn play(tv: &Tv, q: &str, front: bool) -> Result<String> {
         let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
     }
     if f.kind == "movie" {
-        call(tv, "Player.Open", &format!(r#"{{"item":{{"movieid":{}}}}}"#, f.id))?;
+        call_json(tv, "Player.Open", serde_json::json!({ "item": { "movieid": f.id } }))?;
         Ok(format!("playing {}", f.title))
     } else {
         let link = format!("kodi-window:videos|videodb://tvshows/titles/{}/", f.id);
-        call(tv, "GUI.ActivateWindow", &window_params(&link).unwrap_or_default())?;
+        call_json(tv, "GUI.ActivateWindow", window_params(&link).unwrap_or_default())?;
         Ok(format!("opened {} in Kodi", f.title))
     }
 }
@@ -911,7 +926,7 @@ fn visualiser(tv: &Tv, want: Option<bool>) -> Result<bool> {
     }
     let now = window_id(tv)? == VISUALISATION;
     let Some(to) = visualiser_step(now, want) else { return Ok(now) };
-    call(tv, "GUI.SetFullscreen", &format!(r#"{{"fullscreen":{to}}}"#))?;
+    call_json(tv, "GUI.SetFullscreen", serde_json::json!({ "fullscreen": to }))?;
     // as Kodi has it now
     std::thread::sleep(std::time::Duration::from_millis(500));
     Ok(window_id(tv)? == VISUALISATION)
@@ -928,11 +943,11 @@ fn video_player(tv: &Tv) -> Result<u32> {
 fn subtitles(tv: &Tv, how: &str) -> Result<String> {
     let id = video_player(tv)?;
     let params = match how {
-        "on" | "off" => format!(r#"{{"playerid":{id},"subtitle":"{how}"}}"#),
-        _ => format!(r#"{{"playerid":{id},"subtitle":"{how}","enable":true}}"#),
+        "on" | "off" => serde_json::json!({ "playerid": id, "subtitle": how }),
+        _ => serde_json::json!({ "playerid": id, "subtitle": how, "enable": true }),
     };
-    call(tv, "Player.SetSubtitle", &params)?;
-    let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":["currentsubtitle","subtitleenabled"]}}"#))?;
+    call_json(tv, "Player.SetSubtitle", params)?;
+    let props = call_json(tv, "Player.GetProperties", serde_json::json!({ "playerid": id, "properties": ["currentsubtitle", "subtitleenabled"] }))?;
     Ok(match props.get("subtitleenabled").and_then(Value::as_bool) {
         Some(true) => format!("subtitles: {}", track_name(props.get("currentsubtitle")).unwrap_or_else(|| "on".into())),
         _ => "subtitles off".into(),
@@ -941,8 +956,8 @@ fn subtitles(tv: &Tv, how: &str) -> Result<String> {
 
 fn audio(tv: &Tv, how: &str) -> Result<String> {
     let id = video_player(tv)?;
-    call(tv, "Player.SetAudioStream", &format!(r#"{{"playerid":{id},"stream":"{how}"}}"#))?;
-    let props = call(tv, "Player.GetProperties", &format!(r#"{{"playerid":{id},"properties":["currentaudiostream"]}}"#))?;
+    call_json(tv, "Player.SetAudioStream", serde_json::json!({ "playerid": id, "stream": how }))?;
+    let props = call_json(tv, "Player.GetProperties", serde_json::json!({ "playerid": id, "properties": ["currentaudiostream"] }))?;
     Ok(format!("audio: {}", track_name(props.get("currentaudiostream")).unwrap_or_else(|| "changed".into())))
 }
 
@@ -957,7 +972,7 @@ fn track_name(t: Option<&Value>) -> Option<String> {
 }
 
 fn notify(tv: &Tv, text: &str) -> Result<String> {
-    call(tv, "GUI.ShowNotification", &format!(r#"{{"title":"tveee","message":{}}}"#, quote(text)))?;
+    call_json(tv, "GUI.ShowNotification", serde_json::json!({ "title": "tveee", "message": text }))?;
     Ok("shown in Kodi".into())
 }
 
@@ -984,8 +999,8 @@ pub fn rpc_request(args: &[String]) -> Result<(String, String)> {
 fn rpc(tv: &Tv, args: &[String]) -> Result<String> {
     let (method, params) = rpc_request(args)?;
     // anything goes here, slow ones too (a directory on a network share)
-    let body = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"{method}","params":{params}}}"#);
-    let result = result_of(&post_within(tv, &login(tv), &body, 30)?, &method)?;
+    let params = serde_json::from_str::<Value>(&params).unwrap_or(Value::Null);
+    let result = rpc::ask_within(tv, &rpc::Raw { method: &method, params }, 30)?;
     Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
 }
 
@@ -1335,18 +1350,21 @@ mod tests {
     #[test]
     fn times_and_seeks() {
         assert_eq!(seconds(&json(r#"{"hours":1,"milliseconds":250,"minutes":2,"seconds":3}"#)), Some(3723.25));
-        assert_eq!(time_json(3723.25), r#"{"hours":1,"minutes":2,"seconds":3,"milliseconds":250}"#);
-        assert_eq!(seek_value(SeekTo::By(-10.0)), r#"{"seconds":-10}"#);
-        assert_eq!(seek_value(SeekTo::Fraction(0.4)), r#"{"percentage":40.000}"#);
-        assert!(seek_value(SeekTo::At(90.0)).contains(r#""minutes":1,"seconds":30"#));
+        assert_eq!(time_json(3723.25), serde_json::json!({ "hours": 1, "minutes": 2, "seconds": 3, "milliseconds": 250 }));
+        assert_eq!(seek_value(SeekTo::By(-10.0)), serde_json::json!({ "seconds": -10 }));
+        assert_eq!(seek_value(SeekTo::Fraction(0.4)), serde_json::json!({ "percentage": 40.0 }));
+        assert_eq!(seek_value(SeekTo::At(90.0))["time"]["minutes"], 1);
+        assert_eq!(seek_value(SeekTo::At(90.0))["time"]["seconds"], 30);
+        // sent as an object, not a string of one
+        assert!(serde_json::json!({ "value": seek_value(SeekTo::By(5.0)) })["value"].is_object());
     }
 
     #[test]
     fn places_are_windows() {
-        assert_eq!(window_params("kodi-window:home").as_deref(), Some(r#"{"window":"home"}"#));
+        assert_eq!(window_params("kodi-window:home"), Some(serde_json::json!({ "window": "home" })));
         assert_eq!(
-            window_params("kodi-window:videos|videodb://movies/titles/").as_deref(),
-            Some(r#"{"window":"videos","parameters":["videodb://movies/titles/"]}"#)
+            window_params("kodi-window:videos|videodb://movies/titles/"),
+            Some(serde_json::json!({ "window": "videos", "parameters": ["videodb://movies/titles/"] }))
         );
         assert_eq!(window_params("https://x"), None);
     }
