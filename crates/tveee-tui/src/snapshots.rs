@@ -912,3 +912,17 @@ fn picker_shows_what_is_typed() {
     a.prompt.clear();
     assert!(typed(&mut a, "10,20,30").contains("#0a141e"));
 }
+
+#[test]
+fn links_under_a_pop_up_stay_under_it() {
+    let mut a = app(kodi_catchup());
+    // the link drawn, showing
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(DESKTOP.0, DESKTOP.1)).unwrap();
+    let frame = term.draw(|f| a.draw(f)).unwrap();
+    assert_eq!(super::links::showing(&a.links, frame.buffer).len(), a.links.len());
+    assert!(!a.links.is_empty());
+    // help drawn over it: not written again on top
+    a.overlay = Overlay::Help(0);
+    let frame = term.draw(|f| a.draw(f)).unwrap();
+    assert!(super::links::showing(&a.links, frame.buffer).is_empty(), "the link would show through help");
+}

@@ -292,8 +292,9 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
             return Ok(());
         }
         if dirty || app.animating() || drawn.is_none_or(|d| d.elapsed() >= TICK) {
-            term.draw(|f| app.draw(f))?;
-            let _ = links::emit(&app.links);
+            let frame = term.draw(|f| app.draw(f))?;
+            // only the links still showing (not under a pop-up)
+            let _ = links::emit(&links::showing(&app.links, frame.buffer));
             drawn = Some(Instant::now());
             dirty = false;
         }
