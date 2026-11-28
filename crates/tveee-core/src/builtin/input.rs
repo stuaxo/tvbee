@@ -166,7 +166,12 @@ pub fn actions() -> Vec<A> {
         A::terminal("input.list", CAT, "list inputs", inputs)
             .cli("inputs", "[--all]", "list the TV's input sources")
             .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
-        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).args("up|down|<number>").brings_to_front(LIVE_TV),
+        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).long(
+            "up and down press the channel keys; live TV is brought to the front first\n\
+             (they only change channel there). A number tunes exactly, as 'tveee watch'\n\
+             does. --no-front leaves what's in front alone for up and down; a number\n\
+             still shows live TV (the TV brings it forward itself when told to tune).",
+        ).args("up|down|<number>").brings_to_front(LIVE_TV),
         input_item!("input.tuner", 't', "TV tuner", 170),
         input_item!("input.hdmi1", '1', "HDMI 1", 243),
         input_item!("input.hdmi2", '2', "HDMI 2", 244),
