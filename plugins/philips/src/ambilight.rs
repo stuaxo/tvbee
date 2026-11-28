@@ -631,7 +631,7 @@ mod tests {
         assert_eq!(r.iter().map(|r| r.name).collect::<Vec<_>>(), ["power", "style", "setting", "ambi+hue", "lights"]);
         assert_eq!(r[3].help, Some("sync Hue bulbs with the TV"));
         assert_eq!((r[1].current, r[2].current), (Some(0), Some(2)));
-        let act = |args: &[&str]| tveee_core::panel::Run::Act { id: "ambilight.change", args: args.iter().map(|a| a.to_string()).collect() };
+        let act = |args: &[&str]| tveee_core::panel::Run::Act { id: "ambilight.change", args: args.iter().map(std::string::ToString::to_string).collect() };
         // going back to video keeps vivid; sound starts at its default
         assert_eq!(r[1].options[0].run, act(&["style", "FOLLOW_VIDEO", "VIVID"]));
         assert_eq!(r[1].options[1].run, act(&["style", "FOLLOW_AUDIO", "ENERGY_ADAPTIVE_BRIGHTNESS"]));

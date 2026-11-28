@@ -102,7 +102,7 @@ impl App {
     /// Keys in the dialog: ↑/↓ rows, ←/→ change at once, ⏎ picks.
     pub(super) fn ambi_key(&mut self, row: usize, col: usize, code: KeyCode, actions: &Handle) {
         let rows = self.ambi_rows();
-        if matches!(code, KeyCode::Esc | KeyCode::Char('L') | KeyCode::Char('q')) || rows.is_empty() {
+        if matches!(code, KeyCode::Esc | KeyCode::Char('L' | 'q')) || rows.is_empty() {
             if !rows.is_empty() || code == KeyCode::Esc {
                 self.overlay = Overlay::None;
             }

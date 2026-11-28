@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn args() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let a = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         let x = a(&["https://youtu.be/x"]);
         assert_eq!(parse_args(&x).unwrap(), (None, "https://youtu.be/x", false));
         let x = a(&["vlc", "http://x/a.mp4", "--dry-run"]);

@@ -620,7 +620,7 @@ Audio playback (lastly played comes first)
 
     #[test]
     fn skip_args() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let a = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         assert_eq!(parse_skip_args("ff", &a(&["30s"])).unwrap(), (Amount::Seconds(30.0), 10.0));
         assert_eq!(parse_skip_args("seek", &a(&["50%", "--step", "30s"])).unwrap(), (Amount::Fraction(0.5), 30.0));
         assert!(parse_skip_args("ff", &a(&[])).is_err());
@@ -639,7 +639,7 @@ mod mute_tests {
 
     #[test]
     fn visualiser_asked() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let a = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         assert_eq!(super::visualiser_want(&a(&[])).unwrap(), None);
         assert_eq!(super::visualiser_want(&a(&["on"])).unwrap(), Some(true));
         assert_eq!(super::visualiser_want(&a(&["off"])).unwrap(), Some(false));

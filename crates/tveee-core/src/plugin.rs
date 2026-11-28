@@ -376,7 +376,7 @@ mod tests {
         fn vcmds() -> Vec<ActionDescriptor> {
             vec![ActionDescriptor::terminal("v.vendorcmd", "v", "", |_, _| Ok(())).cli("vendorcmd", "", "")]
         }
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let a = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         let quiet = [Plugin::detect("v", "", yes, vcmds)];
         assert!(needs_probe(&quiet, "vendorcmd", &[]));
         assert!(needs_probe(&quiet, "do", &a(&["v.vendorcmd"])));

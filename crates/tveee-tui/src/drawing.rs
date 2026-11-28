@@ -99,7 +99,7 @@ pub enum Hit {
     Popup,
     /// The whole link's buttons: copy, open (worked out by where).
     UrlButtons,
-    /// The row of things to do with what's playing (see [`App::chips`]);
+    /// The row of things to do with what's playing (see `App::chips`);
     /// each has its own hit, this marks the row.
     Chips,
     /// Menu item N, from a button on the now-playing card.
@@ -904,11 +904,11 @@ impl App {
         }
         // music playing in an app with a visualiser (Kodi)
         let music = s.activity.as_ref().and_then(|a| a.media) == Some("audio");
-        if music && provider.and_then(|p| p.player()).is_some_and(|p| p.has_visualiser()) {
+        if music && provider.and_then(|p| p.player()).is_some_and(tveee_core::provider::Player::has_visualiser) {
             out.push(("z".to_string(), "visualiser".to_string(), Hit::Input(Input::ToggleVisualiser)));
         }
         // apps that show lists tveee can read (Kodi's folders)
-        if provider.and_then(|p| p.player()).is_some_and(|p| p.has_list()) {
+        if provider.and_then(|p| p.player()).is_some_and(tveee_core::provider::Player::has_list) {
             out.push(("t".to_string(), "list".to_string(), Hit::Input(Input::OpenList)));
         }
         if live || provider.is_some() {

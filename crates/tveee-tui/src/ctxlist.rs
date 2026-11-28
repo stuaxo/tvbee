@@ -359,8 +359,7 @@ impl App {
             .snap
             .as_ref()
             .and_then(front_pkg)
-            .map(|p| tveee_core::builtin::apps::by_package(&p).map_or(p.clone(), |a| a.name.to_string()))
-            .unwrap_or_else(|| "the app".into());
+            .map_or_else(|| "the app".into(), |p| tveee_core::builtin::apps::by_package(&p).map_or(p.clone(), |a| a.name.to_string()));
         let mut text: Vec<Line> = Vec::new();
         let mut rows_at: Vec<Option<usize>> = Vec::new();
         // the breadcrumbs: which text line, and each clickable crumb (x, width, crumb)

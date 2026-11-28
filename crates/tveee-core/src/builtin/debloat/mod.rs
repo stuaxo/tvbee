@@ -319,7 +319,7 @@ impl State {
     }
 }
 
-/// Package states from one round trip (see [`STATE_CMD`]).
+/// Package states from one round trip (see `STATE_CMD`).
 #[derive(Debug, Default)]
 pub struct States {
     installed: BTreeSet<String>,

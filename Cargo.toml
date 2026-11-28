@@ -13,6 +13,25 @@ license = "GPL-3.0-or-later"
 authors = ["Stuart Axon"]
 repository = "https://github.com/stuaxo/tveee"
 
+# Lints every crate follows ([lints] workspace = true in each).
+[workspace.lints.rust]
+# the one exception (setting the environment from .env) says so where it is
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# a few of clippy's pedantic lints, chosen for being cheap and catching
+# real untidiness; the rest of pedantic is off
+semicolon_if_nothing_returned = "warn"
+redundant_closure_for_method_calls = "warn"
+unnested_or_patterns = "warn"
+map_unwrap_or = "warn"
+inefficient_to_string = "warn"
+manual_let_else = "warn"
+uninlined_format_args = "warn"
+cloned_instead_of_copied = "warn"
+explicit_iter_loop = "warn"
+implicit_clone = "warn"
+
 [workspace.dependencies]
 tveee-core = { path = "crates/tveee-core" }
 tveee-tui = { path = "crates/tveee-tui" }
@@ -83,3 +102,6 @@ assets = [
     ["README.md", "usr/share/doc/tveee/README.md", "644"],
     [".env.example", "usr/share/doc/tveee/env.example", "644"],
 ]
+
+[lints]
+workspace = true

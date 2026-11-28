@@ -193,7 +193,7 @@ impl ActionDescriptor {
     }
 
     /// Other names for the command (after [`Self::cli`]).
-    /// How it's called, for listings: "<id or word> <args> [--no-front]".
+    /// How it's called, for listings: `<id or word> <args> [--no-front]`.
     pub fn call_line(&self, name: &str) -> String {
         let flag = if self.fronts.is_some() { format!(" [{NO_FRONT}]") } else { String::new() };
         format!("{name} {}{flag}", self.args).replace("  [", " [").trim().to_string()
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn no_front_flag() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let a = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         // an action that brings its app forward: the flag is taken out
         assert_eq!(front_flag(Some(Front::Package("x")), &a(&["up"])), (true, a(&["up"])));
         assert_eq!(front_flag(Some(Front::Package("x")), &a(&["--no-front", "up"])), (false, a(&["up"])));

@@ -673,7 +673,7 @@ fn modify_favourite(tv: &Tv, list: &str, ccid: u32, add: bool) -> Result<bool> {
 
 impl tveee_core::provider::Channels for Freeview {
     /// From the TV's channel list (needs JointSpace pairing); notes the
-    /// network it shows, for [`Channels::network`].
+    /// network it shows, for `Channels::network`.
     fn list(&self, cx: &tveee_core::provider::Cx) -> Result<Vec<tveee_core::provider::Channel>> {
         let json = paired_ok(cx.tv, "/6/channeldb/tv/channelLists/all", "the channel list")?;
         let list = parse_channel_list(&json);
@@ -879,7 +879,7 @@ Row: 3 presetid=NULL, starttime=NULL, endtime=NULL, genre=NULL, eventname=NULL, 
         assert_eq!(parse_list_country(r#"{"version":1353,"installCountry":"United Kingdom","Channel":[]}"#).as_deref(), Some("United Kingdom"));
         let net = tveee_core::provider::Network::of(&list, Some("United Kingdom".into()));
         assert_eq!((net.onid, net.deliveries), (Some(9018), vec![tveee_core::provider::Delivery::DvbT]));
-        let labels: Vec<_> = list.iter().map(|c| c.label()).collect();
+        let labels: Vec<_> = list.iter().map(tveee_core::provider::Channel::label).collect();
         assert_eq!(labels, ["1 BBC ONE Lon", "3 ITV1", "722 BBC Essex"]);
         assert_eq!((list[0].id, list[2].radio), (159, true));
         let now = parse_current(r#"{"channel":{"ccid":143,"preset":"18","name":"More 4"},"channelList":{"id":"allter","version":"1352"}}"#).unwrap();

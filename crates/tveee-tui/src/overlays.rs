@@ -163,7 +163,7 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
             _ => (Overlay::None, None),
         },
         Overlay::Menu(sel) => match code {
-            KeyCode::Esc | KeyCode::Char('.') | KeyCode::Char('q') | KeyCode::Backspace => (Overlay::None, None),
+            KeyCode::Esc | KeyCode::Char('.' | 'q') | KeyCode::Backspace => (Overlay::None, None),
             c if super::listnav::is_move(c) => {
                 let to = super::listnav::step(sel, items.len(), c).unwrap_or(sel);
                 (Overlay::Menu(to), None)
@@ -192,7 +192,7 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         // handled by App::options_key
         Overlay::Options(i) => (Overlay::Options(i), None),
         Overlay::Confirm { id, yes } => match code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => (Overlay::None, Some(run(id))),
+            KeyCode::Char('y' | 'Y') => (Overlay::None, Some(run(id))),
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => (Overlay::Confirm { id, yes: !yes }, None),
             KeyCode::Enter if yes => (Overlay::None, Some(run(id))),
             // anything else, including Enter on "No", cancels
@@ -210,7 +210,7 @@ pub fn run(id: &'static str) -> Action {
     Action::Run { id, args: Vec::new() }
 }
 
-/// What it takes to run, as usage text ("up|down|<level>"): its own, or
+/// What it takes to run, as usage text (`up|down|<level>`): its own, or
 /// its command's.
 pub fn usage_of(a: &ActionDescriptor) -> &'static str {
     if !a.args.is_empty() { a.args } else { a.cli.map_or("", |c| c.usage) }
@@ -425,19 +425,19 @@ impl App {
                     self.options_on_tabs = false;
                     self.overlay = Overlay::Options(0);
                 }
-                KeyCode::Char(',') | KeyCode::Char('q') => self.close_options(),
+                KeyCode::Char(',' | 'q') => self.close_options(),
                 _ => {}
             }
             return;
         }
         match code {
-            KeyCode::Esc | KeyCode::Char(',') | KeyCode::Char('q') | KeyCode::Backspace => self.close_options(),
+            KeyCode::Esc | KeyCode::Char(',' | 'q') | KeyCode::Backspace => self.close_options(),
             KeyCode::Tab | KeyCode::BackTab => switch(self),
             // up off the first row: the tab bar
             KeyCode::Up if i == 0 => self.options_on_tabs = true,
             c if super::listnav::is_move(c) => {
                 let to = super::listnav::step(i, n, c).unwrap_or(i);
-                self.overlay = Overlay::Options(to)
+                self.overlay = Overlay::Options(to);
             }
             KeyCode::Left | KeyCode::Right => self.set_option_row(i, code == KeyCode::Right),
             KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(i),
@@ -485,12 +485,9 @@ impl App {
     pub(super) fn opt(&self, name: &str) -> bool {
         match &self.opts {
             None => tveee_core::options::get(name),
-            Some(v) => v
-                .iter()
-                .rev()
-                .find(|(k, _)| k == name)
-                .map(|(_, on)| *on)
-                .unwrap_or_else(|| tveee_core::options::OPTIONS.iter().any(|o| o.name == name && o.default)),
+            Some(v) => {
+                v.iter().rev().find(|(k, _)| k == name).map_or_else(|| tveee_core::options::OPTIONS.iter().any(|o| o.name == name && o.default), |(_, on)| *on)
+            }
         }
     }
 

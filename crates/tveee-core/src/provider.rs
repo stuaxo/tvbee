@@ -206,7 +206,7 @@ pub trait Channels {
 
 /// More about what's playing (description, chapters, ...).
 pub trait Details {
-    /// Details for the link [`Provider::watch_link`] made for what's on.
+    /// Details for the link `Provider::watch_link` made for what's on.
     fn details(&self, tv: &crate::tv::Tv, link: &str) -> Result<crate::more::Details>;
 }
 

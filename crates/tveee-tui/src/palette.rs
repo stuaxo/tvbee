@@ -117,7 +117,7 @@ impl App {
             }
             c if super::listnav::is_move(c) => {
                 let to = super::listnav::step(sel, n, c).unwrap_or(sel);
-                self.overlay = Overlay::Palette(to)
+                self.overlay = Overlay::Palette(to);
             }
             KeyCode::Enter => match self.palette_list().get(sel) {
                 Some(&Item::Action(i)) => {
