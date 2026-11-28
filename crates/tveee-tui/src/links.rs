@@ -133,6 +133,14 @@ pub fn open(url: &str) -> String {
     if ok { "opening the link in the browser".into() } else { format!("couldn't run {}: y copies the link", cmd[0]) }
 }
 
+/// Links on screen: the ones drawn this frame (made terminal hyperlinks
+/// after drawing), and whether what's on's URL is shown whole.
+#[derive(Default)]
+pub struct LinkView {
+    pub drawn: Vec<Drawn>,
+    pub url_full: bool,
+}
+
 /// A link drawn this frame: where, the text shown, and where it goes. The
 /// terminal is told about it after drawing ([`emit`]).
 #[derive(Debug, Clone, PartialEq)]

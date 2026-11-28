@@ -50,6 +50,12 @@ use tveee_core::engine::*;
 
 const CAT: &str = "ui";
 struct App {
+    /// The system panel's own state (shown or not, read or not, paused).
+    system: drawing::SystemView,
+    /// The plugins: each one's state, and every plugin there is.
+    plugins: overlays::PluginsView,
+    /// Links: the ones drawn this frame, and whether the URL is shown whole.
+    links: links::LinkView,
     /// The guide's own state (where it's scrolled to, its details panel).
     guide: guide::GuideView,
     /// The preview panel's own state.
@@ -78,9 +84,6 @@ struct App {
     actions: Vec<ActionDescriptor>,
     /// Where the clickable things were drawn last frame.
     hits: Vec<(ratatui::layout::Rect, Hit)>,
-    /// Show the system panel (memory, storage, ...): None until `i` is
-    /// pressed (then shown when the screen is wide, see `wide`).
-    info: Option<bool>,
     /// Whether the last frame was wide enough for the side column.
     wide: bool,
     /// The launcher tab used last.
@@ -88,26 +91,12 @@ struct App {
     /// Where the progress bar stays after a pause, seek or stop asked for
     /// here, until the next read says what it's doing (no prediction).
     frozen: Option<f64>,
-    /// The file name ⏎ was pressed for that's there already (⏎ again
-    /// writes over it).
-    save_confirm: Option<String>,
     /// tveee's options as this app reads them: None, the saved ones; tests
     /// give each app its own (never the real file, nor each other's).
     opts: Option<Vec<(String, bool)>>,
-    /// The engine has been told the system panel is showing (it reads the
-    /// system figures while it is).
-    system_watching: bool,
     /// The pop-up the command palette opened over (the log, the guide, ...)
     /// and its typed text: back to it when the palette closes.
     under: Option<(Overlay, String)>,
-    /// Every plugin and whether it's on (the options dialog's plugins tab).
-    plugins: Vec<tveee_core::plugin::PluginState>,
-    /// The system panel paused (I): its figures as they were then, and the
-    /// memory graph's; not read meanwhile.
-    info_frozen: Option<(tveee_core::engine::Snapshot, Vec<u64>)>,
-    /// Every plugin there is (from the start): what's installed again when
-    /// one is turned on or off. None in tests (nothing installed).
-    all_plugins: Option<fn() -> Vec<tveee_core::plugin::Plugin>>,
     /// What has been typed into the open prompt.
     prompt: String,
     /// The search box's app choices, made when it opens.
@@ -120,10 +109,6 @@ struct App {
     picker: Option<ratatui_image::picker::Picker>,
     /// Something asked to quit (the palette's ui: quit).
     quit: bool,
-    /// The link (what's on's URL) shown whole, not shortened to fit.
-    url_full: bool,
-    /// Links drawn this frame, made terminal hyperlinks after drawing.
-    links: Vec<links::Drawn>,
 }
 
 /// An action under way waits this long for its next step: each change on
@@ -273,7 +258,7 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
         if dirty || app.animating() || drawn.is_none_or(|d| d.elapsed() >= TICK) {
             let frame = term.draw(|f| app.draw(f))?;
             // only the links still showing (not under a pop-up)
-            let _ = links::emit(&links::showing(&app.links, frame.buffer));
+            let _ = links::emit(&links::showing(&app.links.drawn, frame.buffer));
             drawn = Some(Instant::now());
             dirty = false;
         }
@@ -403,8 +388,8 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
     tveee_core::log::keep_recent();
     let engine = Engine::start(&c.tv.ip, c.actions.clone());
     let mut app = App::new(c.tv.ip.clone(), engine.handle.clone(), c.actions.clone(), settle);
-    app.plugins = c.plugins.clone();
-    app.all_plugins = Some(c.all);
+    app.plugins.states = c.plugins.clone();
+    app.plugins.all = Some(c.all);
     // ratatui::run sets up the terminal, restores it afterwards (and on panic)
     // how this terminal shows pictures (sixel, kitty, ...; else half-blocks),
     // asked before ratatui takes the terminal (the query turns raw mode on and
@@ -491,9 +476,11 @@ impl App {
             menu: actions.iter().filter(|a| a.key.is_some()).copied().collect(),
             actions,
             hits: Vec::new(),
-            info: None,
             wide: false,
             apps_tab: AppTab::Known,
+            system: Default::default(),
+            plugins: Default::default(),
+            links: Default::default(),
             guide: Default::default(),
             preview: Default::default(),
             ambi: Default::default(),
@@ -502,21 +489,14 @@ impl App {
             log: Default::default(),
             options: Default::default(),
             frozen: None,
-            save_confirm: None,
             opts: None,
-            system_watching: false,
             under: None,
-            plugins: Vec::new(),
-            info_frozen: None,
-            all_plugins: None,
             prompt: String::new(),
             search_targets: Vec::new(),
             settling: None,
             settle,
             picker: None,
             quit: false,
-            url_full: false,
-            links: Vec::new(),
         }
     }
 }
@@ -635,17 +615,17 @@ impl App {
             }
             Input::ToggleHelp => self.overlay = Overlay::Help(0),
             Input::ToggleInfo => {
-                self.info = Some(!self.info_shown());
-                self.info_frozen = None;
+                self.system.shown = Some(!self.info_shown());
+                self.system.frozen = None;
             }
             Input::PauseInfo => {
-                self.note = if self.info_frozen.take().is_some() {
+                self.note = if self.system.frozen.take().is_some() {
                     "system panel: updating again".into()
                 } else if !self.info_shown() {
                     "the system panel isn't open (i opens it)".into()
                 } else {
                     // kept as they are now; the TV isn't asked for them meanwhile
-                    self.info_frozen = self.st.snap.clone().map(|s| (s, self.st.mem_history.clone()));
+                    self.system.frozen = self.st.snap.clone().map(|s| (s, self.st.mem_history.clone()));
                     "system panel paused (I again resumes it)".into()
                 };
             }
@@ -707,7 +687,7 @@ impl App {
             Input::OpenPalette => self.open_palette(),
             Input::ShowLogs => self.overlay = Overlay::Logs { at: None, from: None },
             Input::ToggleUrl => match self.url() {
-                Some(_) => self.url_full = !self.url_full,
+                Some(_) => self.links.url_full = !self.links.url_full,
                 None => self.note = "no link for what's on".into(),
             },
             Input::CopyUrl => self.note = self.url().map_or_else(|| "no link for what's on".into(), |u| links::copy(&u)),

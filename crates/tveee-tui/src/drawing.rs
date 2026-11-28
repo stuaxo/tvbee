@@ -54,6 +54,19 @@ impl BarAt {
     }
 }
 
+/// The system panel's own state.
+#[derive(Default)]
+pub struct SystemView {
+    /// Show it (memory, storage, ...): None until `i` is pressed (then shown
+    /// when the screen is wide).
+    pub shown: Option<bool>,
+    /// The engine has been told it's showing (it reads the figures while it is).
+    pub watching: bool,
+    /// Paused (I): its figures as they were then, and the memory graph's;
+    /// not read meanwhile.
+    pub frozen: Option<(tveee_core::engine::Snapshot, Vec<u64>)>,
+}
+
 /// The scrollbars' state.
 #[derive(Default)]
 pub struct Bars {
@@ -482,12 +495,12 @@ pub(super) fn popup_titled(f: &mut Frame, title: &str, right: &str, text: Vec<Li
 impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
         self.hits.clear();
-        self.links.clear();
+        self.links.drawn.clear();
         // the system figures are read only while something shows them
-        let wanted = self.info_shown() && self.info_frozen.is_none();
-        if wanted != self.system_watching {
+        let wanted = self.info_shown() && self.system.frozen.is_none();
+        if wanted != self.system.watching {
             let _ = self.engine.send(Action::WatchSystem(wanted));
-            self.system_watching = wanted;
+            self.system.watching = wanted;
         }
         let outer = Block::bordered()
             .title(Line::from(format!(" tveee ui - {} ", self.ip)).bold())
@@ -577,7 +590,7 @@ impl App {
     /// show (not in standby, or before the first reading).
     pub(super) fn info_shown(&self) -> bool {
         let read = self.st.snap.as_ref().is_some_and(|s| s.system.mem.is_some() && !s.standby && !self.st.seeded);
-        self.info.unwrap_or(self.wide && read)
+        self.system.shown.unwrap_or(self.wide && read)
     }
 
     /// A narrow screen: the open panels below what's playing (preview,
@@ -766,7 +779,7 @@ impl App {
                             let room = width.saturating_sub(9).max(10);
                             let style = Style::new().fg(Color::Cyan).underlined();
                             let toggle = Some(Hit::Input(Input::ToggleUrl));
-                            if self.url_full {
+                            if self.links.url_full {
                                 for (i, row) in links::rows(&u, room).into_iter().enumerate() {
                                     let head = if i == 0 { label("url") } else { Span::raw(" ".repeat(9)) };
                                     url_rows.push((lines.len(), row.clone(), u.clone()));
@@ -839,7 +852,7 @@ impl App {
             for (_, text, url) in url_rows.iter().filter(|(i, _, _)| *i == n) {
                 // the open button sits after the copy button
                 let x = if text == OPEN_BUTTON { body.x + LABEL + width_of(COPY_BUTTON) + 1 } else { body.x + LABEL };
-                self.links.push(links::Drawn { x, y, text: text.clone(), url: url.clone() });
+                self.links.drawn.push(links::Drawn { x, y, text: text.clone(), url: url.clone() });
             }
             if hit == Some(Hit::Chips) {
                 let mut x = body.x + LABEL;
@@ -941,11 +954,11 @@ impl App {
     /// The system panel: power, app, memory graph, swap, storage, load.
     /// What the system panel shows: as it was when paused (I), else now.
     pub(super) fn panel_snap(&self) -> Option<&tveee_core::engine::Snapshot> {
-        self.info_frozen.as_ref().map(|(s, _)| s).or(self.st.snap.as_ref())
+        self.system.frozen.as_ref().map(|(s, _)| s).or(self.st.snap.as_ref())
     }
 
     pub(super) fn draw_panel(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let title = if self.info_frozen.is_some() {
+        let title = if self.system.frozen.is_some() {
             Line::from(vec![Span::raw(" system - "), Span::styled("paused", Style::new().fg(Color::Black).bg(Color::Yellow)), Span::raw(", I resumes ")])
         } else {
             Line::from(" system - i hides, I pauses ")
@@ -1040,7 +1053,7 @@ impl App {
     pub(super) fn draw_mem_graph(&self, f: &mut Frame, rect: ratatui::layout::Rect, total_mb: u64) {
         let x = rect.x + 9;
         let w = rect.width.saturating_sub(9 + 1);
-        let history = self.info_frozen.as_ref().map_or(&self.st.mem_history, |(_, h)| h);
+        let history = self.system.frozen.as_ref().map_or(&self.st.mem_history, |(_, h)| h);
         let n = usize::from(w).min(history.len());
         let recent = &history[history.len() - n..];
         let hot = recent.last().is_some_and(|u| total_mb > 0 && *u * 10 >= total_mb * 9);
