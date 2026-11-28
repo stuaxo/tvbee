@@ -1089,3 +1089,36 @@ fn breadcrumbs_from_the_path_and_a_typed_location() {
     a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert!(a.location.is_none() && matches!(a.overlay, Overlay::List { .. }));
 }
+
+#[test]
+fn tab_to_the_breadcrumbs() {
+    use super::ctxlist::Crumb;
+    use tveee_core::more::Go;
+    let (mut a, rx, h) = app_seeing(kodi_artists());
+    let crumb = |t: &str, k: &str| Crumb { title: t.into(), key: k.into(), go: Some(Go::Link(format!("open:{k}"))) };
+    a.crumbs = vec![crumb("Music", "10502|"), crumb("Artists", "10502|musicdb://artists/")];
+    a.overlay = Overlay::List { sel: 0 };
+    // Tab: onto the breadcrumbs, on the list shown
+    a.list_key(0, KeyCode::Tab, KeyModifiers::NONE, &h);
+    assert_eq!(a.crumb_at, Some(1));
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("←→ choose a step"), "{s}");
+    // ← to Music, ⏎ goes there; the keys are back on the list
+    a.list_key(0, KeyCode::Left, KeyModifiers::NONE, &h);
+    assert_eq!(a.crumb_at, Some(0));
+    a.list_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
+    assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("open:10502|".into()))));
+    assert_eq!(a.crumb_at, None);
+    // ⏎ on the list shown goes nowhere; Esc (or Tab, ↓) back to the list
+    a.list_key(0, KeyCode::Tab, KeyModifiers::NONE, &h);
+    a.list_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
+    assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
+    a.list_key(0, KeyCode::Tab, KeyModifiers::NONE, &h);
+    a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
+    assert_eq!(a.crumb_at, None);
+    assert!(matches!(a.overlay, Overlay::List { .. }), "Esc on the breadcrumbs doesn't close the pane");
+    // with the keys on the list, ↓ moves in it again
+    a.list_key(0, KeyCode::Down, KeyModifiers::NONE, &h);
+    assert_eq!(a.overlay, Overlay::List { sel: 1 });
+}

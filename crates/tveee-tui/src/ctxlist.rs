@@ -93,6 +93,7 @@ impl App {
         self.overlay = Overlay::None;
         self.prompt.clear();
         self.location = None;
+        self.crumb_at = None;
         if self.list_watching {
             let _ = actions.send(Action::WatchList(false));
             self.list_watching = false;
@@ -106,7 +107,22 @@ impl App {
         if self.location.is_some() {
             return self.location_key(code, mods, actions);
         }
+        // on the breadcrumbs (Tab): keys go to them
+        if let Some(at) = self.crumb_at
+            && !(code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL))
+        {
+            return self.crumb_key(at, code, actions);
+        }
+        if code == KeyCode::Tab || code == KeyCode::BackTab {
+            if self.crumbs.len() > 1 {
+                self.crumb_at = Some(self.crumbs.len() - 1);
+            } else {
+                self.note = "no breadcrumbs here (this list isn't inside another tveee has seen)".into();
+            }
+            return;
+        }
         if code == KeyCode::Char('l') && mods.contains(KeyModifiers::CONTROL) {
+            self.crumb_at = None;
             match self.list_ok().filter(|l| l.open_location.is_some()) {
                 Some(l) => self.location = Some(l.location.clone().unwrap_or_default()),
                 None => self.note = "this list can't be opened at a typed location".into(),
@@ -167,6 +183,27 @@ impl App {
         }
     }
 
+    /// Keys on the breadcrumbs: ←/→ move along them, ⏎ goes to the one
+    /// chosen, Tab, ↓ or Esc go back to the list.
+    pub(super) fn crumb_key(&mut self, at: usize, code: KeyCode, actions: &Handle) {
+        let n = self.crumbs.len();
+        match code {
+            KeyCode::Left | KeyCode::BackTab if at > 0 => self.crumb_at = Some(at - 1),
+            KeyCode::Right if at + 1 < n => self.crumb_at = Some(at + 1),
+            KeyCode::Home => self.crumb_at = Some(0),
+            KeyCode::End => self.crumb_at = Some(n.saturating_sub(1)),
+            KeyCode::Enter => {
+                self.crumb_at = None;
+                // the last is the list shown: nothing to go to
+                if at + 1 < n {
+                    self.list_crumb(at, actions);
+                }
+            }
+            KeyCode::Tab | KeyCode::Down | KeyCode::Esc => self.crumb_at = None,
+            _ => {}
+        }
+    }
+
     /// Go up: to the list this one's in (Kodi's "..").
     pub(super) fn list_up(&mut self, actions: &Handle) {
         match self.list_ok().and_then(|l| l.up.clone()) {
@@ -217,6 +254,8 @@ impl App {
         if change == Change::List {
             if let Some(l) = self.list_ok().cloned() {
                 self.crumbs = breadcrumbs(&self.crumbs, &l);
+                // another list: the breadcrumbs changed under the cursor
+                self.crumb_at = None;
             }
             if let Some(l) = self.list_ok() {
                 let at = place.as_ref().filter(|p| p.key == l.key).and_then(|p| l.find(p).or_else(|| l.find_playing(&p.playing_id))).or(l.at).or(l.playing).unwrap_or(0);
@@ -298,6 +337,8 @@ impl App {
                         }
                         let last = i + 1 == self.crumbs.len();
                         let st = if last { Style::new().bold() } else { Style::new().fg(Color::Cyan) };
+                        // the one chosen while on the breadcrumbs (Tab)
+                        let st = if self.crumb_at == Some(i) { st.reversed() } else { st };
                         let w = u16::try_from(c.title.chars().count()).unwrap_or(0);
                         if !last && c.go.is_some() {
                             crumb_spots.push((x, w, i));
@@ -365,7 +406,13 @@ impl App {
                 let reading = if self.st.list_loading { "  reading..." } else { "" };
                 // ^L only where a location can be typed (Kodi's folders)
                 let loc = if l.open_location.is_some() { "^L location  " } else { "" };
-                text.push(Line::from(format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  {loc}type to filter  esc closes{more}{reading}")).fg(Color::DarkGray));
+                let tab = if self.crumbs.len() > 1 { "tab breadcrumbs  " } else { "" };
+                let hint = if self.crumb_at.is_some() {
+                    format!("←→ choose a step  ⏎ go there  {loc}tab/↓/esc back to the list")
+                } else {
+                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/← up  {tab}{loc}type to filter  esc closes{more}{reading}")
+                };
+                text.push(Line::from(hint).fg(Color::DarkGray));
                 rows_at.push(None);
                 let count = match pos {
                     Some(p) => format!(" {} of {} ", p + 1, shown.len()),
