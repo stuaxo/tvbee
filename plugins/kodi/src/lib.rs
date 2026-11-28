@@ -1081,6 +1081,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             Some(how @ ("next" | "off" | "on" | "previous")) => subtitles(cx.tv, how).map(Into::into),
             Some(other) => tveee_core::error::usage(format!("subtitles: next, off, on or previous, not '{other}'")),
         })
+        .words(&["captions", "subs", "subtitle"])
         .args("[next|off|on|previous]")
         .choices(&[("next subtitles", "next"), ("previous subtitles", "previous"), ("subtitles off", "off"), ("subtitles on", "on")])
         .key('k')
@@ -1091,6 +1092,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
             Some(how @ ("next" | "previous")) => audio(cx.tv, how).map(Into::into),
             Some(other) => tveee_core::error::usage(format!("audio: next or previous, not '{other}'")),
         })
+        .words(&["language", "track", "sound"])
         .args("[next|previous]")
         .choices(&[("next audio track", "next"), ("previous audio track", "previous")])
         .key('a')
@@ -1104,6 +1106,7 @@ pub fn actions() -> Vec<ActionDescriptor> {
         .args("[clean]")
         .key('L'),
         A::new("kodi.find", "kodi", "kodi: find in the library", |cx, a| find(cx.tv, &words(a, "a title")?).map(Into::into))
+            .words(&["search", "library", "film", "movie", "show"])
             .args("<words>")
             .key('F')
             .text("Find in Kodi:", "a film or show's title"),

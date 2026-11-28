@@ -877,7 +877,7 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
         ActionDescriptor::terminal("apps.launch", CAT, "launch an app", launch).cli("launch", "[--free] [--quiet] <app>", "launch an app").long(
             "<app> is an alias (see 'tveee apps'), a package name, or package/activity.\n  'home' goes to the home screen (same as 'tveee home').\n  --free   run 'tveee free' first\n  --quiet  mute the TV first",
         ),
-        ActionDescriptor::new("apps.restart", CAT, "restart the app in front, back where it was", restart_action)
+        ActionDescriptor::new("apps.restart", CAT, "restart the app in front, back where it was", restart_action).words(&["reload", "relaunch", "frozen", "stuck"])
             .cli("restart", "[<app>] [--fresh]", "restart the app in front (or <app>), back where it was (YouTube, Kodi)")
             .long(
                 "Closes the app and starts it again. Apps tveee knows well (YouTube, Kodi)\n\
@@ -910,7 +910,7 @@ pub fn command_actions() -> Vec<ActionDescriptor> {
              \x20 <action...>          the app's own actions, listed by 'tveee app <app>'\n\
              \x20                      (Kodi: find, play, subtitles, audio, scan, clean, notify)",
         ),
-        ActionDescriptor::new("apps.free", CAT, "free memory (force-stop idle RAM-hungry apps)", free).cli("free", "", "force-stop idle RAM-hungry apps"),
+        ActionDescriptor::new("apps.free", CAT, "free memory (force-stop idle RAM-hungry apps)", free).words(&["memory", "ram", "slow"]).cli("free", "", "force-stop idle RAM-hungry apps"),
         ActionDescriptor::terminal("apps.apps", CAT, "list app aliases installed on the TV", apps).cli("apps", "[--all | --others]", "list app aliases installed on the TV").long(
             "Queries the TV and hides aliases whose package isn't installed.\n  --all     list every alias without contacting the TV\n  --others  installed apps without an alias, with the kind tveee guesses\n            for them (player, store, home, app); cached for a day",
         ),

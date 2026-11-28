@@ -187,14 +187,14 @@ pub fn actions() -> Vec<A> {
                  pressed (including tveee's 'home' and the ui's h key).",
             ),
         A::new("input.back", CAT, "back", |c, _| c.tv.key(4).map(|()| "back".into())).cli("back", "", "press the back button"),
-        A::new("input.text", CAT, "type text", text).cli("text", "\"<string>\"", "type text into the focused field").text("Type:", "text for the focused field"),
-        A::new("input.source", CAT, "switch input", input)
+        A::new("input.text", CAT, "type text", text).words(&["type", "keyboard"]).cli("text", "\"<string>\"", "type text into the focused field").text("Type:", "text for the focused field"),
+        A::new("input.source", CAT, "switch input", input).words(&["hdmi", "tuner", "source"])
             .cli("input", "<name>", "switch input source")
             .choices(&[("HDMI 1", "hdmi1"), ("HDMI 2", "hdmi2"), ("HDMI 3", "hdmi3"), ("HDMI 4", "hdmi4"), ("TV (the tuner)", "tv")]),
         A::terminal("input.list", CAT, "list inputs", inputs)
             .cli("inputs", "[--all]", "list the TV's input sources")
             .long("Queries the TV (dumpsys tv_input) for the inputs it reports; best effort,\nthe format depends on the firmware.\n  --all  list the inputs 'tveee input' supports, without contacting the TV"),
-        A::new("input.channel", CAT, "change channel", channel).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).long(
+        A::new("input.channel", CAT, "change channel", channel).words(&["tv", "station"]).cli("channel", "up|down|<number>", "change TV channel").aliases(&["ch"]).long(
             "up and down press the channel keys; live TV is brought to the front first\n\
              (they only change channel there). A number tunes exactly, as 'tveee watch'\n\
              does. --no-front leaves what's in front alone for up and down; a number\n\

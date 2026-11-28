@@ -188,6 +188,10 @@ pub struct ActionDescriptor {
     /// The app it brings to the front ("live TV"): the command line takes
     /// `--no-front` to leave what's in front alone.
     pub fronts: Option<Front>,
+    /// More words it's found by in a palette (not shown): "url" for opening
+    /// a link, "standby" for sleep. Its command-line name and aliases count
+    /// too.
+    pub words: &'static [&'static str],
     pub run: Run,
 }
 
@@ -204,6 +208,7 @@ impl ActionDescriptor {
             confirm: None,
             media: None,
             fronts: None,
+            words: &[],
             run: Run::Do(run),
         }
     }
@@ -221,8 +226,34 @@ impl ActionDescriptor {
             confirm: None,
             media: None,
             fronts: None,
+            words: &[],
             run: Run::Terminal(run),
         }
+    }
+
+    /// More words a palette finds it by (see [`ActionDescriptor::words`]).
+    pub const fn words(mut self, words: &'static [&'static str]) -> Self {
+        self.words = words;
+        self
+    }
+
+    /// Everything a palette matches what's typed against: its title, id,
+    /// command-line name and aliases, and [`ActionDescriptor::words`].
+    pub fn search_text(&self) -> String {
+        let mut t = format!("{} {}", self.title, self.id);
+        if let Some(c) = &self.cli {
+            t.push(' ');
+            t.push_str(c.name);
+            for a in c.aliases {
+                t.push(' ');
+                t.push_str(a);
+            }
+        }
+        for w in self.words {
+            t.push(' ');
+            t.push_str(w);
+        }
+        t
     }
 
     /// Reachable as `tveee <name>`, `desc` its one-line help.

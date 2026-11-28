@@ -12,22 +12,23 @@ const ROWS: usize = 12;
 /// What the ui itself can do, listed in the palette with the plugins'
 /// actions (as ui: ...).
 /// The ui's own entries: what it says, its key on the main screen ("": none),
-/// and what it does. (The music visualiser is the media.visualiser action.)
-pub const UI: &[(&str, &str, Input)] = &[
-    ("ui: show the log (what tveee did lately)", "", Input::ShowLogs),
-    ("ui: all keys (help)", "?", Input::ToggleHelp),
-    ("ui: live TV guide", "g", Input::OpenGuide),
-    ("ui: the list the app shows (Kodi's folder)", "t", Input::OpenList),
-    ("ui: launch an app", "a", Input::OpenApps),
-    ("ui: search the app in front", "/", Input::OpenSearch),
-    ("ui: options", ",", Input::OpenOptions),
-    ("ui: preview on/off", "v", Input::TogglePreview),
-    ("ui: system info on/off", "i", Input::ToggleInfo),
-    ("ui: show the whole link / shorten it", "u", Input::ToggleUrl),
-    ("ui: copy the link", "y", Input::CopyUrl),
-    ("ui: open the link in the browser", "", Input::OpenUrl),
-    ("ui: remote / player mode", "tab", Input::ToggleMode),
-    ("ui: quit", "q", Input::Quit),
+/// what it does, and more words it's found by (not shown). (The music
+/// visualiser is the media.visualiser action.)
+pub const UI: &[(&str, &str, Input, &str)] = &[
+    ("ui: show the log (what tveee did lately)", "", Input::ShowLogs, "history debug"),
+    ("ui: all keys (help)", "?", Input::ToggleHelp, "keys shortcuts"),
+    ("ui: live TV guide", "g", Input::OpenGuide, "epg channels schedule programmes tv"),
+    ("ui: the list the app shows (Kodi's folder)", "t", Input::OpenList, "folder library browse chapters queue tracks"),
+    ("ui: launch an app", "a", Input::OpenApps, "apps open start"),
+    ("ui: search the app in front", "/", Input::OpenSearch, "find"),
+    ("ui: options", ",", Input::OpenOptions, "settings preferences plugins"),
+    ("ui: preview on/off", "v", Input::TogglePreview, "picture screenshot screen"),
+    ("ui: system info on/off", "i", Input::ToggleInfo, "memory ram load storage"),
+    ("ui: show the whole link / shorten it", "u", Input::ToggleUrl, "url"),
+    ("ui: copy the link", "y", Input::CopyUrl, "url clipboard"),
+    ("ui: open the link in the browser", "", Input::OpenUrl, "url web"),
+    ("ui: remote / player mode", "tab", Input::ToggleMode, "keyboard dpad arrows"),
+    ("ui: quit", "q", Input::Quit, "exit close"),
 ];
 
 /// A palette entry: a plugin's action (index into the actions), or
@@ -99,8 +100,8 @@ pub fn palette_ranked(actions: &[ActionDescriptor], query: &str, now: &Now) -> V
         .iter()
         .enumerate()
         .filter(|(_, a)| matches!(a.run, Run::Do(_)))
-        .map(|(i, a)| (Item::Action(i), format!("{} {}", a.title, a.id)))
-        .chain(UI.iter().enumerate().map(|(i, (title, _, _))| (Item::Ui(i), title.to_string())));
+        .map(|(i, a)| (Item::Action(i), a.search_text()))
+        .chain(UI.iter().enumerate().map(|(i, (title, _, _, words))| (Item::Ui(i), format!("{title} {words}"))));
     let query = query.trim();
     if query.is_empty() {
         // the most relevant first; the rest in their order
@@ -376,5 +377,24 @@ mod tests {
         assert!(is_link("https://youtu.be/gwLRWgOWhBs") && is_link("www.example.com/x") && is_link("  http://a/b  "));
         assert!(!is_link("open http://a") && !is_link("youtube") && !is_link(""));
         assert_eq!(palette_matches(&[], "https://youtu.be/x"), vec![Item::Link]);
+    }
+
+    #[test]
+    fn found_by_hidden_words_and_command_names() {
+        use tveee_core::actions::ActionDescriptor as A;
+        let ok = |_: &tveee_core::actions::Cx, _: &[String]| Ok("".into());
+        let a = vec![
+            A::new("apps.open_link", "apps", "open a link", ok).words(&["url", "web"]),
+            A::new("power.sleep", "power", "sleep (standby)", ok).cli("sleep", "", "").words(&["off"]),
+            A::new("media.ffw", "media", "fast-forward", ok).cli("ff", "", "").aliases(&["ffw"]),
+        ];
+        let first = |q: &str| palette_matches(&a, q).into_iter().next();
+        // a word it isn't called, but is about
+        assert_eq!(first("url"), Some(Item::Action(0)));
+        // its command-line name
+        assert_eq!(first("ff"), Some(Item::Action(2)));
+        // the ui's own: the guide by "epg"
+        let guide = UI.iter().position(|u| u.0 == "ui: live TV guide").unwrap();
+        assert!(palette_matches(&a, "epg").contains(&Item::Ui(guide)));
     }
 }

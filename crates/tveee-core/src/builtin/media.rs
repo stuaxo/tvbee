@@ -474,11 +474,11 @@ pub fn actions() -> Vec<A> {
         A::new("media.play", CAT, "play", |c, _| c.tv.key(126).map(|()| "play".into())).cli("play", "", "media play"),
         A::new("media.pause", CAT, "pause", |c, _| c.tv.key(127).map(|()| "pause".into())).cli("pause", "", "media pause"),
         A::new("media.stop", CAT, "stop", |c, _| c.tv.key(86).map(|()| "stop".into())).cli("stop", "", "media stop"),
-        A::new("media.playpause", CAT, "play/pause", playpause).cli("playpause", "", "toggle play/pause"),
-        A::new("media.next", CAT, "next track (or item)", |c, _| skip_item(c, true)).cli("next", "", "the next track or item queued"),
-        A::new("media.previous", CAT, "previous track (or item)", |c, _| skip_item(c, false)).cli("previous", "", "the track or item before").aliases(&["prev"]),
-        A::new("media.mute", CAT, "mute", mute).cli("mute", "", "mute (no-op if already muted)"),
-        A::new("media.visualiser", CAT, "music visualiser: show or hide it", visualiser)
+        A::new("media.playpause", CAT, "play/pause", playpause).words(&["pause", "resume"]).cli("playpause", "", "toggle play/pause"),
+        A::new("media.next", CAT, "next track (or item)", |c, _| skip_item(c, true)).words(&["skip", "track", "forward"]).cli("next", "", "the next track or item queued"),
+        A::new("media.previous", CAT, "previous track (or item)", |c, _| skip_item(c, false)).words(&["back", "track"]).cli("previous", "", "the track or item before").aliases(&["prev"]),
+        A::new("media.mute", CAT, "mute", mute).words(&["silence", "quiet", "sound"]).cli("mute", "", "mute (no-op if already muted)"),
+        A::new("media.visualiser", CAT, "music visualiser: show or hide it", visualiser).words(&["visualisation", "visualizer"])
             .cli("visualiser", "[on|off]", "show or hide the music visualiser (Kodi, while it plays music)")
             .long(
                 "Shows the music visualiser of the app in front, or goes back from it; with\n\
@@ -487,13 +487,13 @@ pub fn actions() -> Vec<A> {
             )
             .args("[on|off]")
             .while_playing("audio"),
-        A::new("media.unmute", CAT, "unmute", unmute).cli("unmute", "", "unmute (no-op if not muted)"),
-        A::new("media.ffw", CAT, "fast-forward", ffw).cli("ff", SKIP_USAGE, "fast-forward by an amount").aliases(&["ffw"]).long(SKIP_LONG),
-        A::new("media.rew", CAT, "rewind", rew).cli("rw", SKIP_USAGE, "rewind by an amount").aliases(&["rew"]).long(SKIP_LONG),
-        A::new("media.seek", CAT, "seek", seek).cli("seek", SKIP_USAGE, "jump to a position (time or percent of the way through)").long(
+        A::new("media.unmute", CAT, "unmute", unmute).words(&["sound"]).cli("unmute", "", "unmute (no-op if not muted)"),
+        A::new("media.ffw", CAT, "fast-forward", ffw).words(&["forward", "skip"]).cli("ff", SKIP_USAGE, "fast-forward by an amount").aliases(&["ffw"]).long(SKIP_LONG),
+        A::new("media.rew", CAT, "rewind", rew).words(&["back", "rewind", "skip"]).cli("rw", SKIP_USAGE, "rewind by an amount").aliases(&["rew"]).long(SKIP_LONG),
+        A::new("media.seek", CAT, "seek", seek).words(&["jump", "position", "time", "skip"]).cli("seek", SKIP_USAGE, "jump to a position (time or percent of the way through)").long(
             "Like ff/rw but absolute. Apps tveee can control directly (Kodi, with its\nremote control on) seek exactly. Otherwise it reads the current position from\nthe TV's media session, then skips the difference. Needs an app that publishes a media session\nwith a position (and a duration for percentages). Approximate: accuracy is\nlimited by --step, so seeking lands within about one step of the target.",
         ),
-        A::new("media.volume", CAT, "volume", vol)
+        A::new("media.volume", CAT, "volume", vol).words(&["sound", "loud", "quiet", "louder", "softer", "level"])
             .cli("vol", "up|down|<level>", "change volume")
             .long("A number sets an absolute level with 'media volume'."),
     ]
