@@ -183,9 +183,9 @@ impl App {
         let hint_w = usize::from(f.area().width.saturating_sub(4));
         let hints_for = |more: &str| -> Vec<String> {
             [
-                format!("↑/↓ choose  ⏎ open (or to front)  space actions  / search{more}"),
+                format!("⏎ open (or to front)  space actions  / search{more}"),
                 "● running  ⊘ always running: Android won't let it close".to_string(),
-                "letter = jump  tab/←/→ switch  # package names  click / right-click  esc closes   F1 guide  F3 remote".to_string(),
+                "a letter jumps  tab switches  # package names  right-click actions   F1 guide  F3 remote".to_string(),
             ]
             .iter()
             .flat_map(|h| super::drawing::wrap_keep(h, hint_w, 0))
@@ -259,7 +259,6 @@ impl App {
             text.push(if i == at { line.reversed() } else { line });
         }
         text.push(Line::default());
-        text.push(Line::from("↑/↓ choose  ⏎ do it  esc back  or click").fg(Color::DarkGray));
         let r = popup(f, &format!(" {} ", e.name), text, Color::Yellow);
         self.hits.push((r, Hit::Popup));
         for i in 0..choices.len() {

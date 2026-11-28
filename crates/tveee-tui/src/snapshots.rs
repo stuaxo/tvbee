@@ -1107,7 +1107,7 @@ fn tab_to_the_breadcrumbs() {
     assert_eq!(a.crumb_at, Some(1));
     let s = screen(&mut a, DESKTOP);
     insta::assert_snapshot!(s);
-    assert!(s.contains("←→ choose a step"), "{s}");
+    assert!(s.contains("tab back to the list"), "{s}");
     // ← to Music, ⏎ goes there; the keys are back on the list
     a.list_key(0, KeyCode::Left, KeyModifiers::NONE, &h);
     assert_eq!(a.crumb_at, Some(0));
@@ -1289,7 +1289,7 @@ fn options_scroll_when_short() {
     a.overlay = Overlay::Options(last);
     let s = screen(&mut a, (100, 11));
     // the chosen one in view, the tabs and keys still there, a bar beside the rows
-    assert!(s.contains(label) && s.contains("Options") && s.contains("esc closes"), "{s}");
+    assert!(s.contains(label) && s.contains("Options") && s.contains("tab: plugins"), "{s}");
     assert!(!s.contains(tveee_core::options::OPTIONS[0].label), "the first scrolled out: {s}");
     assert!(s.contains('┃'), "{s}");
     // clicked where it's drawn: that one

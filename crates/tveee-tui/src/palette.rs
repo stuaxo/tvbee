@@ -183,7 +183,7 @@ impl App {
             text.push(Line::from(" nothing matches").italic().fg(Color::DarkGray));
         }
         text.push(Line::default());
-        text.push(Line::from("type to find  ↑/↓ choose  ⏎ run  esc close   …: asks first").fg(Color::DarkGray));
+        text.push(Line::from("type to find   …: asks first").fg(Color::DarkGray));
         let count = format!(" {} ", list.len());
         let r = popup_titled(f, " commands ", &count, text, Color::Cyan);
         self.hits.push((r, Hit::Popup));

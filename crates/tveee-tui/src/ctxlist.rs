@@ -377,7 +377,6 @@ impl App {
                     text.push(Line::from(vec![
                         Span::styled("location ", dim),
                         Span::styled(format!("{typed}█"), Style::new().fg(Color::White).bg(Color::DarkGray)),
-                        Span::styled("  ⏎ open  esc back", dim),
                     ]));
                     rows_at.push(None);
                 } else if self.crumbs.len() > 1 {
@@ -479,9 +478,9 @@ impl App {
                 };
                 let tab = if self.crumbs.len() > 1 { "tab breadcrumbs  " } else { "" };
                 let hint = if self.crumb_at.is_some() {
-                    format!("←→ choose a step  ⏎ go there  {loc}tab/↓/esc back to the list")
+                    format!("{loc}tab back to the list")
                 } else {
-                    format!("↑↓ pgup pgdn home end  ⏎/click choose  ⌫/←/alt+↑ up  {tab}{loc}{sync}type to filter  esc closes{reading}")
+                    format!("⌫/alt+↑ up  {tab}{loc}{sync}type to filter{reading}")
                 };
                 text.push(Line::from(hint).fg(Color::DarkGray));
                 rows_at.push(None);

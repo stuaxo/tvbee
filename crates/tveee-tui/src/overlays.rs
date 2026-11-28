@@ -258,7 +258,6 @@ pub(super) const HELP: &str = " everywhere
    0-9      jump to 0%-90%   + -    volume
    m        mute/unmute      r      refresh
    tab      switch mode      .      more (power, mirror, ...)
-   lists    ↑ ↓ one, pgup pgdn a page, home end the first and last
    : ctrl+p commands: everything tveee can do, found by typing a few letters
             (the ui's own too: the log of what tveee did lately, help, ...)
    F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
@@ -268,15 +267,16 @@ pub(super) const HELP: &str = " everywhere
    u        the link whole / shortened    y  copy the link (click it: the same;
             its buttons copy or open it; ctrl+click opens it in most terminals)
    l        Ambilight panel (TVs with one; P there pairs if needed)
-   L        change the Ambilight in its panel: ↑↓ ←→ (or click), ⏎ on a light:
-            a colour picker (arrows or click, or type a name or #hex)
+   L        change the Ambilight in its panel; ⏎ on a light: a colour picker
+            (or type a name or #hex)
    v        preview: a picture of what's on (scrcpy if installed, 1 a second;
             YouTube's storyboards; else a screenshot every few seconds)
    /        search the app in front (tab picks another app)
    z        music visualiser: show or hide it (Kodi, while it plays music)
-   t        the list the app shows (Kodi's folder or add-on, YouTube's chapters
-            and links): choose from it, following the app (type to filter;
-            ⌫ ← or alt+↑ up a level, tab the breadcrumbs, ^L a location)
+   t        the app's list: Kodi's library, browsed here (only what you play
+            reaches Kodi; ^S opens the folders on the TV too), YouTube's
+            chapters and links (type to filter; ⌫ or alt+↑ up a level, tab the
+            breadcrumbs, ^L a location)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
@@ -457,7 +457,7 @@ impl App {
         // remembered as shown, so ↑ moves at once from the end
         self.overlay = Overlay::Help(top);
         let (title, right) = if lines.len() > room {
-            (" keys - ↑/↓ scroll, any other key closes ", format!(" {}-{} of {} ", top + 1, (top + room).min(lines.len()), lines.len()))
+            (" keys - any other key closes ", format!(" {}-{} of {} ", top + 1, (top + room).min(lines.len()), lines.len()))
         } else {
             (" keys - any key closes ", String::new())
         };
@@ -471,7 +471,7 @@ impl App {
 
     pub(super) fn draw_menu(&mut self, f: &mut Frame, sel: usize) {
         let (text, items) = self.menu_lines(sel);
-        let r = popup(f, " more - esc closes ", text, Color::Cyan);
+        let r = popup(f, " more ", text, Color::Cyan);
         self.hits.push((r, Hit::Popup));
         for (row, item) in items.into_iter().enumerate() {
             if let Some(i) = item {
@@ -516,7 +516,7 @@ impl App {
             }
             vec![
                 Line::default(),
-                Line::from("↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes").fg(Color::DarkGray),
+                Line::from("space toggles  a: auto (found on the TV)  tab: options").fg(Color::DarkGray),
                 Line::from("changes apply from tveee's next start").fg(Color::DarkGray),
             ]
         } else {
@@ -526,7 +526,7 @@ impl App {
                 at.push(body.len());
                 body.push(if i == sel { line.reversed() } else { line });
             }
-            vec![Line::default(), Line::from("↑/↓ choose  space/⏎/click toggle  tab: plugins  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray)]
+            vec![Line::default(), Line::from("space toggles  tab: plugins  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray)]
         };
         // what fits: the tabs and keys stay; the rows scroll to keep the
         // chosen one in view
@@ -578,7 +578,7 @@ impl App {
             Line::from(vec![
                 Span::raw("Search in  "),
                 Span::styled(format!(" {app_name} "), Style::new().fg(Color::Black).bg(Color::Cyan).bold()),
-                Span::styled("   tab / ↑↓ change app", Style::new().fg(Color::DarkGray)),
+                Span::styled("   tab changes app", Style::new().fg(Color::DarkGray)),
             ]),
             Line::from(how).fg(if target.is_some_and(|t| t.method == "keys") { Color::Yellow } else { Color::DarkGray }),
             Line::default(),
@@ -674,7 +674,7 @@ impl App {
             items.push(Some(i));
         }
         lines.push(Line::default());
-        lines.push(Line::from("↑/↓ choose  ⏎ run  press the key, or click").fg(Color::DarkGray));
+        lines.push(Line::from("or press its key").fg(Color::DarkGray));
         (lines, items)
     }
 }
