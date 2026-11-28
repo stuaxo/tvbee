@@ -1408,6 +1408,11 @@ fn help_has_colour() {
     let line = "   home     the TV's home screen    pgup pgdn  page up/down";
     assert_eq!(help_line(line).spans.iter().map(|s| s.content.as_ref()).collect::<String>(), line);
     assert!(parts(line).contains(&("pgup pgdn".to_string(), Some(Color::Yellow))));
+    // an aside that wraps: dim on the next line too, up to its bracket
+    let both = super::overlays::help_styled(&["   u        the link (click it: the same;".to_string(), "            its buttons copy it) and more".to_string()]);
+    let second: Vec<_> = both[1].spans.iter().map(|s| (s.content.to_string(), s.style.fg)).collect();
+    assert!(second.iter().any(|(t, c)| t.contains("its buttons copy it)") && *c == Some(Color::DarkGray)), "{second:?}");
+    assert!(second.iter().any(|(t, c)| t.contains("and more") && c.is_none()), "{second:?}");
 }
 
 #[test]
