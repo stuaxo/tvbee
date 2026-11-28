@@ -1713,3 +1713,31 @@ fn volume_box_says_the_level_and_steps_it() {
     assert_eq!(super::overlays::prompt_step("media.seek", KeyCode::Left), Some(Action::Seek(-10.0)));
     assert_eq!(super::overlays::prompt_step("kodi.find", KeyCode::Left), None);
 }
+
+#[test]
+fn a_choice_is_picked_from_a_list() {
+    use tveee_core::actions::ActionDescriptor as A;
+    let ok = |_: &tveee_core::actions::Cx, _: &[String]| Ok("".into());
+    let (mut a, rx, h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    a.actions = vec![A::new("input.source", "input", "switch input", ok).choices(&[("HDMI 1", "hdmi1"), ("HDMI 2", "hdmi2"), ("TV (the tuner)", "tv")])];
+    // from the palette: the list
+    let (next, action) = super::overlays::choose(&a.actions[0]);
+    assert_eq!((next, action), (Overlay::Choose { id: "input.source", sel: 0 }, None));
+    a.overlay = next;
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("switch input") && s.contains("HDMI 2") && s.contains("TV (the tuner)"), "{s}");
+    // ↓ ⏎: HDMI 2
+    a.choose_key("input.source", 0, KeyCode::Down, &h);
+    a.choose_key("input.source", 1, KeyCode::Enter, &h);
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { id: "input.source", args } if args == &["hdmi2"])));
+    assert_eq!(a.overlay, Overlay::None);
+    // a click on one runs it
+    a.overlay = Overlay::Choose { id: "input.source", sel: 0 };
+    let _ = screen(&mut a, DESKTOP);
+    let spot = a.hits.iter().find(|(_, x)| *x == Hit::ChoiceItem(2)).map(|(r, _)| *r).expect("the tuner's row");
+    a.click(spot.x, spot.y, &h);
+    assert!(rx.try_iter().any(|x| matches!(&x, Action::Run { id: "input.source", args } if args == &["tv"])));
+    // a menu key acts at once, with the default
+    assert_eq!(super::overlays::pick(&a.actions, 0).0, Overlay::None);
+}

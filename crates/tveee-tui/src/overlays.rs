@@ -27,6 +27,12 @@ pub enum Overlay {
         id: &'static str,
         yes: bool,
     },
+    /// Picking one of action `id`'s choices (`Params::Choice`), `sel`
+    /// highlighted.
+    Choose {
+        id: &'static str,
+        sel: usize,
+    },
     /// The command palette, with the highlighted match (what's typed is its
     /// own, `PaletteView::query`).
     Palette(usize),
@@ -193,6 +199,8 @@ pub fn overlay_key(overlay: Overlay, code: KeyCode, items: &[ActionDescriptor]) 
         Overlay::Prompt(id) => (Overlay::Prompt(id), None),
         // handled by App::palette_key
         Overlay::Palette(sel) => (Overlay::Palette(sel), None),
+        // handled by App::choose_key
+        Overlay::Choose { id, sel } => (Overlay::Choose { id, sel }, None),
         // handled by App::logs_key / save_log_key
         Overlay::Logs { at, from } => (Overlay::Logs { at, from }, None),
         Overlay::SaveLog => (Overlay::SaveLog, None),
@@ -239,7 +247,9 @@ pub fn needs_input(a: &ActionDescriptor) -> bool {
 /// What choosing an action does: ask for what it needs, ask first if it's
 /// risky, or run it.
 pub fn choose(a: &ActionDescriptor) -> (Overlay, Option<Action>) {
-    if needs_input(a) {
+    if let Params::Choice(_) = a.params {
+        (Overlay::Choose { id: a.id, sel: 0 }, None)
+    } else if needs_input(a) {
         (Overlay::Prompt(a.id), None)
     } else if a.confirm.is_some() {
         (Overlay::Confirm { id: a.id, yes: false }, None)
@@ -250,7 +260,12 @@ pub fn choose(a: &ActionDescriptor) -> (Overlay, Option<Action>) {
 
 /// What choosing menu item `i` does (see [`choose`]).
 pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
-    items.get(i).map_or((Overlay::None, None), choose)
+    match items.get(i) {
+        // a menu key acts at once: a choice's default (next subtitles, ...)
+        Some(a) if matches!(a.params, Params::Choice(_)) => (Overlay::None, Some(run(a.id))),
+        Some(a) => choose(a),
+        None => (Overlay::None, None),
+    }
 }
 
 /// [`HELP`] in rows of at most `w`: as it is when it fits; else its two
@@ -643,6 +658,7 @@ impl App {
             Overlay::Search(at) => self.draw_search(f, at),
             Overlay::Prompt(id) => self.draw_prompt(f, id),
             Overlay::Palette(sel) => self.draw_palette(f, sel),
+            Overlay::Choose { id, sel } => self.draw_choose(f, id, sel),
             Overlay::Logs { at, from } => self.draw_logs(f, at, from),
             Overlay::SaveLog => self.draw_save_log(f),
             // changed in the panel itself (its cursor): nothing over it
@@ -681,6 +697,43 @@ impl App {
         let bar = scrollbar(f, Bar::Help, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), total, top);
         self.hits.push((r, Hit::Popup));
         self.hits.extend(bar.map(|b| (b.area, Hit::Scrollbar(b))));
+    }
+
+    /// The choices of action `id` (`Params::Choice`), `sel` highlighted.
+    pub(super) fn draw_choose(&mut self, f: &mut Frame, id: &'static str, sel: usize) {
+        let Some(it) = tveee_core::actions::find(&self.actions, id) else { return };
+        let Params::Choice(choices) = it.params else { return };
+        let mut buf = LineBuf::default();
+        for (i, (label, _)) in choices.iter().enumerate() {
+            let line = Line::from(format!("  {label}  "));
+            buf.push_hit(if i == sel { line.reversed() } else { line }, Hit::ChoiceItem(i));
+        }
+        let (_, hits) = buf.popup(f, &format!(" {} ", it.title), "", Color::Cyan);
+        self.hits.extend(hits);
+    }
+
+    /// Keys in a list of choices: ↑/↓ choose, ⏎ runs it, Esc closes.
+    pub(super) fn choose_key(&mut self, id: &'static str, sel: usize, code: KeyCode, actions: &Handle) {
+        let n = tveee_core::actions::find(&self.actions, id).map_or(0, |a| match a.params {
+            Params::Choice(c) => c.len(),
+            _ => 0,
+        });
+        match code {
+            KeyCode::Esc => self.overlay = Overlay::None,
+            c if super::listnav::is_move(c) => self.overlay = Overlay::Choose { id, sel: super::listnav::step(sel, n, c).unwrap_or(sel) },
+            KeyCode::Enter => self.run_action_choice(id, sel, actions),
+            _ => {}
+        }
+    }
+
+    /// Run action `id` with its choice `i`.
+    pub(super) fn run_action_choice(&mut self, id: &'static str, i: usize, actions: &Handle) {
+        let Some(it) = tveee_core::actions::find(&self.actions, id) else { return };
+        let Params::Choice(choices) = it.params else { return };
+        let Some((label, arg)) = choices.get(i) else { return };
+        self.note = format!("{label}...");
+        let _ = actions.dispatch(id, vec![(*arg).to_string()]);
+        self.overlay = Overlay::None;
     }
 
     pub(super) fn draw_menu(&mut self, f: &mut Frame, sel: usize) {
@@ -849,7 +902,7 @@ impl App {
         // text it asks for, or the arguments it takes
         let (prompt, hint) = match it.params {
             Params::Text { prompt, hint } => (prompt.to_string(), hint),
-            Params::None => (format!("{}:", it.title), usage_of(it)),
+            Params::None | Params::Choice(_) => (format!("{}:", it.title), usage_of(it)),
         };
         // a volume or a position: where it is now, and ←/→ to step it
         let now = match id {

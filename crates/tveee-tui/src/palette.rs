@@ -257,7 +257,8 @@ impl App {
             let (left, key, right) = match item {
                 Item::Action(i) => {
                     let a = &self.actions[i];
-                    let more = if needs_input(a) || a.confirm.is_some() { "…" } else { "" };
+                    let asks = needs_input(a) || a.confirm.is_some() || matches!(a.params, tveee_core::actions::Params::Choice(_));
+                    let more = if asks { "…" } else { "" };
                     (format!("{}{more}", a.title), a.key.map(|k| format!(".{k}")).unwrap_or_default(), a.category)
                 }
                 Item::Ui(i) => (UI[i].0.to_string(), UI[i].1.to_string(), "ui"),
