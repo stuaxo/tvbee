@@ -7,17 +7,13 @@
 //! typed location); something to play is `kodi-play:playlist|folder|file`.
 
 use super::browse::{bare, path_crumbs, section_name, unescape};
+use super::link::Link;
 use super::{Result, Tv};
 use serde_json::Value;
 use tveee_core::more::Go;
 use tveee_core::provider::{ContextList, ListCrumb, ListItem, ListPlace};
 
-/// The start of a link that plays a file, from its folder (see [`play`]).
-pub const PLAY: &str = "kodi-play:";
-
-/// Above the libraries: Kodi's own top, its categories (music, videos).
-pub const ROOT: &str = "kodi|";
-/// Its key (as a list, and the libraries' way up).
+/// Kodi's top's key (as a list, and the libraries' way up).
 const ROOT_KEY: &str = "kodi";
 
 /// Which of Kodi's libraries.
@@ -76,7 +72,7 @@ impl Media {
             _ => None,
         }
     }
-    fn parse(s: &str) -> Option<Media> {
+    pub fn parse(s: &str) -> Option<Media> {
         match s {
             "music" => Some(Media::Music),
             "video" => Some(Media::Video),
@@ -87,12 +83,12 @@ impl Media {
 
 /// The link to browse `path` (named `name`, if known).
 pub fn link(m: Media, name: &str, path: &str) -> String {
-    format!("{}|{}|{}", m.name(), name.replace('|', "/"), path)
+    Link::browse(m, name, path).to_string()
 }
 
-/// Whether `at` is a place to browse (a [`link`]).
+/// Whether `at` is a place to browse (Kodi's top, or a folder).
 pub fn is_link(at: &str) -> bool {
-    at == ROOT || at.split_once('|').is_some_and(|(m, _)| Media::parse(m).is_some())
+    matches!(Link::parse(at), Some(Link::Root | Link::Browse { .. }))
 }
 
 /// Kodi's top: its categories, each its library's top.
@@ -113,7 +109,7 @@ pub fn root() -> ContextList {
         playing: None,
         at: None,
         up: None,
-        reopen: Some(Go::Link(ROOT.into())),
+        reopen: Some(Link::Root.go()),
         crumbs: Vec::new(),
         crumbs_whole: true,
         location: None,
@@ -125,11 +121,8 @@ pub fn root() -> ContextList {
 /// A [`link`]'s media, name and path; a bare path (typed) is music's,
 /// unless it's in the video library.
 pub fn parse(at: &str) -> (Media, String, String) {
-    let mut parts = at.splitn(3, '|');
-    let (m, name, path) = (parts.next(), parts.next(), parts.next());
-    match (m.and_then(Media::parse), name, path) {
-        (Some(m), Some(name), Some(path)) => (m, name.to_string(), path.trim().to_string()),
-        (Some(m), Some(path), None) => (m, String::new(), path.trim().to_string()),
+    match Link::parse(at) {
+        Some(Link::Browse { media, name, path }) => (media, name, path),
         _ => {
             let m = if at.starts_with("videodb://") { Media::Video } else { Media::Music };
             (m, String::new(), at.trim().to_string())
@@ -205,7 +198,8 @@ pub fn items_of(m: Media, dir: &str, v: &Value, key: &str, section: Option<&str>
                 _ if folder && !artists.is_empty() => Some(artists.join(", ")),
                 _ => None,
             };
-            let go = if folder { Go::Link(link(m, &label, &file)) } else { Go::Link(format!("{PLAY}{}|{dir}|{file}", m.playlist())) };
+            let go =
+                if folder { Link::browse(m, &label, &file).go() } else { Link::Play { playlist: m.playlist(), dir: dir.to_string(), file: file.clone() }.go() };
             Some(ListItem { section: section.map(str::to_string), id: file, label: shown, meta, folder, go })
         })
         .collect()
@@ -214,7 +208,7 @@ pub fn items_of(m: Media, dir: &str, v: &Value, key: &str, section: Option<&str>
 /// The list at `at` (a [`link`], or a path typed), read from Kodi without
 /// changing its screen.
 pub fn list_at(tv: &Tv, at: &str) -> Result<ContextList> {
-    if at == ROOT {
+    if Link::parse(at) == Some(Link::Root) {
         return Ok(root());
     }
     let (m, name, path) = parse(at);
@@ -244,7 +238,7 @@ pub fn shape(m: Media, name: &str, path: &str, items: Vec<ListItem>) -> ContextL
     // a library's top: Kodi's top above it (its categories)
     let up = match parent(path) {
         Some(p) => Some((key_for(&p), Go::Link(link(m, "", &p)))),
-        None => Some((ROOT_KEY.to_string(), Go::Link(ROOT.into()))),
+        None => Some((ROOT_KEY.to_string(), Link::Root.go())),
     };
     let (mut crumbs, crumbs_whole) = path_crumbs(m.window(), path);
     for c in &mut crumbs {
@@ -252,7 +246,7 @@ pub fn shape(m: Media, name: &str, path: &str, items: Vec<ListItem>) -> ContextL
         c.go = Some(Go::Link(link(m, &c.title, &p)));
     }
     // every way starts at Kodi's top: a click from another category
-    crumbs.insert(0, ListCrumb { title: "Kodi".into(), key: ROOT_KEY.into(), go: Some(Go::Link(ROOT.into())) });
+    crumbs.insert(0, ListCrumb { title: "Kodi".into(), key: ROOT_KEY.into(), go: Some(Link::Root.go()) });
     ContextList {
         title: title.clone(),
         kind: "folder",
@@ -285,15 +279,13 @@ pub fn start(tv: &Tv) -> Result<ContextList> {
     list_at(tv, &link(Media::Music, "", ""))
 }
 
-/// Play a [`PLAY`] link: its whole folder queued in Kodi's playlist,
+/// Play a [`Link::Play`]: its whole folder queued in Kodi's playlist,
 /// started at the file (so next and previous go along the folder); just
-/// the file if that can't be done.
+/// the file if that can't be done (or `link` is a file's own path).
 pub fn play(tv: &Tv, link: &str) -> Result<String> {
-    let rest = link.strip_prefix(PLAY).unwrap_or(link);
-    let mut parts = rest.splitn(3, '|');
-    let (pl, dir, file) = match (parts.next().and_then(|p| p.parse::<u32>().ok()), parts.next(), parts.next()) {
-        (Some(pl), Some(d), Some(f)) => (pl, d.to_string(), f.to_string()),
-        _ => (0, String::new(), rest.to_string()),
+    let (pl, dir, file) = match Link::parse(link) {
+        Some(Link::Play { playlist, dir, file }) => (playlist, dir, file),
+        _ => (0, String::new(), link.to_string()),
     };
     let media = if pl == 1 { "video" } else { "music" };
     let queued = || -> Result<Option<usize>> {
@@ -358,7 +350,7 @@ mod tests {
         assert_eq!(l.up, Some(("10502|musicdb://albums/".into(), Go::Link("music||musicdb://albums/".into()))));
         assert_eq!(l.crumbs.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["Kodi", "Music", "Albums"]);
         assert_eq!(l.crumbs[2].go, Some(Go::Link("music|Albums|musicdb://albums/".into())));
-        assert_eq!(l.crumbs[0].go, Some(Go::Link(ROOT.into())));
+        assert_eq!(l.crumbs[0].go, Some(Link::Root.go()));
         assert_eq!(l.open_location.as_deref(), Some("music||{}"));
         // the top: the library, then the sources
         let s: Value = serde_json::from_str(r#"{"sources":[{"file":"smb://192.168.1.80/media/","label":"media"}]}"#).unwrap();
@@ -367,11 +359,11 @@ mod tests {
         let top = shape(Media::Music, "", "", src);
         assert_eq!((top.title.as_str(), top.location.as_deref()), ("Music", Some("musicdb://")));
         // up from a library's top: Kodi's, its categories
-        assert_eq!(top.up, Some(("kodi".into(), Go::Link(ROOT.into()))));
+        assert_eq!(top.up, Some(("kodi".into(), Link::Root.go())));
         assert_eq!(top.crumbs.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["Kodi"]);
         let r = root();
         assert_eq!(r.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Music", "Videos"]);
         assert_eq!(r.items[1].go, Go::Link("video|Videos|".into()));
-        assert!(r.up.is_none() && r.browsed && is_link(ROOT));
+        assert!(r.up.is_none() && r.browsed && is_link(&Link::Root.to_string()));
     }
 }
