@@ -6,7 +6,7 @@ mod plugins;
 #[cfg(test)]
 mod plugin_tests;
 
-use tveee_core::{actions, dotenv, error, nowplaying, pairing, panel, plugin, provider, registry, tv, Ctx};
+use tveee_core::{dotenv, error, plugin, registry, tv, Ctx};
 use error::Error;
 use plugin::Mode;
 use registry::Command;
@@ -40,18 +40,9 @@ fn main() {
         .filter(|(_, s)| s.enabled)
         .flat_map(|(p, _)| p.commands())
         .collect();
-    // the enabled plugins' apps join the core list, before anything looks one up
-    plugins::apps::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.apps)()).collect());
-    provider::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.providers)()).collect());
-    pairing::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.pairings)()).collect());
-    panel::install(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.panels)()).collect());
-    nowplaying::install_namers(all.iter().zip(&states).filter(|(_, s)| s.enabled).flat_map(|(p, _)| (p.namers)()).collect());
-    let actions: Vec<actions::ActionDescriptor> = all
-        .iter()
-        .zip(&states)
-        .filter(|(_, s)| s.enabled)
-        .flat_map(|(p, _)| (p.actions)())
-        .collect();
+    // what the enabled plugins bring (their apps join the core list), before
+    // anything looks one up
+    let actions = plugin::install_enabled(&all, &states);
     let menu = actions.iter().filter(|a| a.key.is_some()).copied().collect();
     let diagnoses = all.iter().zip(&states).filter(|(_, s)| s.enabled).map(|(p, _)| p.diagnose).collect();
     let ctx = Ctx { tv, commands, actions, menu, plugins: states, all: plugins::all, diagnoses, has_ui: cfg!(feature = "ui") };

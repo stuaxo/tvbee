@@ -46,6 +46,22 @@ impl<T: 'static> Default for Registry<T> {
     }
 }
 
+/// Install what the enabled plugins (by `states`, alongside `all`) bring:
+/// their apps, providers, pairings, panels, namers and actions. At the
+/// start, and again when one is turned on or off (it applies at once).
+/// Returns their actions.
+pub fn install_enabled(all: &[Plugin], states: &[PluginState]) -> Vec<ActionDescriptor> {
+    let on = || all.iter().zip(states).filter(|(_, s)| s.enabled).map(|(p, _)| p);
+    crate::builtin::apps::install(on().flat_map(|p| (p.apps)()).collect());
+    crate::provider::install(on().flat_map(|p| (p.providers)()).collect());
+    crate::pairing::install(on().flat_map(|p| (p.pairings)()).collect());
+    crate::panel::install(on().flat_map(|p| (p.panels)()).collect());
+    crate::nowplaying::install_namers(on().flat_map(|p| (p.namers)()).collect());
+    let actions: Vec<ActionDescriptor> = on().flat_map(|p| (p.actions)()).collect();
+    crate::actions::install(actions.clone());
+    actions
+}
+
 pub enum Enable {
     Always,
     Detect(fn(&Tv) -> Result<bool>),
