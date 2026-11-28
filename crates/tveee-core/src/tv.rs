@@ -188,10 +188,11 @@ impl Tv {
     fn reconnect(&self) -> Result<()> {
         static LAST_FAILURE: std::sync::Mutex<Option<(String, std::time::Instant, String)>> = std::sync::Mutex::new(None);
         let mut last = LAST_FAILURE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((serial, at, why)) = last.as_ref() {
-            if *serial == self.serial() && at.elapsed() < std::time::Duration::from_secs(5) {
-                return failed(why.clone());
-            }
+        if let Some((serial, at, why)) = last.as_ref()
+            && *serial == self.serial()
+            && at.elapsed() < std::time::Duration::from_secs(5)
+        {
+            return failed(why.clone());
         }
         match self.connect().and_then(|()| self.wait_online()) {
             Ok(()) => {

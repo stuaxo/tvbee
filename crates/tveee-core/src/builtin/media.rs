@@ -210,10 +210,10 @@ pub fn parse_media_sessions(dump: &str) -> Vec<MediaInfo> {
         let Some(cur) = out.last_mut() else { continue };
         if line.starts_with("state=PlaybackState {") {
             cur.state = number_after(line, "{state=");
-        } else if line.starts_with("metadata:") {
-            if let Some((_, d)) = line.split_once("description=") {
-                (cur.title, cur.subtitle) = split_description(d);
-            }
+        } else if line.starts_with("metadata:")
+            && let Some((_, d)) = line.split_once("description=")
+        {
+            (cur.title, cur.subtitle) = split_description(d);
         }
     }
     out
@@ -365,10 +365,10 @@ fn player_seek(c: &Cx, to: crate::devtools::SeekTo) -> Result<Option<String>> {
 }
 
 fn playpause(c: &Cx, _: &[String]) -> Result<Output> {
-    if let Some(player) = player_in_front(c.tv) {
-        if player.play_pause(c.tv).or_fallback()?.is_some() {
-            return Ok("play/pause".into());
-        }
+    if let Some(player) = player_in_front(c.tv)
+        && player.play_pause(c.tv).or_fallback()?.is_some()
+    {
+        return Ok("play/pause".into());
     }
     c.tv.keyevent(85)?;
     Ok("play/pause".into())
@@ -376,10 +376,10 @@ fn playpause(c: &Cx, _: &[String]) -> Result<Output> {
 
 fn skip(c: &Cx, name: &str, args: &[String], sign: f64) -> Result<Output> {
     let (amount, step) = parse_skip_args(name, args)?;
-    if let Amount::Seconds(s) = amount {
-        if let Some(said) = player_seek(c, crate::devtools::SeekTo::By(sign * s))? {
-            return Ok(said.into());
-        }
+    if let Amount::Seconds(s) = amount
+        && let Some(said) = player_seek(c, crate::devtools::SeekTo::By(sign * s))?
+    {
+        return Ok(said.into());
     }
     let secs = match amount {
         Amount::Seconds(s) => s,

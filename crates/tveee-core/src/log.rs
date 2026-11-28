@@ -68,14 +68,14 @@ pub fn write(args: std::fmt::Arguments) {
     let t = std::thread::current();
     let name = t.name().map_or_else(|| format!("{:?}", t.id()), str::to_string);
     let text = line(now, &name, &args.to_string());
-    if KEEP.load(std::sync::atomic::Ordering::Relaxed) {
-        if let Ok(mut l) = LINES.lock() {
-            if l.len() >= RECENT {
-                l.pop_front();
-            }
-            l.push_back(text.trim_end().to_string());
-            TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if KEEP.load(std::sync::atomic::Ordering::Relaxed)
+        && let Ok(mut l) = LINES.lock()
+    {
+        if l.len() >= RECENT {
+            l.pop_front();
         }
+        l.push_back(text.trim_end().to_string());
+        TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
     if let Some(Ok(mut f)) = file().map(Mutex::lock) {
         let _ = f.write_all(text.as_bytes());

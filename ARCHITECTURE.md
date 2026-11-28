@@ -18,7 +18,7 @@ plugins/kodi                Kodi's JSON-RPC: playing, its library, add-ons
 
 Each plugin depends only on `tveee-core`; `tveee-core` depends on no front
 end (CI checks it pulls in no terminal crates), so a GUI could use it too.
-`tveee-core` and the plugins build with Rust 1.85; `tveee-tui` needs 1.90.
+`tveee-core` and the plugins build with Rust 1.89; `tveee-tui` needs 1.90.
 
 ## Talking to the TV (`tveee-core`)
 
@@ -84,7 +84,7 @@ Screens are tested as text snapshots (`snapshots.rs`, insta) at 120x35 and
 * Feature branches off `main`, one fix or feature each, merged with
   `--no-ff`; releases are tagged `vX.Y.Z` on main (CI builds them).
 * Before merging: `cargo fmt`, `cargo clippy -D warnings`, the tests, and
-  the build on Rust 1.85 (`pre-commit` runs fmt and clippy).
+  the build on Rust 1.89 (`pre-commit` runs fmt and clippy).
 * Few dependencies, on purpose: no async runtime, no TLS library (curl),
   our own HTTP and WebSocket clients.
 * Screenshots: `tools/contact-sheet/` records `tveee ui` at a terminal size

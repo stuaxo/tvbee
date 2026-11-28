@@ -861,10 +861,10 @@ pub fn background(shared: &Shared, asked: &Receiver<Action>, tx: Sender<Msg>) {
     if !shared.wait_idle() {
         return;
     }
-    if crate::labels::refresh(&tv).unwrap_or(0) > 0 {
-        if let Some(rows) = app_rows(shared, &tv) {
-            let _ = tx.send(Msg::Apps(rows));
-        }
+    if crate::labels::refresh(&tv).unwrap_or(0) > 0
+        && let Some(rows) = app_rows(shared, &tv)
+    {
+        let _ = tx.send(Msg::Apps(rows));
     }
     // nothing more to tell the ui: don't keep it waiting on quit
     drop(tx);

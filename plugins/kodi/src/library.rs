@@ -267,14 +267,13 @@ pub fn shape(m: Media, name: &str, path: &str, items: Vec<ListItem>) -> ContextL
 /// Where to start browsing: the folder Kodi shows, if it's showing its
 /// music or videos (on the item it has highlighted); else music's top.
 pub fn start(tv: &Tv) -> Result<ContextList> {
-    if let Some(p) = super::browse::place(tv)? {
-        if let Some(m) = Media::of_window(p.window) {
-            if let Ok(mut l) = list_at(tv, &link(m, &p.name, &p.path)) {
-                let place = ListPlace { key: l.key.clone(), focus_label: p.focus.0.clone(), focus_id: p.focus.1.clone(), playing_id: String::new() };
-                l.at = l.find(&place);
-                return Ok(l);
-            }
-        }
+    if let Some(p) = super::browse::place(tv)?
+        && let Some(m) = Media::of_window(p.window)
+        && let Ok(mut l) = list_at(tv, &link(m, &p.name, &p.path))
+    {
+        let place = ListPlace { key: l.key.clone(), focus_label: p.focus.0.clone(), focus_id: p.focus.1.clone(), playing_id: String::new() };
+        l.at = l.find(&place);
+        return Ok(l);
     }
     list_at(tv, &link(Media::Music, "", ""))
 }

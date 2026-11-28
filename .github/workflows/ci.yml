@@ -47,41 +47,21 @@ jobs:
             echo "tveee-core depends on a terminal crate (above): keep it in tveee-tui"; exit 1
           fi
 
-  # licences, where crates come from (failing), and security advisories
-  # (reported, not failing: their fixes wait on the minimum Rust; see deny.toml)
+  # licences, where crates come from, and security advisories
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check licenses bans sources
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        continue-on-error: true
-        with:
-          command: check advisories
-
-  # build with Debian's own packaged Rust (no rustup), as someone building
-  # from source on Debian 13 would
-  debian:
-    name: Debian 13, packaged Rust
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    steps:
-      - uses: actions/checkout@v4
-      # ca-certificates: cargo fetches crates over HTTPS; gcc and libc6-dev
-      # build the bundled SQLite
-      - run: apt-get update && apt-get install -y --no-install-recommends cargo ca-certificates gcc libc6-dev curl
-      - run: cargo --version && cargo build --locked && cargo test --workspace --exclude tveee-tui --locked
 
   # the oldest Rust we claim to support (Cargo.toml rust-version)
   msrv:
-    name: Minimum Rust (1.85)
+    name: Minimum Rust (1.89)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
       # the terminal remote needs newer Rust (see crates/tveee-tui)
       - run: cargo test --workspace --exclude tveee-tui --locked

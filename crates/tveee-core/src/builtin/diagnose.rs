@@ -207,10 +207,10 @@ fn findtv(c: &Ctx, args: &[String]) -> Result<()> {
         println!("{ip:<15} {}{model}", d.name);
         println!("{:<15} offers: {}; {adb}{casting}{mark}", "", if d.offers.is_empty() { "-".into() } else { d.offers.join(", ") });
     }
-    if !found.iter().any(|d| d.ip.map(|i| i.to_string()) == Some(current.clone())) {
-        if let Some(ip) = found.first().and_then(|d| d.ip) {
-            println!("\nTV_IP is {current}. To use {ip}, put TV_IP={ip} in ~/.config/tveee/env (or ./.env).");
-        }
+    if !found.iter().any(|d| d.ip.map(|i| i.to_string()) == Some(current.clone()))
+        && let Some(ip) = found.first().and_then(|d| d.ip)
+    {
+        println!("\nTV_IP is {current}. To use {ip}, put TV_IP={ip} in ~/.config/tveee/env (or ./.env).");
     }
     Ok(())
 }
