@@ -10,11 +10,9 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-      # rustfmt joins once the code has been reformatted (one commit of its
-      # own, after the open branches are merged):
-      # - id: fmt
-      #   name: cargo fmt
-      #   entry: cargo fmt --all --check
-      #   language: system
-      #   types: [rust]
-      #   pass_filenames: false
+      - id: fmt
+        name: cargo fmt
+        entry: cargo fmt --all --check
+        language: system
+        types: [rust]
+        pass_filenames: false
