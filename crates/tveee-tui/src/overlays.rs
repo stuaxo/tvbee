@@ -27,8 +27,8 @@ pub enum Overlay {
         id: &'static str,
         yes: bool,
     },
-    /// The command palette, with the highlighted match (what's typed is
-    /// `App::prompt`).
+    /// The command palette, with the highlighted match (what's typed is its
+    /// own, `PaletteView::query`).
     Palette(usize),
     /// The log, scrolled up this many lines from the end.
     /// The log: line `at` (by its number) highlighted, or None following
@@ -37,7 +37,7 @@ pub enum Overlay {
         at: Option<usize>,
         from: Option<usize>,
     },
-    /// Typing the file to save the log to (the name is `App::prompt`).
+    /// Typing the file to save the log to (the name is `LogView::save_name`).
     SaveLog,
     /// The app launcher: which tab, and the highlighted app in it.
     Apps {
@@ -57,13 +57,13 @@ pub enum Overlay {
     /// tveee's options, with N highlighted.
     Options(usize),
     /// The live TV guide on `tab`, with channel `at` (an id) highlighted;
-    /// the filter typed is `App::prompt`.
+    /// the filter typed is the guide's own (`GuideView::filter`).
     Guide {
         tab: GuideTab,
         at: u32,
     },
     /// The list the app in front shows (`t`), item `sel` (an index into it)
-    /// highlighted; the filter typed is `App::prompt`.
+    /// highlighted; the filter typed is the pane's own (`ListPane::filter`).
     List {
         sel: usize,
     },
@@ -607,12 +607,11 @@ impl App {
 
     pub(super) fn draw_overlay(&mut self, f: &mut Frame) {
         // the commands over another pop-up: that first, under them
-        if let (Overlay::Palette(_), Some((under, text))) = (self.overlay, self.under.clone()) {
-            let (palette_text, over) = (std::mem::replace(&mut self.prompt, text), self.overlay);
+        if let (Overlay::Palette(_), Some(under)) = (self.overlay, self.palette.under) {
+            let over = self.overlay;
             self.overlay = under;
             self.draw_one(f);
             self.overlay = over;
-            self.prompt = palette_text;
         }
         self.draw_one(f);
     }

@@ -84,6 +84,8 @@ pub struct ListPane {
     pub watching: bool,
     /// The lists last asked to be read ahead (asked again only on a change).
     pub ahead: Vec<String>,
+    /// The filter typed.
+    pub filter: String,
 }
 
 impl App {
@@ -94,13 +96,14 @@ impl App {
 
     /// The items the filter lets through, as indexes into the list.
     pub(super) fn list_shown(&self) -> Vec<usize> {
-        self.list_ok().map_or_else(Vec::new, |l| l.items.iter().enumerate().filter(|(_, i)| list_matches(&i.label, &self.prompt)).map(|(n, _)| n).collect())
+        self.list_ok()
+            .map_or_else(Vec::new, |l| l.items.iter().enumerate().filter(|(_, i)| list_matches(&i.label, &self.list.filter)).map(|(n, _)| n).collect())
     }
 
     /// Open the list pane: read the list, and have the refresh say where
     /// it is while it's open.
     pub(super) fn open_list(&mut self, actions: &Handle) {
-        self.prompt.clear();
+        self.list.filter.clear();
         self.list.seen = None;
         let at = self.list_ok().and_then(|l| l.at.or(l.playing)).unwrap_or(0);
         self.overlay = Overlay::List { sel: at };
@@ -111,7 +114,7 @@ impl App {
 
     pub(super) fn close_list(&mut self, actions: &Handle) {
         self.overlay = Overlay::None;
-        self.prompt.clear();
+        self.list.filter.clear();
         self.list.location = None;
         self.list.crumb_at = None;
         if self.list.watching {
@@ -161,7 +164,7 @@ impl App {
         let pos = shown.iter().position(|&i| i == sel).unwrap_or(0);
         match code {
             // Esc: the filter first, then the pane
-            KeyCode::Esc if !self.prompt.is_empty() => self.prompt.clear(),
+            KeyCode::Esc if !self.list.filter.is_empty() => self.list.filter.clear(),
             KeyCode::Esc => return self.close_list(actions),
             KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => return self.close_list(actions),
             KeyCode::Enter => return self.list_choose(sel, actions),
@@ -173,12 +176,12 @@ impl App {
                 return;
             }
             // nothing typed: back to the list this one's in
-            KeyCode::Backspace | KeyCode::Left if self.prompt.is_empty() => return self.list_up(actions),
+            KeyCode::Backspace | KeyCode::Left if self.list.filter.is_empty() => return self.list_up(actions),
             KeyCode::Backspace => {
-                self.prompt.pop();
+                self.list.filter.pop();
             }
-            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.prompt.clear(),
-            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.prompt.push(c),
+            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.list.filter.clear(),
+            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.list.filter.push(c),
             _ => return,
         }
         // the filter changed: keep the highlight if it's still shown, else the first
@@ -221,7 +224,7 @@ impl App {
                 let template = self.list_ok().and_then(|l| l.open_location.clone());
                 if let (false, Some(t)) = (typed.is_empty(), template) {
                     self.note = format!("opening {typed}...");
-                    self.prompt.clear();
+                    self.list.filter.clear();
                     let to = tveee_core::more::Go::Link(t.replace("{}", &typed));
                     self.list.location = None;
                     return self.list_open(to, actions);
@@ -301,7 +304,7 @@ impl App {
     /// Go back along the trail to crumb `i`.
     pub(super) fn list_crumb(&mut self, i: usize, actions: &Handle) {
         if let Some(go) = self.list.crumbs.get(i).and_then(|c| c.go.clone()) {
-            self.prompt.clear();
+            self.list.filter.clear();
             self.note = format!("{}...", self.list.crumbs[i].title);
             self.list_open(go, actions);
         }
@@ -318,7 +321,7 @@ impl App {
             let _ = actions.send(Action::ListGo(item.go));
         }
         if item.folder {
-            self.prompt.clear();
+            self.list.filter.clear();
         } else {
             self.close_list(actions);
         }
@@ -464,10 +467,10 @@ impl App {
                     text.push(Line::from(format!("couldn't read it again ({e}): showing it as it was")).fg(Color::Yellow));
                     rows_at.push(None);
                 }
-                text.push(if self.prompt.is_empty() {
+                text.push(if self.list.filter.is_empty() {
                     Line::from(Span::styled("type to filter", dim))
                 } else {
-                    Line::from(vec![Span::styled("filter: ", dim), Span::raw(self.prompt.clone())])
+                    Line::from(vec![Span::styled("filter: ", dim), Span::raw(self.list.filter.clone())])
                 });
                 rows_at.push(None);
                 // the app's own highlight, marked

@@ -47,12 +47,14 @@ pub struct AmbiView {
     pub open: bool,
     /// Where the colour picker is (column, row).
     pub pick: (usize, usize),
+    /// A colour being typed in the picker (a name, #hex).
+    pub typed: String,
 }
 
 impl Default for AmbiView {
     fn default() -> Self {
         // the picker starts on its full colours' row
-        AmbiView { open: false, pick: (0, 1) }
+        AmbiView { open: false, pick: (0, 1), typed: String::new() }
     }
 }
 
@@ -89,7 +91,7 @@ impl App {
         match self.overlay {
             Overlay::AmbiColour { row: open, .. } if open == row && asks => self.overlay = Overlay::AmbiColour { row, col },
             _ => {
-                self.prompt.clear();
+                self.ambi.typed.clear();
                 self.overlay = Overlay::Ambilight { row, col };
                 self.ambi_pick(row, col, actions);
             }
@@ -103,7 +105,7 @@ impl App {
         let Some(choice) = rows.get(row).and_then(|r| r.options.get(col)) else { return };
         match &choice.run {
             Run::Ask { .. } => {
-                self.prompt.clear();
+                self.ambi.typed.clear();
                 self.overlay = Overlay::AmbiColour { row, col };
             }
             Run::Act { id, args } => {
@@ -163,10 +165,10 @@ impl App {
                 self.ambi.pick = (gx.min(pick_width(gy) - 1), gy);
             }
             KeyCode::Backspace => {
-                self.prompt.pop();
+                self.ambi.typed.pop();
             }
-            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.prompt.clear(),
-            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.prompt.push(c),
+            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.ambi.typed.clear(),
+            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.ambi.typed.push(c),
             _ => {}
         }
     }
@@ -175,7 +177,7 @@ impl App {
     /// option `col` of row `row`. The picker stays open (what's typed too),
     /// to try another; Esc goes back to the panel.
     pub(super) fn ambi_set(&mut self, row: usize, col: usize, actions: &Handle) {
-        let typed = self.prompt.trim().to_string();
+        let typed = self.ambi.typed.trim().to_string();
         let colour = if typed.is_empty() { hex(pick_colour(self.ambi.pick.0, self.ambi.pick.1)) } else { typed };
         let rows = self.ambi_rows();
         if let Some(Run::Ask { id, args, .. }) = rows.get(row).and_then(|r| r.options.get(col)).map(|o| &o.run) {
@@ -355,7 +357,7 @@ impl App {
             let mut spans: Vec<Span> = Vec::new();
             let mut x = 0;
             for gx in 0..pick_width(gy) {
-                let on = self.ambi.pick == (gx, gy) && self.prompt.is_empty();
+                let on = self.ambi.pick == (gx, gy) && self.ambi.typed.is_empty();
                 let colour = pick_colour(gx, gy);
                 let dark = u32::from(colour.0) * 3 + u32::from(colour.1) * 6 + u32::from(colour.2) < 1280;
                 let label = if gy == SPECIALS {
@@ -381,11 +383,11 @@ impl App {
         text.push(Line::default());
         text.push(Line::from(vec![
             Span::styled("or type: ", dim),
-            Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray)),
-            Span::styled(" ".repeat(20usize.saturating_sub(self.prompt.chars().count() + 1)), Style::new().bg(Color::DarkGray)),
+            Span::styled(format!("{}█", self.ambi.typed), Style::new().fg(Color::White).bg(Color::DarkGray)),
+            Span::styled(" ".repeat(20usize.saturating_sub(self.ambi.typed.chars().count() + 1)), Style::new().bg(Color::DarkGray)),
             // the colour typed, beside it, once it's one
-            match tveee_core::panel::parse_colour(&self.prompt) {
-                Some(c) if !self.prompt.trim().is_empty() => Span::styled("    ", block(c)),
+            match tveee_core::panel::parse_colour(&self.ambi.typed) {
+                Some(c) if !self.ambi.typed.trim().is_empty() => Span::styled("    ", block(c)),
                 _ => Span::raw(""),
             },
         ]));
@@ -398,7 +400,7 @@ impl App {
         }
         cmp.push(Span::styled("  →  ", dim));
         // what's typed, as soon as it's a colour tveee knows
-        match (self.prompt.trim(), tveee_core::panel::parse_colour(&self.prompt)) {
+        match (self.ambi.typed.trim(), tveee_core::panel::parse_colour(&self.ambi.typed)) {
             ("", _) => cmp.push(Span::styled("    ", block(pick_colour(self.ambi.pick.0, self.ambi.pick.1)))),
             (_, Some(c)) => {
                 cmp.push(Span::styled("    ", block(c)));

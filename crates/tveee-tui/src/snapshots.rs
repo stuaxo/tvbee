@@ -113,7 +113,7 @@ fn palette_desktop() {
     let mut a = app_with(kodi_paused(), actions());
     a.open_palette();
     insta::assert_snapshot!("palette_all", screen(&mut a, DESKTOP));
-    a.prompt = "kodi".into();
+    a.palette.query = "kodi".into();
     insta::assert_snapshot!("palette_kodi", screen(&mut a, DESKTOP));
 }
 
@@ -128,7 +128,7 @@ fn palette_asks_for_arguments() {
 fn palette_lists_the_ui_too() {
     let mut a = app_with(kodi_paused(), actions());
     a.open_palette();
-    a.prompt = "log".into();
+    a.palette.query = "log".into();
     insta::assert_snapshot!(screen(&mut a, CORNER));
 }
 
@@ -141,15 +141,15 @@ fn guide_filter_ctrl_u_clears() {
     for c in "bbc".chars() {
         a.guide_key(tab, 0, KeyCode::Char(c), KeyModifiers::NONE, &h);
     }
-    assert_eq!(a.prompt, "bbc");
+    assert_eq!(a.guide.filter, "bbc");
     // ctrl+u clears it, and no "u" is typed
     a.guide_key(tab, 0, KeyCode::Char('u'), KeyModifiers::CONTROL, &h);
-    assert_eq!(a.prompt, "");
+    assert_eq!(a.guide.filter, "");
     // Esc: the filter first, the guide staying open; then the guide
     a.overlay = Overlay::Guide { tab, at: 0 };
     a.guide_key(tab, 0, KeyCode::Char('b'), KeyModifiers::NONE, &h);
     a.guide_key(tab, 0, KeyCode::Esc, KeyModifiers::NONE, &h);
-    assert!(a.prompt.is_empty() && matches!(a.overlay, Overlay::Guide { .. }));
+    assert!(a.guide.filter.is_empty() && matches!(a.overlay, Overlay::Guide { .. }));
     a.guide_key(tab, 0, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::None);
 }
@@ -162,7 +162,7 @@ fn guide_ctrl_p_opens_the_commands() {
     a.overlay = Overlay::Guide { tab: GuideTab::All, at: 0 };
     // ":" filters (programme names have them)
     a.guide_key(GuideTab::All, 0, KeyCode::Char(':'), KeyModifiers::NONE, &h);
-    assert_eq!(a.prompt, ":");
+    assert_eq!(a.guide.filter, ":");
     a.guide_key(GuideTab::All, 0, KeyCode::Char('p'), KeyModifiers::CONTROL, &h);
     assert!(matches!(a.overlay, Overlay::Palette(_)), "{:?}", a.overlay);
 }
@@ -507,13 +507,13 @@ fn palette_over_the_log() {
     assert_eq!(a.overlay, Overlay::Logs { at: None, from: None });
     // over the guide, its filter kept: : is typed there, ^P opens them
     a.overlay = Overlay::Guide { tab: GuideTab::All, at: 0 };
-    a.prompt = "bbc".into();
+    a.guide.filter = "bbc".into();
     assert!(!a.palette_wanted(KeyCode::Char(':'), KeyModifiers::NONE));
     assert!(a.palette_wanted(KeyCode::Char('p'), KeyModifiers::CONTROL));
     a.palette_over();
-    assert!(a.prompt.is_empty());
+    assert!(a.palette.query.is_empty());
     a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
-    assert_eq!((a.overlay, a.prompt.as_str()), (Overlay::Guide { tab: GuideTab::All, at: 0 }, "bbc"));
+    assert_eq!((a.overlay, a.guide.filter.as_str()), (Overlay::Guide { tab: GuideTab::All, at: 0 }, "bbc"));
     // the palette on its own, closed: nothing comes back
     a.overlay = Overlay::None;
     a.open_palette();
@@ -551,17 +551,17 @@ fn log_select_and_save() {
     // s: a file name asked for (one offered), saved, back to the log
     a.logs_key(Some(n0 + 2), None, KeyCode::Char('s'), KeyModifiers::NONE);
     assert_eq!(a.overlay, Overlay::SaveLog);
-    assert!(a.prompt.starts_with("tveee-log-") && a.prompt.ends_with(".txt"), "{}", a.prompt);
+    assert!(a.log.save_name.starts_with("tveee-log-") && a.log.save_name.ends_with(".txt"), "{}", a.log.save_name);
     let path = std::env::temp_dir().join(format!("{mark}.txt"));
     let _ = std::fs::remove_file(&path);
-    a.prompt = path.display().to_string();
+    a.log.save_name = path.display().to_string();
     a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
     let saved = std::fs::read_to_string(&path).expect("saved");
     assert!(saved.contains(&format!("{mark} line 4")), "{saved}");
     assert_eq!(a.overlay, Overlay::Logs { at: Some(n0 + 2), from: None });
     // again, the same name: asked before writing over it
     a.logs_key(Some(n0 + 2), None, KeyCode::Char('s'), KeyModifiers::NONE);
-    a.prompt = path.display().to_string();
+    a.log.save_name = path.display().to_string();
     a.save_log_key(KeyCode::Enter, KeyModifiers::NONE);
     assert_eq!(a.overlay, Overlay::SaveLog);
     assert!(a.note.contains("again writes over it"), "{}", a.note);
@@ -723,7 +723,7 @@ fn list_pane_keys() {
     // a folder: opened, the pane stays (and the filter goes)
     a.list_key(1, KeyCode::Enter, KeyModifiers::NONE, &h);
     assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListGo(Go::Link("kodi-window:music|musicdb://artists/7/".into()))]);
-    assert!(matches!(a.overlay, Overlay::List { .. }) && a.prompt.is_empty());
+    assert!(matches!(a.overlay, Overlay::List { .. }) && a.list.filter.is_empty());
     // a file: played, the pane closes and the refresh stops reading the list
     a.list_choose(3, &h);
     let asked: Vec<Action> = rx.try_iter().collect();
@@ -951,7 +951,7 @@ fn ambilight_picker_switches_lights() {
     assert_eq!(a.overlay, Overlay::AmbiColour { row: 4, col: 3 });
     // tab: the next light; what's typed is kept
     a.ambi_ask_key(4, 3, KeyCode::Tab, KeyModifiers::NONE, &h);
-    assert_eq!((a.overlay, a.prompt.as_str()), (Overlay::AmbiColour { row: 4, col: 4 }, "warm"));
+    assert_eq!((a.overlay, a.ambi.typed.as_str()), (Overlay::AmbiColour { row: 4, col: 4 }, "warm"));
     // "all" in the picker's own row of lights
     let _ = screen(&mut a, DESKTOP);
     let r = spot(&a, Hit::AmbiOption(4, 0));
@@ -985,9 +985,9 @@ fn picker_shows_what_is_typed() {
     let s = typed(&mut a, "nge");
     assert!(s.contains("#ff6400") && !s.contains("not a colour"), "{s}");
     // #hex and r,g,b too
-    a.prompt.clear();
+    a.ambi.typed.clear();
     assert!(typed(&mut a, "#00ff88").contains("#00ff88"));
-    a.prompt.clear();
+    a.ambi.typed.clear();
     assert!(typed(&mut a, "10,20,30").contains("#0a141e"));
 }
 
@@ -1067,9 +1067,9 @@ fn list_trail_and_going_up() {
     a.click(r.x, r.y, &h);
     assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-window:music".into()))));
     // typing: ⌫ takes a letter off, not up
-    a.prompt = "ra".into();
+    a.list.filter = "ra".into();
     a.list_key(0, KeyCode::Backspace, KeyModifiers::NONE, &h);
-    assert_eq!(a.prompt, "r");
+    assert_eq!(a.list.filter, "r");
     assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
 }
 
@@ -1181,7 +1181,7 @@ fn breadcrumbs_from_the_path_and_a_typed_location() {
         a.list_key(0, KeyCode::Char(c), KeyModifiers::NONE, &h);
     }
     // typing went to the location, not the filter
-    assert!(a.prompt.is_empty());
+    assert!(a.list.filter.is_empty());
     a.list_key(0, KeyCode::Enter, KeyModifiers::NONE, &h);
     assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-window:music|smb://nas/music/".into()))));
     assert!(a.list.location.is_none());
@@ -1235,7 +1235,7 @@ fn alt_up_goes_up() {
     let (mut a, rx, h) = app_seeing(st);
     a.overlay = Overlay::List { sel: 2 };
     // plain ↑ moves in the list; alt+↑ goes up a level (even with a filter typed)
-    a.prompt = "ra".into();
+    a.list.filter = "ra".into();
     a.list_key(2, KeyCode::Up, KeyModifiers::ALT, &h);
     assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-parentdir".into()))));
     a.list_key(2, KeyCode::Up, KeyModifiers::NONE, &h);
@@ -1628,14 +1628,14 @@ fn esc_clears_the_filter_first() {
     a.open_list(&h);
     a.list_key(0, KeyCode::Char('r'), KeyModifiers::NONE, &h);
     a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
-    assert!(a.prompt.is_empty() && matches!(a.overlay, Overlay::List { .. }), "the filter cleared, still open");
+    assert!(a.list.filter.is_empty() && matches!(a.overlay, Overlay::List { .. }), "the filter cleared, still open");
     a.list_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::None);
     // the palette
     a.overlay = Overlay::Palette(0);
     a.palette_key(0, KeyCode::Char('m'), KeyModifiers::NONE, &h);
     a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
-    assert!(a.prompt.is_empty() && matches!(a.overlay, Overlay::Palette(_)));
+    assert!(a.palette.query.is_empty() && matches!(a.overlay, Overlay::Palette(_)));
     a.palette_key(0, KeyCode::Esc, KeyModifiers::NONE, &h);
     assert_eq!(a.overlay, Overlay::None);
 }

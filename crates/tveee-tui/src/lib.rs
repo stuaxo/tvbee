@@ -50,6 +50,8 @@ use tveee_core::engine::*;
 
 const CAT: &str = "ui";
 struct App {
+    /// The command palette's own state (what's typed, what it's over).
+    palette: palette::PaletteView,
     /// The system panel's own state (shown or not, read or not, paused).
     system: drawing::SystemView,
     /// The plugins: each one's state, and every plugin there is.
@@ -94,9 +96,6 @@ struct App {
     /// tveee's options as this app reads them: None, the saved ones; tests
     /// give each app its own (never the real file, nor each other's).
     opts: Option<Vec<(String, bool)>>,
-    /// The pop-up the command palette opened over (the log, the guide, ...)
-    /// and its typed text: back to it when the palette closes.
-    under: Option<(Overlay, String)>,
     /// What has been typed into the open prompt.
     prompt: String,
     /// The search box's app choices, made when it opens.
@@ -354,7 +353,8 @@ fn event_loop(term: &mut DefaultTerminal, app: &mut App, events: &Receiver<CoreE
             }
             Event::Paste(p) => {
                 match app.overlay {
-                    Overlay::Prompt(_) | Overlay::Search(_) | Overlay::Palette(_) => app.prompt.push_str(&paste_text(&p)),
+                    Overlay::Prompt(_) | Overlay::Search(_) => app.prompt.push_str(&paste_text(&p)),
+                    Overlay::Palette(_) => app.palette.query.push_str(&paste_text(&p)),
                     // remote mode: type it into the TV (what `input text` can)
                     Overlay::None if app.mode == Mode::Remote => {
                         let t: String = paste_text(&p).chars().filter(|c| c.is_ascii() && !c.is_ascii_control()).collect();
@@ -490,7 +490,7 @@ impl App {
             options: Default::default(),
             frozen: None,
             opts: None,
-            under: None,
+            palette: Default::default(),
             prompt: String::new(),
             search_targets: Vec::new(),
             settling: None,
@@ -1022,7 +1022,7 @@ impl App {
             (Overlay::Ambilight { .. }, _) => self.overlay = Overlay::None,
             (Overlay::AmbiColour { row, col }, Some(Hit::AmbiPick(x, y))) => {
                 self.ambi.pick = (x, y);
-                self.prompt.clear();
+                self.ambi.typed.clear();
                 self.ambi_set(row, col, actions);
             }
             // another light (or any choice in the panel) while picking a colour

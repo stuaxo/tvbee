@@ -98,11 +98,21 @@ pub fn palette_ranked(actions: &[ActionDescriptor], query: &str, now: &Now) -> V
     scored.into_iter().map(|(_, _, item)| item).collect()
 }
 
+/// The command palette's own state.
+#[derive(Default)]
+pub struct PaletteView {
+    /// What's been typed to find a command.
+    pub query: String,
+    /// The pop-up it opened over (the log, the guide, ...): back to it when
+    /// it closes, its own text as it was.
+    pub under: Option<Overlay>,
+}
+
 impl App {
     pub(super) fn open_palette(&mut self) {
         // over nothing: nothing to go back to
-        self.under = None;
-        self.prompt.clear();
+        self.palette.under = None;
+        self.palette.query.clear();
         self.overlay = Overlay::Palette(0);
     }
 
@@ -123,23 +133,24 @@ impl App {
 
     /// Open the commands over the pop-up that's open, to go back to it.
     pub(super) fn palette_over(&mut self) {
-        self.under = Some((self.overlay, std::mem::take(&mut self.prompt)));
+        // what it's over keeps its own text (a filter, a name typed)
+        self.palette.under = Some(self.overlay);
+        self.palette.query.clear();
         self.overlay = Overlay::Palette(0);
     }
 
     /// The palette closed: back to what it was over, if anything.
     pub(super) fn palette_closed(&mut self) {
-        if let Some((o, text)) = self.under.take()
+        if let Some(o) = self.palette.under.take()
             && self.overlay == Overlay::None
         {
             self.overlay = o;
-            self.prompt = text;
         }
     }
 
     /// What's listed now, for what's been typed.
     pub(super) fn palette_list(&self) -> Vec<Item> {
-        palette_ranked(&self.actions, &self.prompt, &self.palette_now())
+        palette_ranked(&self.actions, &self.palette.query, &self.palette_now())
     }
 
     /// What makes an action relevant now: the app in front, what's playing.
@@ -157,8 +168,8 @@ impl App {
         let n = self.palette_list().len();
         match code {
             // Esc: what's typed first, then the palette
-            KeyCode::Esc if !self.prompt.is_empty() => {
-                self.prompt.clear();
+            KeyCode::Esc if !self.palette.query.is_empty() => {
+                self.palette.query.clear();
                 self.overlay = Overlay::Palette(0);
             }
             KeyCode::Esc => {
@@ -188,15 +199,15 @@ impl App {
                 None => {}
             },
             KeyCode::Backspace => {
-                self.prompt.pop();
+                self.palette.query.pop();
                 self.overlay = Overlay::Palette(0);
             }
             KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => {
-                self.prompt.clear();
+                self.palette.query.clear();
                 self.overlay = Overlay::Palette(0);
             }
             KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => {
-                self.prompt.push(c);
+                self.palette.query.push(c);
                 self.overlay = Overlay::Palette(0);
             }
             _ => {}
@@ -208,7 +219,7 @@ impl App {
         let width = 64usize;
         let mut text = vec![Line::from(vec![
             Span::styled("> ", Style::new().fg(Color::DarkGray)),
-            Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White)),
+            Span::styled(format!("{}█", self.palette.query), Style::new().fg(Color::White)),
         ])];
         text.push(Line::from("─".repeat(width)).fg(Color::DarkGray));
         // a window of ROWS around the highlight
