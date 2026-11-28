@@ -61,6 +61,8 @@ pub struct LogView {
     /// The file name ⏎ was pressed for that's there already (⏎ again
     /// writes over it).
     pub save_confirm: Option<String>,
+    /// The file name being typed to save the log to.
+    pub save_name: String,
 }
 
 impl App {
@@ -100,7 +102,7 @@ impl App {
             KeyCode::Char('s') => {
                 self.log.back = Some(Overlay::Logs { at, from });
                 self.log.save_confirm = None;
-                self.prompt = default_log_name();
+                self.log.save_name = default_log_name();
                 self.overlay = Overlay::SaveLog;
             }
             KeyCode::Esc if from.is_some() => self.overlay = Overlay::Logs { at, from: None },
@@ -128,7 +130,7 @@ impl App {
         match code {
             KeyCode::Esc => self.overlay = self.log.back.take().unwrap_or(Overlay::None),
             KeyCode::Enter => {
-                let name = self.prompt.trim().to_string();
+                let name = self.log.save_name.trim().to_string();
                 if name.is_empty() {
                     self.note = "type a file name to save the log to".into();
                     return;
@@ -150,12 +152,12 @@ impl App {
                 self.overlay = self.log.back.take().unwrap_or(Overlay::None);
             }
             KeyCode::Backspace => {
-                self.prompt.pop();
+                self.log.save_name.pop();
                 self.log.save_confirm = None;
             }
-            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.prompt.clear(),
+            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.log.save_name.clear(),
             KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => {
-                self.prompt.push(c);
+                self.log.save_name.push(c);
                 self.log.save_confirm = None;
             }
             _ => {}
@@ -231,7 +233,7 @@ impl App {
     pub(super) fn draw_save_log(&mut self, f: &mut Frame) {
         let text = vec![
             Line::from("Save the log (all the lines kept) to:"),
-            Line::from(vec![Span::styled(format!("{}█", self.prompt), Style::new().fg(Color::White).bg(Color::DarkGray))]),
+            Line::from(vec![Span::styled(format!("{}█", self.log.save_name), Style::new().fg(Color::White).bg(Color::DarkGray))]),
             Line::default(),
             Line::from("~/ is your home; else where tveee was started").fg(Color::DarkGray),
         ];

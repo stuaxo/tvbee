@@ -217,6 +217,8 @@ pub struct GuideView {
     /// Descriptions asked for; `want_info` is the next to ask for.
     pub infos_asked: std::collections::HashSet<(u32, i64)>,
     pub want_info: Option<(u32, i64)>,
+    /// The filter typed (channels' names and numbers).
+    pub filter: String,
 }
 
 impl Default for GuideView {
@@ -230,6 +232,7 @@ impl Default for GuideView {
             details_of: None,
             infos_asked: Default::default(),
             want_info: None,
+            filter: String::new(),
         }
     }
 }
@@ -252,7 +255,7 @@ impl App {
             Some(nowplaying::Open::Guide { channel }) => channel,
             None => None,
         });
-        self.prompt.clear();
+        self.guide.filter.clear();
         self.guide.later = 0;
         self.guide.view = self.guide_start();
         self.overlay = Overlay::Guide { tab: GuideTab::All, at: channel.or(on_now).unwrap_or(0) };
@@ -316,7 +319,7 @@ impl App {
                 return;
             }
             // Esc: the filter first, then the guide
-            KeyCode::Esc if !self.prompt.is_empty() => self.prompt.clear(),
+            KeyCode::Esc if !self.guide.filter.is_empty() => self.guide.filter.clear(),
             KeyCode::Esc => {
                 self.overlay = Overlay::None;
                 return;
@@ -348,22 +351,22 @@ impl App {
             KeyCode::Right => self.guide.later = (self.guide.later + 1).min(GUIDE_AHEAD / GUIDE_STEP),
             KeyCode::Left => self.guide.later = self.guide.later.saturating_sub(1).max(0),
             KeyCode::Backspace => {
-                self.prompt.pop();
+                self.guide.filter.pop();
             }
             // ctrl+u clears the filter (as in the palette); other ctrl keys
             // aren't letters to filter by
-            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.prompt.clear(),
-            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.prompt.push(c),
+            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => self.guide.filter.clear(),
+            KeyCode::Char(c) if !mods.contains(KeyModifiers::CONTROL) => self.guide.filter.push(c),
             _ => {}
         }
-        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
+        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.guide.filter, self.guide_time()).iter().map(|r| r.channel.id).collect();
         // keep the highlight on its channel while it's shown; else the first
         self.overlay = Overlay::Guide { tab, at: guide_move(&ids, at, code) };
     }
 
     /// Switch the guide to `tab`, the highlight moving to a channel it shows.
     pub(super) fn guide_tab(&mut self, tab: GuideTab, at: u32) {
-        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.prompt, self.guide_time()).iter().map(|r| r.channel.id).collect();
+        let ids: Vec<u32> = guide_shown(self.guide_rows(), tab, &self.guide.filter, self.guide_time()).iter().map(|r| r.channel.id).collect();
         let current = self.st.guide_ok().and_then(|g| g.current);
         self.guide.details_scroll = 0;
         self.overlay = Overlay::Guide { tab, at: guide_tab_pick(&ids, at, current) };
@@ -441,10 +444,10 @@ impl App {
                         .collect::<Vec<_>>(),
                 ));
                 ids.push(None);
-                let filter = if self.prompt.is_empty() {
+                let filter = if self.guide.filter.is_empty() {
                     Line::from("type to filter by number, name or programme").fg(Color::DarkGray)
                 } else {
-                    Line::from(vec![Span::raw("filter: "), Span::raw(self.prompt.clone()).bold(), Span::raw("▏")])
+                    Line::from(vec![Span::raw("filter: "), Span::raw(self.guide.filter.clone()).bold(), Span::raw("▏")])
                 };
                 text.push(filter);
                 ids.push(None);
@@ -467,7 +470,7 @@ impl App {
                 }
                 text.push(Line::from(head));
                 ids.push(None);
-                let shown = guide_shown(&g.rows, tab, &self.prompt, t);
+                let shown = guide_shown(&g.rows, tab, &self.guide.filter, t);
                 let sel = shown.iter().position(|r| r.channel.id == at).unwrap_or(0);
                 // the details panel: the highlighted channel's programme at the guide's time
                 let picked = shown.get(sel).and_then(|r| {
@@ -499,10 +502,10 @@ impl App {
                 let panel_h = if self.guide.details == Details::Closed { 1 } else { rows + 1 };
                 let room = usize::from(area.height.saturating_sub(8)).saturating_sub(panel_h + 1).max(3);
                 if shown.is_empty() {
-                    let why = match (tab, self.prompt.is_empty()) {
+                    let why = match (tab, self.guide.filter.is_empty()) {
                         (GuideTab::Favourites, true) => "no favourites yet: add channels to a favourites list on the TV".to_string(),
                         (GuideTab::Radio, true) => "no radio stations in the TV's channel list".to_string(),
-                        _ => format!("nothing matches \"{}\"", self.prompt),
+                        _ => format!("nothing matches \"{}\"", self.guide.filter),
                     };
                     text.push(Line::from(why).italic());
                     ids.push(None);
