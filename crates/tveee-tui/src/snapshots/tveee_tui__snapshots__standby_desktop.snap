@@ -1,12 +1,12 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 99
+assertion_line: 103
 expression: "screen(&mut app(standby()), DESKTOP)"
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
 │[F]ree memory │ [:] commands                                                                                          │
 │what     In standby                                                                                                   │
-│press . then w to wake the TV                                                                                         │
+│press w to wake the TV                                                                                                │
 │                                                                                                                      │
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                                                               │
 │                                                                                                                      │

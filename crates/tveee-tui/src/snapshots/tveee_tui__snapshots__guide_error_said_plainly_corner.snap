@@ -6,7 +6,7 @@ expression: s
 ┌ tveee ui - 192.168.1.19 ───────────────────────── player ┐
 │[F]ree memory │ [:] commands                              │
 │what     In standby                                       │
-│press . then w to wake the TV                             │
+│press w to wake the TV                                    │
 │                                                          │
 │┌ guide ────────────────────────────────────────────────┐ │
 ││couldn't read the guide: the TV didn't answer (it may  │ │
