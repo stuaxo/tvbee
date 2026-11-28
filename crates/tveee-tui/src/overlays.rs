@@ -464,8 +464,9 @@ impl App {
         let total = lines.len();
         let text: Vec<Line> = lines.into_iter().skip(top).take(room).map(Line::from).collect();
         let r = popup_titled(f, title, &right, text, Color::DarkGray);
-        scrollbar(f, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), total, top);
+        let bar = scrollbar(f, Bar::Help, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), total, top);
         self.hits.push((r, Hit::Popup));
+        self.hits.extend(bar.map(|b| (b.area, Hit::Scrollbar(b))));
     }
 
     pub(super) fn draw_menu(&mut self, f: &mut Frame, sel: usize) {
@@ -539,10 +540,13 @@ impl App {
         text.extend(foot);
         let r = popup(f, " options ", text, Color::Blue);
         let top = r.y + 1 + u16::try_from(head.len()).unwrap_or(0);
-        scrollbar(f, r.right().saturating_sub(1), top, u16::try_from(shown).unwrap_or(0), total, start);
+        let bar = scrollbar(f, Bar::Options, r.right().saturating_sub(1), top, u16::try_from(shown).unwrap_or(0), total, start);
+        // which choosable row each body line is (a dragged scrollbar picks by line)
+        self.bar_rows = (0..total).map(|l| at.iter().position(|a| *a == l)).collect();
         // the rows in view, clickable where they are
         let rows: Vec<(usize, usize)> = at.iter().enumerate().filter(|(_, l)| (start..start + room).contains(*l)).map(|(i, l)| (i, head.len() + l - start)).collect();
         self.option_hits(r, &rows);
+        self.hits.extend(bar.map(|b| (b.area, Hit::Scrollbar(b))));
     }
 
     /// The options dialog's clickable parts: its tabs, and its rows (each
