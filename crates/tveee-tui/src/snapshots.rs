@@ -216,7 +216,7 @@ fn help_fits_the_corner() {
     // scrolled to the end: the last of it shows, and ↑ moves straight away
     a.overlay = Overlay::Help(999);
     let end = screen(&mut a, CORNER);
-    assert!(end.contains("Shift+drag selects text"), "{end}");
+    assert!(end.contains("select text as usual"), "{end}");
     let Overlay::Help(top) = a.overlay else { panic!("help closed") };
     let (up, _) = overlays::overlay_key(a.overlay, KeyCode::Up, &[]);
     assert_eq!(up, Overlay::Help(top - 1));
@@ -224,14 +224,14 @@ fn help_fits_the_corner() {
 
 #[test]
 fn help_whole_on_the_desktop() {
-    // wide enough: the two columns as written
+    // wide enough: as written
     let lines = overlays::help_lines(116);
-    assert_eq!(lines.len(), overlays::HELP.lines().count());
+    assert_eq!(lines.len(), super::keys::help().lines().count());
     // narrow: no row too long, and no words lost
     let narrow = overlays::help_lines(56);
     assert!(narrow.iter().all(|l| l.chars().count() <= 56), "{narrow:#?}");
     let words = |t: &str| t.split_whitespace().map(str::to_string).collect::<Vec<_>>();
-    assert_eq!(words(&narrow.join(" ")), words(overlays::HELP));
+    assert_eq!(words(&narrow.join(" ")), words(super::keys::help()));
 }
 
 #[test]

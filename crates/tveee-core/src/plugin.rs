@@ -330,7 +330,10 @@ pub fn needs_probe(plugins: &[Plugin], sub: &str, args: &[String]) -> bool {
     if sub == "do" && args.first().is_some_and(|id| detect().any(|p| (p.actions)().iter().any(|a| a.id == id))) {
         return true;
     }
-    let offline = OFFLINE.contains(&sub) || (sub == "apps" && args.iter().any(|a| a == "--all")) || (sub == "do" && args.first().is_some_and(|a| a == "--all"));
+    let offline = OFFLINE.contains(&sub)
+        || (sub == "apps" && args.iter().any(|a| a == "--all"))
+        || (sub == "do" && args.first().is_some_and(|a| a == "--all"))
+        || (sub == "ui" && args.iter().any(|a| a == "--keys"));
     !offline && detect().any(|p| !(p.apps)().is_empty())
 }
 

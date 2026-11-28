@@ -27,6 +27,7 @@ mod ctxlist;
 mod drawing;
 mod guide;
 mod keymap;
+pub mod keys;
 mod launcher;
 mod links;
 mod listnav;
@@ -386,7 +387,11 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
         match a.as_str() {
             "--no-mouse" => mouse = false,
             "--no-settle" => settle = false,
-            _ => return tveee_core::error::usage(format!("usage: tveee ui [--no-mouse] [--no-settle]  (unexpected '{a}')")),
+            "--keys" => {
+                println!("{}", keys::help());
+                return Ok(());
+            }
+            _ => return tveee_core::error::usage(format!("usage: tveee ui [--no-mouse] [--no-settle] [--keys]  (unexpected '{a}')")),
         }
     }
     use std::io::IsTerminal;
@@ -422,7 +427,7 @@ fn ui(c: &Ctx, args: &[String]) -> Result<()> {
 pub fn actions() -> Vec<ActionDescriptor> {
     let mut v = vec![
         ActionDescriptor::terminal("ui.ui", CAT, "interactive remote: what's on, volume, seeking", ui)
-            .cli("ui", "[--no-mouse] [--no-settle]", "interactive remote: what's on, volume, seeking")
+            .cli("ui", "[--no-mouse] [--no-settle] [--keys]", "interactive remote: what's on, volume, seeking")
             .long(
                 "A full-screen remote showing what is playing (as 'tveee nowplaying') and the\n\
          volume, refreshed every second. Two modes, switched with Tab: in player mode\n\
@@ -430,31 +435,15 @@ pub fn actions() -> Vec<ActionDescriptor> {
          arrows move around its menus, Enter is OK, Esc is back, and what you type\n\
          (or paste) is typed into the TV. Tab switches back; Ctrl-C quits.\n\
          \n\
-         \x20 space / p     play/pause   Backspace  back   h  home\n\
-         \x20 left/right    seek 10s     [ / ]  seek 60s     0-9  jump to 0%-90%\n\
-         \x20 up/down + -   volume       m      mute/unmute\n\
-         \x20 r  refresh    .  more: power, mirror, screenshot, inputs (risky ones ask first)\n\
-         \x20 :  commands (or Ctrl-P): everything tveee can do, found by typing a\n\
-         \x20    few letters of it\n\
-         \x20 F  free memory   S  sleep   R  restart the app in front, where it was\n\
-         \x20 F1 F2 F3  the guide, the apps, remote mode (Alt+1-3 too), from the\n\
-         \x20    player or from the guide or the apps\n\
-         \x20 The top line: the TV's load and free memory, [F]ree, [l] the Ambilight,\n\
-         \x20 [:] commands (click them too). A small pane keeps one row of keys.\n\
-         \x20 i  system panel: memory graph, swap, storage, load, uptime\n\
-         \x20 l  Ambilight panel (Philips TVs that have it): state and each light's\n\
-         \x20    colour; L (or clicking it) changes power, style, Hue and any light's\n\
-         \x20    colour; P pairs with the TV if needed\n\
-         \x20 v  preview: a picture of what's on, refreshed every second or so (with\n\
-         \x20    scrcpy and ffmpeg installed: scrcpy at 320 pixels, which sees video too;\n\
-         \x20    YouTube's storyboard frames while it starts or without it; otherwise a\n\
-         \x20    screenshot every few seconds, where video comes out black)\n\
-         \x20 a  launcher: the installed apps tveee has aliases for (see 'tveee apps'); ● marks\n\
-         \x20    running ones (Enter brings them to the front), ⊘ ones Android keeps running\n\
-         \x20    (live TV: they can't be closed); Space or right-click opens actions:\n\
-         \x20    restart, close, search\n\
-         \x20 /  search the app in front, or (in the launcher) the highlighted app\n\
-         \x20 ?  all keys   q / Esc / Ctrl-C  quit\n\
+         Keys: ? in the remote shows them all, by where they work; --keys prints\n\
+         them here (the same list).\n\
+         \n\
+         The top line: the TV's load and free memory, [F]ree, [l] the Ambilight,\n\
+         [:] commands (click them too). A small pane keeps one row of keys. The\n\
+         launcher marks running apps ● and ones Android keeps running ⊘ (live TV:\n\
+         they can't be closed). The preview is scrcpy at 320 pixels with scrcpy\n\
+         and ffmpeg installed (it sees video too), YouTube's storyboard frames\n\
+         while it starts, else a screenshot every few seconds (video is black).\n\
          \n\
          Seeking is exact for apps tveee can read the video of (YouTube); elsewhere\n\
          left/right send fast-forward/rewind key presses (~10s each, apps differ)\n\

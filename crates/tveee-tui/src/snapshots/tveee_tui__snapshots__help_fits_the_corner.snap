@@ -1,21 +1,20 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 212
 expression: s
 ---
-┌ keys - any other key closes ───────────────── 1-14 of 83 ┐
+┌ keys - any other key closes ──────────────── 1-14 of 227 ┐
 │ everywhere                                               ┃
-│   space p  play/pause                                    ┃
-│   ⌫        back                                          │
-│   h        home                                          │
-│   [ ]      seek -/+ 60s                                  │
-│   0-9      jump to 0%-90%                                │
-│   + -      volume                                        │
-│   m        mute/unmute                                   │
-│   r        refresh                                       │
-│   tab      switch mode                                   │
-│   .        more (power, mirror, ...)                     │
-│   : ctrl+p commands: everything tveee can do, found by   │
-│            typing a few letters                          │
-│            (the ui's own too: the log of what tveee did  │
+│   ^P       commands (over whatever is open; back to it   │
+│            after)                                        │
+│   :        commands, where ':' isn't being typed (a      │
+│            filter, a search, a box)                      │
+│   F1       the guide (alt+1 too), from anywhere you      │
+│            aren't typing                                 │
+│   F2       the apps (alt+2 too)                          │
+│   F3       remote mode (alt+3 too)                       │
+│   tab      player mode / remote mode (on the main        │
+│            screen)                                       │
+│   ^C       quit (the guide and the list: close them)     │
+│                                                          │
+│ player mode  (the main screen)                           │
 └──────────────────────────────────────────────────────────┘

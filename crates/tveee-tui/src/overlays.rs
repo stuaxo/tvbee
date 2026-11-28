@@ -268,8 +268,8 @@ pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
     }
 }
 
-/// [`HELP`] in rows of at most `w`: as it is when it fits; else its two
-/// columns one under the other, and long rows wrapped under their text.
+/// [`super::keys::help`] in rows of at most `w`: as it is when it fits;
+/// else long rows wrapped under their text.
 /// A line of the help, coloured so it reads at a glance: headings bold
 /// cyan, keys yellow (the first column's, and a second column's: a short
 /// key after three spaces and before two), asides in brackets dim.
@@ -350,85 +350,19 @@ fn help_line_in(line: &str, open: &mut usize) -> Line<'static> {
 }
 
 pub(super) fn help_lines(w: usize) -> Vec<String> {
-    if HELP.lines().all(|l| l.chars().count() <= w) {
-        return HELP.lines().map(str::to_string).collect();
+    let text = super::keys::help();
+    if text.lines().all(|l| l.chars().count() <= w) {
+        return text.lines().map(str::to_string).collect();
     }
-    const COL2: usize = 29;
     let mut out = Vec::new();
-    for line in HELP.lines() {
-        let c: Vec<char> = line.chars().collect();
-        // a key row ("   m        mute/unmute      r      refresh"): its
-        // second column has a row of its own
-        let key_row = c.len() > 3 && c[..3].iter().all(|&x| x == ' ') && c[3] != ' ';
-        let two = key_row && c.len() > COL2 && c[COL2 - 3..COL2].iter().all(|&x| x == ' ') && c[COL2] != ' ';
-        let rows = if two {
-            // the second column's keys are narrower: lined up with the first's
-            let second: String = c[COL2..].iter().collect();
-            let (key, what) = second.split_once("  ").unwrap_or((&second, ""));
-            vec![c[..COL2].iter().collect::<String>(), format!("   {key:<9}{}", what.trim_start())]
-        } else {
-            vec![line.to_string()]
-        };
-        for row in rows {
-            let lead = row.chars().take_while(|&x| x == ' ').count();
-            let hang = if lead == 3 { 12 } else { lead };
-            out.extend(super::drawing::wrap_keep(&row, w, hang));
-        }
+    for row in text.lines() {
+        // a key's row wraps under its description, the rest under themselves
+        let lead = row.chars().take_while(|&x| x == ' ').count();
+        let hang = if lead == 3 { 3 + super::keys::LABEL + 2 } else { lead };
+        out.extend(super::drawing::wrap_keep(row, w, hang));
     }
     out
 }
-
-pub(super) const HELP: &str = " everywhere
-   space p  play/pause       ⌫      back
-   h        home             [ ]    seek -/+ 60s
-   0-9      jump to 0%-90%   + -    volume
-   m        mute/unmute      r      refresh
-   tab      switch mode      .      more (power, mirror, ...)
-   : ctrl+p commands: everything tveee can do, found by typing a few letters
-            (the ui's own too: the log of what tveee did lately, help, ...)
-   F1 F2 F3 the guide, the apps, remote mode (also alt+1-3; from the lists too)
-   w        wake the TV (from standby)
-   F        free memory (force-stop idle apps)   S  sleep   R  restart the app
-            in front, coming back where it was (YouTube, Kodi)
-   i        system info      a      launch an app (space there: front / restart / close)
-   I        pause the system panel's figures (to look at them, or to stop reading them)
-   u        the link whole / shortened    y  copy the link (click it: the same;
-            its buttons copy or open it; ctrl+click opens it in most terminals)
-   l        Ambilight panel (TVs with one; P there pairs if needed)
-   L        change the Ambilight in its panel; ⏎ on a light: a colour picker
-            (or type a name or #hex)
-   v        preview: a picture of what's on (scrcpy if installed, 1 a second;
-            YouTube's storyboards; else a screenshot every few seconds)
-   /        search the app in front (tab picks another app)
-   z        music visualiser: show or hide it (Kodi, while it plays music)
-   t        the app's list: Kodi's library, browsed here (only what you play
-            reaches Kodi; ^S opens the folders on the TV too), YouTube's
-            chapters and links (type to filter; ⌫ or alt+↑ up a level, tab the
-            breadcrumbs, ^L a location)
-   g        live TV guide: now/next on every channel (type to filter, ←/→ later
-            or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
-            * or click the star to add/remove a favourite);
-            clicking the channel line opens it too
-   . o      open a link (YouTube, Netflix, media files)
-   ,        options (scroll animations, ...)
-   q Esc    quit
-
- player mode
-   ← →      seek -/+ 10s (exact in YouTube; ff/rw keys elsewhere)
-   ↑ ↓      volume
-
- remote mode: the keyboard is the TV's (tab leaves, ctrl-c quits)
-   arrows   move around the TV's menus
-   ⏎ esc    OK, back
-   ⌫ del    delete in a text box (backward, forward)
-   home     the TV's home screen    pgup pgdn  page up/down
-   typing   typed into the TV (a search box, say); pasting too
-   other actions: the buttons along the bottom
-
- mouse
-   click the buttons, the progress bar (jump) or volume bar (set)
-   wheel    volume
-   Shift+drag selects text as usual (to copy the url)";
 
 /// The plugins: each one's state (the options' Plugins tab), and every
 /// plugin there is (installed again when one is turned on or off; None in
@@ -677,7 +611,7 @@ impl App {
         let mut lines = help_lines(w);
         // wrapped to fit: the whole width (else a column of the screen's
         // own border shows beside it)
-        if HELP.lines().any(|l| l.chars().count() > w)
+        if super::keys::help().lines().any(|l| l.chars().count() > w)
             && let Some(first) = lines.first_mut()
         {
             *first = format!("{first:<w$}");
