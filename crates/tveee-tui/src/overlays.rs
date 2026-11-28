@@ -492,8 +492,7 @@ impl App {
         // body line each choosable row is on
         let mut body: Vec<Line> = Vec::new();
         let mut at: Vec<usize> = Vec::new();
-        let foot: Vec<Line>;
-        if self.options_plugins {
+        let foot: Vec<Line> = if self.options_plugins {
             let vendor: Vec<_> = self.vendor_plugins().into_iter().cloned().collect();
             body.push(Line::from(Span::styled(" vendor", dim)));
             for (i, p) in vendor.iter().enumerate() {
@@ -514,11 +513,11 @@ impl App {
             for p in self.plugins.iter().filter(|p| p.source == tveee_core::plugin::Source::Builtin) {
                 body.push(Line::from(Span::styled(format!(" [x] {:<20}  {}", p.name, p.desc), dim)));
             }
-            foot = vec![
+            vec![
                 Line::default(),
                 Line::from("↑/↓ choose  space/⏎/click toggle  a: auto (found on the TV)  tab: options  esc closes").fg(Color::DarkGray),
                 Line::from("changes apply from tveee's next start").fg(Color::DarkGray),
-            ];
+            ]
         } else {
             for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
                 let tick = if self.opt(o.name) { "[x]" } else { "[ ]" };
@@ -526,8 +525,8 @@ impl App {
                 at.push(body.len());
                 body.push(if i == sel { line.reversed() } else { line });
             }
-            foot = vec![Line::default(), Line::from("↑/↓ choose  space/⏎/click toggle  tab: plugins  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray)];
-        }
+            vec![Line::default(), Line::from("↑/↓ choose  space/⏎/click toggle  tab: plugins  esc closes  (saved in ~/.config/tveee/options.txt)").fg(Color::DarkGray)]
+        };
         // what fits: the tabs and keys stay; the rows scroll to keep the
         // chosen one in view
         let room = usize::from(f.area().height.saturating_sub(2)).saturating_sub(head.len() + foot.len()).max(3);
