@@ -62,11 +62,15 @@ pub fn ask<M: Method>(tv: &Tv, m: &M) -> Result<M::Out> {
 /// answers a ping) just slow, which is said as such.
 pub fn ask_within<M: Method>(tv: &Tv, m: &M, secs: u32) -> Result<M::Out> {
     let rpc = Rpc(m, secs);
+    let slow = || failed(format!("Kodi didn't answer within {secs}s (it's running: a slow share or a big library?)"));
     let reply = match tv.send(&rpc.request(tv)?) {
         Ok(r) => r,
-        Err(_) if m.name() != "JSONRPC.Ping" && ping(tv) => {
-            return failed(format!("Kodi didn't answer within {secs}s (it's running: a slow share or a big library?)"));
-        }
+        // what the failure was says it: nothing listening is Kodi off,
+        // no answer in time is Kodi busy
+        Err(e) if e.refused() => return Err(off()),
+        Err(e) if e.timed_out() => return slow(),
+        // else ask whether it's there at all
+        Err(_) if m.name() != "JSONRPC.Ping" && ping(tv) => return slow(),
         Err(_) => return Err(off()),
     };
     match rpc.parse(&reply)? {
