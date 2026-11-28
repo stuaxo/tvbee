@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Kodi, through its own remote-control API (JSON-RPC over HTTP, port 8080
 //! by default). It's off until switched on in Kodi: Settings > Services >
 //! Control > "Allow remote control via HTTP". With it, tveee knows what Kodi
@@ -15,6 +16,7 @@ use tveee_core::more::Place;
 use tveee_core::provider::{Outcome, Playing, Session};
 use tveee_core::tv::Tv;
 
+/// Kodi's Android package.
 pub const PACKAGE: &str = "org.xbmc.kodi";
 
 pub mod addons;
@@ -27,6 +29,7 @@ const PAIRING: &str = "kodi";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_USER: &str = "kodi";
 
+/// Whether the TV has Kodi.
 pub fn detect(tv: &Tv) -> Result<bool> {
     let out = tv.shell(&["cmd", "package", "list", "packages", PACKAGE])?;
     Ok(out.lines().any(|l| l.trim() == format!("package:{PACKAGE}")))
@@ -257,8 +260,11 @@ fn now(tv: &Tv) -> Result<Option<(Playing, Option<String>, Value)>> {
 /// session's `extra` and put back after a restart.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Tracks {
+    /// The audio stream chosen (Kodi's index).
     pub audio: Option<u64>,
+    /// The subtitle chosen (Kodi's index).
     pub subtitle: Option<u64>,
+    /// Whether subtitles are showing.
     pub subtitles_on: bool,
 }
 
@@ -410,7 +416,10 @@ pub fn seek_value(to: SeekTo) -> Value {
 
 // --- the provider --------------------------------------------------------------
 
+/// Kodi's provider: what's playing, exact seeking, its library, lists,
+/// pictures, next and previous (through its JSON-RPC API).
 pub struct Kodi;
+/// The one Kodi provider.
 pub static KODI: Kodi = Kodi;
 
 const PLACES: &[Place] = &[
@@ -846,8 +855,11 @@ impl tveee_core::provider::Details for Kodi {
 pub struct Found {
     /// "movie" or "tvshow".
     pub kind: &'static str,
+    /// Its id in the library (movieid, tvshowid).
     pub id: u64,
+    /// Its title.
     pub title: String,
+    /// Its year, when the library has one.
     pub year: Option<u32>,
 }
 
@@ -863,6 +875,8 @@ fn search_library(tv: &Tv, q: &str) -> Result<Vec<Found>> {
     Ok(out)
 }
 
+/// The movies or shows (`kind`) in a `VideoLibrary.Get…` answer's `list`,
+/// each by its `id` field.
 pub fn parse_found(r: &Value, kind: &'static str, list: &str, id: &str) -> Vec<Found> {
     r.get(list)
         .and_then(Value::as_array)
@@ -1165,13 +1179,16 @@ fn clean(tv: &Tv) -> Result<tveee_core::actions::Output> {
     call(tv, "VideoLibrary.Clean", "{}").map(|_| "Kodi is removing missing videos from its library".into())
 }
 
+/// This plugin's providers: Kodi.
 pub fn providers() -> Vec<&'static dyn tveee_core::provider::Provider> {
     vec![&KODI]
 }
 
 // --- pairing ---------------------------------------------------------------------
 
+/// Pairing with Kodi (`tveee pair kodi`): its port, user and password.
 pub struct KodiLogin;
+/// The one Kodi pairing.
 pub static KODI_LOGIN: KodiLogin = KodiLogin;
 
 fn ask(prompt: &str, default: &str) -> Result<String> {
@@ -1227,6 +1244,7 @@ impl tveee_core::pairing::Pairing for KodiLogin {
     }
 }
 
+/// This plugin's pairings: Kodi's login.
 pub fn pairings() -> Vec<&'static dyn tveee_core::pairing::Pairing> {
     vec![&KODI_LOGIN]
 }

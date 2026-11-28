@@ -15,21 +15,47 @@ use super::library::Media;
 use std::fmt;
 use tveee_core::more::Go;
 
+/// One of Kodi's links (see the table above).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
     /// Above the libraries: Kodi's categories.
     Root,
-    /// A folder to browse in tveee (`name` may be empty: a typed location).
-    Browse { media: Media, name: String, path: String },
+    /// A folder to browse in tveee.
+    Browse {
+        /// Which library.
+        media: Media,
+        /// Its name, if known (empty: a typed location).
+        name: String,
+        /// Its path, as Kodi knows it.
+        path: String,
+    },
     /// A file to play from its folder (the folder queued, see
-    /// [`super::library::play`]); `dir` may be empty (just the file).
-    Play { playlist: u32, dir: String, file: String },
-    /// A window on Kodi's screen, at a folder or its own start.
-    Window { window: String, path: Option<String> },
-    /// The queue playing (Kodi's playlist `playlist`).
-    Queue { playlist: u32 },
-    /// Item `position` of the queue playing: play from there.
-    GoTo { position: usize },
+    /// [`super::library::play`]).
+    Play {
+        /// The playlist to queue it in (0 music, 1 video).
+        playlist: u32,
+        /// Its folder (empty: just the file).
+        dir: String,
+        /// The file.
+        file: String,
+    },
+    /// A window on Kodi's screen.
+    Window {
+        /// The window, as `GUI.ActivateWindow` names it.
+        window: String,
+        /// The folder to open it at (None: its own start).
+        path: Option<String>,
+    },
+    /// The queue playing.
+    Queue {
+        /// Kodi's playlist.
+        playlist: u32,
+    },
+    /// An item of the queue playing: play from there.
+    GoTo {
+        /// Its position, from 0.
+        position: usize,
+    },
 }
 
 const ROOT: &str = "kodi|";

@@ -21,12 +21,18 @@ const INFO: u64 = 10146;
 /// Progress dialogs: fine while installing.
 const PROGRESS: [u64; 2] = [10101, 10151];
 
+/// An add-on Kodi has (installed or available).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Addon {
+    /// Its id: "plugin.video.example".
     pub id: String,
+    /// Its name, as Kodi shows it.
     pub name: String,
+    /// Its version.
     pub version: String,
+    /// What it says it does, in a line.
     pub summary: String,
+    /// Whether it's switched on.
     pub enabled: bool,
 }
 
