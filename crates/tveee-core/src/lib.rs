@@ -6,6 +6,7 @@
 //! plugins (Philips, YouTube, Kodi) are crates of their own.
 
 pub mod actions;
+pub mod ask;
 pub mod builtin;
 pub mod crypto;
 pub mod devtools;

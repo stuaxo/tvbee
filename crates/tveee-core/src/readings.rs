@@ -7,32 +7,58 @@
 //! short: a reading says when an answer isn't a whole one, and it's asked
 //! for again ([`Tv::read`]); where something keeps going (the refresh), the
 //! last whole one stands in ([`Kept`]).
+//!
+//! A reading is the simplest kind of [`crate::ask::Ask`]: a shell command
+//! with no parameters, and its answer's type. [`Of`] is it as an `Ask`
+//! (to batch it with [`Tv::ask_both`], say).
 
+use crate::ask::{Ask, Cmd, Reply, Request};
 use crate::error::{Result, failed};
 use crate::tv::Tv;
 
 /// A reading from the TV: the command, and what its answer means.
 pub trait Reading: Sized {
-    /// What's run in the TV's shell (a pipeline is fine).
-    const CMD: &'static str;
+    /// What's run in the TV's shell.
+    fn cmd() -> Cmd;
     /// What it's called, in messages.
     const NAME: &'static str;
     /// The answer, or None when it isn't a whole one (empty, cut short).
     fn parse(out: &str) -> Option<Self>;
 }
 
+/// Reading `R`, as something to [`Tv::ask`].
+pub struct Of<R>(std::marker::PhantomData<R>);
+
+impl<R> Of<R> {
+    pub fn new() -> Of<R> {
+        Of(std::marker::PhantomData)
+    }
+}
+
+impl<R> Default for Of<R> {
+    fn default() -> Self {
+        Of::new()
+    }
+}
+
+impl<R: Reading> Ask for Of<R> {
+    type Answer = R;
+    fn name(&self) -> String {
+        R::NAME.to_string()
+    }
+    fn request(&self, _: &Tv) -> Result<Request> {
+        Ok(Request::Shell(R::cmd()))
+    }
+    fn parse(&self, reply: &Reply) -> Result<Option<R>> {
+        Ok(R::parse(&reply.body))
+    }
+}
+
 impl Tv {
     /// Read `R`, asking again once if the answer isn't a whole one; Ok(None)
     /// if it still isn't (an adb failure is an error).
     pub fn read_whole<R: Reading>(&self) -> Result<Option<R>> {
-        for tries in 0..2 {
-            let out = self.shell(&[R::CMD])?;
-            if let Some(r) = R::parse(&out) {
-                return Ok(Some(r));
-            }
-            crate::tlog!("{}: not a whole answer ({} bytes){}", R::NAME, out.len(), if tries == 0 { "; asking again" } else { "" });
-        }
-        Ok(None)
+        self.ask_whole(&Of::<R>::new())
     }
 
     /// Read `R`; an error if the TV doesn't give a whole answer.
@@ -92,7 +118,9 @@ impl Power {
 }
 
 impl Reading for Power {
-    const CMD: &'static str = "dumpsys power | grep mWakefulness=";
+    fn cmd() -> Cmd {
+        Cmd::new("dumpsys").arg("power").grep("mWakefulness=")
+    }
     const NAME: &'static str = "power";
     fn parse(out: &str) -> Option<Power> {
         // mWakefulness=Awake (and on newer Android mWakefulnessChanging=...)
@@ -126,7 +154,9 @@ impl Window {
 }
 
 impl Reading for Window {
-    const CMD: &'static str = "dumpsys window | grep -E 'mCurrentFocus=|mOwnerUid='";
+    fn cmd() -> Cmd {
+        Cmd::new("dumpsys").arg("window").grep_e("mCurrentFocus=|mOwnerUid=")
+    }
     const NAME: &'static str = "window";
     fn parse(out: &str) -> Option<Window> {
         // whole: it says what has focus (null while nothing has)
