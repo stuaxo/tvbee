@@ -134,6 +134,10 @@ pub enum Action {
     LoadList,
     /// Choose an item from it; its list is read again after.
     ListGo(crate::more::Go),
+    /// Open a browsed list's folder (a link, see
+    /// [`crate::provider::ContextList::browsed`]): read here, and shown on
+    /// the app's screen too when `show`.
+    ListOpen { at: String, show: bool },
     Refresh,
     /// Read the TV now, saying nothing: something the refresh feeds (the
     /// list pane, a panel) was just opened, and shouldn't wait for the next

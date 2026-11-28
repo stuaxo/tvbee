@@ -21,6 +21,7 @@ pub const SHOW_PACKAGES: &str = "show-packages";
 pub const LOW_BANDWIDTH: &str = "low-bandwidth";
 pub const SHOW_LOAD: &str = "show-load";
 pub const PREDICT_POSITION: &str = "predict-position";
+pub const LIST_SYNC: &str = "list-sync-folder";
 
 pub const OPTIONS: &[Opt] = &[
     Opt {
@@ -52,6 +53,12 @@ pub const OPTIONS: &[Opt] = &[
         label: "predict position",
         help: "the UI moves the progress bar between reads, as fast as it's playing (still while you pause or seek)",
         default: true,
+    },
+    Opt {
+        name: LIST_SYNC,
+        label: "sync folder",
+        help: "browsing Kodi in the UI's list (t) opens each folder on the TV too (off: only what you play); ^S there toggles it",
+        default: false,
     },
     Opt {
         name: SHOW_LOAD,

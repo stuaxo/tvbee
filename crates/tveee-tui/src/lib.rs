@@ -77,6 +77,8 @@ struct App {
     location: Option<String>,
     /// The breadcrumb chosen, while keys are on the breadcrumbs (Tab).
     crumb_at: Option<usize>,
+    /// The folder a browsed list was left from: landed on when back up.
+    list_from: Option<String>,
     /// Where the colour picker is (column, row).
     pick: (usize, usize),
     /// Where the progress bar stays after a pause, seek or stop asked for
@@ -546,6 +548,7 @@ impl App {
             crumbs: Vec::new(),
             location: None,
             crumb_at: None,
+            list_from: None,
             pick: (0, 1),
             frozen: None,
             log_back: None,

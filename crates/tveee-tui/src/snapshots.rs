@@ -475,10 +475,13 @@ fn load_hidden_and_system_watched() {
     let row = tveee_core::options::OPTIONS.iter().position(|o| o.name == tveee_core::options::SHOW_LOAD).expect("the option");
     a.toggle_option(row);
     assert!(rx.try_iter().any(|x| x == Action::Refresh));
+    // (the options closed: they'd cover the top line)
+    a.overlay = Overlay::None;
     let s = screen(&mut a, CORNER);
     assert!(s.lines().nth(1).unwrap_or_default().contains("load 4.82"), "{s}");
     // and off again: gone at once
     a.toggle_option(row);
+    a.overlay = Overlay::None;
     let s = screen(&mut a, CORNER);
     assert!(!s.lines().nth(1).unwrap_or_default().contains("load"), "{s}");
 }
@@ -632,7 +635,7 @@ fn kodi_artists() -> TvState {
         ],
         playing: None, at: Some(2),
         up: None,
-        reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None,
+        reopen: None, crumbs: Vec::new(), crumbs_whole: false, location: None, open_location: None, browsed: false,
     };
     st.list = Some(Arc::new(Ok(Some(list))));
     if let Some(s) = st.snap.as_mut() {
@@ -945,7 +948,7 @@ fn list_trail_and_going_up() {
         crumbs: Vec::new(),
         crumbs_whole: false,
         location: None,
-        open_location: None,
+        open_location: None, browsed: false,
     };
     let music = list("Music", "10502|", None);
     let albums = list("Albums", "10502|musicdb://albums/", Some(("10502|", "kodi-window:music")));
@@ -1040,6 +1043,7 @@ fn breadcrumbs_from_the_path_and_a_typed_location() {
         crumbs_whole: whole,
         location: Some(key.trim_start_matches("10502|").into()),
         open_location: Some("kodi-window:music|{}".into()),
+        browsed: false,
     };
     let titles = |c: &[Crumb]| c.iter().map(|x| x.title.clone()).collect::<Vec<_>>();
     // a share: every step from the path, straight away
@@ -1139,4 +1143,111 @@ fn alt_up_goes_up() {
     assert!(rx.try_iter().any(|x| x == Action::ListGo(Go::Link("kodi-parentdir".into()))));
     a.list_key(2, KeyCode::Up, KeyModifiers::NONE, &h);
     assert!(!rx.try_iter().any(|x| matches!(x, Action::ListGo(_))));
+}
+
+/// Kodi's Albums, browsed here (not following its screen).
+fn kodi_albums_browsed() -> TvState {
+    use tveee_core::more::Go;
+    use tveee_core::provider::{ContextList, ListCrumb, ListItem, ListPlace};
+    let mut st = kodi_paused();
+    let album = |id: u32, name: &str, artist: &str| ListItem {
+        section: None,
+        id: format!("musicdb://albums/{id}/"),
+        label: name.into(),
+        meta: Some(artist.into()),
+        folder: true,
+        go: Go::Link(format!("music|{name}|musicdb://albums/{id}/")),
+    };
+    let list = ContextList {
+        title: "Albums".into(),
+        kind: "folder",
+        key: "10502|musicdb://albums/".into(),
+        items: vec![album(250, "Dummy", "Portishead"), album(251, "A Polished Solid", "Luke Vibert"), album(252, "Mezzanine", "Massive Attack")],
+        playing: None,
+        at: None,
+        up: Some(("10502|".into(), Go::Link("music||".into()))),
+        reopen: Some(Go::Link("music|Albums|musicdb://albums/".into())),
+        crumbs: vec![ListCrumb { title: "Music".into(), key: "10502|".into(), go: Some(Go::Link("music|Music|".into())) }],
+        crumbs_whole: true,
+        location: Some("musicdb://albums/".into()),
+        open_location: Some("music||{}".into()),
+        browsed: true,
+    };
+    st.list = Some(Arc::new(Ok(Some(list))));
+    if let Some(s) = st.snap.as_mut() {
+        // Kodi's screen is somewhere else entirely
+        s.list_place = Some(ListPlace { key: "10025|videodb://movies/".into(), focus_label: "Alien".into(), focus_id: "videodb://movies/1/".into(), playing_id: String::new() });
+    }
+    st
+}
+
+#[test]
+fn browsing_kodi_here() {
+    let st = kodi_albums_browsed();
+    let (mut a, rx, h, held) = app_holding(st.clone());
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    a.list_sync(Change::Snapshot);
+    let _ = rx.try_iter().count();
+    // Kodi's screen shows another list: the pane doesn't follow it or read it
+    a.list_key(0, KeyCode::Down, KeyModifiers::NONE, &h);
+    a.list_sync(Change::Snapshot);
+    assert_eq!(a.overlay, Overlay::List { sel: 1 });
+    assert!(!rx.try_iter().any(|x| x == Action::LoadList));
+    let s = screen(&mut a, DESKTOP);
+    insta::assert_snapshot!(s);
+    assert!(s.contains("^S sync folder: off"), "{s}");
+    // a folder opens here, not on the TV
+    a.list_choose(1, &h);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListOpen { at: "music|A Polished Solid|musicdb://albums/251/".into(), show: false }]);
+    // ^S: sync folder on, folders open on the TV too
+    a.list_key(1, KeyCode::Char('s'), KeyModifiers::CONTROL, &h);
+    assert!(a.opt(tveee_core::options::LIST_SYNC));
+    a.list_up(&h);
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![Action::ListOpen { at: "music||".into(), show: true }]);
+    // the album, read: then back up, landing on it
+    let mut inside = st.clone();
+    if let Some(Ok(Some(l))) = inside.list.as_deref().cloned() {
+        let mut l = l;
+        l.title = "A Polished Solid".into();
+        l.key = "10502|musicdb://albums/251/".into();
+        l.location = Some("musicdb://albums/251/".into());
+        l.items.truncate(1);
+        inside.list = Some(Arc::new(Ok(Some(l))));
+    }
+    *held.lock().unwrap() = Arc::new(inside);
+    a.st = h.state();
+    a.list_sync(Change::List);
+    a.list_up(&h);
+    *held.lock().unwrap() = Arc::new(st.clone());
+    a.st = h.state();
+    a.list_sync(Change::List);
+    assert_eq!(a.overlay, Overlay::List { sel: 1 }, "back on A Polished Solid");
+    // a file plays (ListGo), as before
+    let _ = rx.try_iter().count();
+}
+
+#[test]
+fn a_failed_read_keeps_the_list() {
+    use tveee_core::engine::keeps_list;
+    let st = kodi_albums_browsed();
+    let old = st.list.as_deref();
+    assert!(keeps_list(old, &Err("timed out".into())));
+    // browsed here: Kodi saying there's no list (a blip) keeps it too
+    assert!(keeps_list(old, &Ok(None)));
+    // one following the screen: no list there is news
+    let shown = kodi_artists();
+    assert!(!keeps_list(shown.list.as_deref(), &Ok(None)));
+    assert!(keeps_list(shown.list.as_deref(), &Err("timed out".into())));
+    // nothing to keep
+    assert!(!keeps_list(None, &Err("timed out".into())));
+    // kept, the pane says why
+    let mut st = st;
+    st.list_failed = Some("timed out".into());
+    let (mut a, _rx, h) = app_seeing(st);
+    a.opts = Some(Vec::new());
+    a.open_list(&h);
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("couldn't read it again (timed out): showing it as it was"), "{s}");
+    assert!(s.contains("A Polished Solid"), "{s}");
 }
