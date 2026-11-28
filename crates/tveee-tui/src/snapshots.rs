@@ -1368,3 +1368,28 @@ fn update_frequency_is_a_choice() {
     let s = screen(&mut a, DESKTOP);
     assert!(s.contains("‹low bandwidth›"), "{s}");
 }
+
+#[test]
+fn help_has_colour() {
+    use super::overlays::help_line;
+    use ratatui::style::Color;
+    let parts = |l: &str| help_line(l).spans.iter().map(|s| (s.content.to_string(), s.style.fg)).collect::<Vec<_>>();
+    // a heading
+    assert_eq!(parts(" player mode"), vec![(" player mode".to_string(), Some(Color::Cyan))]);
+    // both columns' keys
+    let p = parts("   space p  play/pause       ⌫      back");
+    assert!(p.contains(&("space p".to_string(), Some(Color::Yellow))), "{p:?}");
+    assert!(p.contains(&("⌫".to_string(), Some(Color::Yellow))), "{p:?}");
+    assert!(p.iter().any(|(t, c)| t.contains("play/pause") && c.is_none()), "{p:?}");
+    // an aside, dim; a key after it still a key
+    let p = parts("   F        free memory (force-stop idle apps)   S  sleep   R  restart the app");
+    assert!(p.contains(&("(force-stop idle apps)".to_string(), Some(Color::DarkGray))), "{p:?}");
+    assert!(p.contains(&("S".to_string(), Some(Color::Yellow))) && p.contains(&("R".to_string(), Some(Color::Yellow))), "{p:?}");
+    // not keys: a sentence, and a continuation line
+    assert!(parts("   click the buttons, the progress bar (jump) or volume bar (set)").iter().all(|(_, c)| *c != Some(Color::Yellow)));
+    assert!(parts("            in front, coming back where it was (YouTube, Kodi)").iter().all(|(_, c)| *c != Some(Color::Yellow)));
+    // the text itself unchanged
+    let line = "   home     the TV's home screen    pgup pgdn  page up/down";
+    assert_eq!(help_line(line).spans.iter().map(|s| s.content.as_ref()).collect::<String>(), line);
+    assert!(parts(line).contains(&("pgup pgdn".to_string(), Some(Color::Yellow))));
+}

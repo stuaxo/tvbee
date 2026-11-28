@@ -223,6 +223,67 @@ pub fn pick(items: &[ActionDescriptor], i: usize) -> (Overlay, Option<Action>) {
 
 /// [`HELP`] in rows of at most `w`: as it is when it fits; else its two
 /// columns one under the other, and long rows wrapped under their text.
+/// A line of the help, coloured so it reads at a glance: headings bold
+/// cyan, keys yellow (the first column's, and a second column's: a short
+/// key after three spaces and before two), asides in brackets dim.
+pub(super) fn help_line(line: &str) -> Line<'static> {
+    let c: Vec<char> = line.chars().collect();
+    // a heading: " everywhere", " player mode"
+    if c.first() == Some(&' ') && c.get(1).is_some_and(|x| *x != ' ') {
+        return Line::from(Span::styled(line.to_string(), Style::new().fg(Color::Cyan).bold()));
+    }
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Plain,
+        Key,
+        Aside,
+    }
+    let mut kind = vec![Kind::Plain; c.len()];
+    // a key: from `at` to the next two spaces, if that's short and a
+    // description follows it
+    let key_at = |at: usize| -> Option<usize> {
+        let end = (at..c.len().saturating_sub(1)).find(|&i| c[i] == ' ' && c[i + 1] == ' ')?;
+        (end - at <= 9).then_some(end)
+    };
+    let mut i = 0;
+    let mut depth = 0usize;
+    while i < c.len() {
+        let after_gap = i >= 3 && c[i - 3..i].iter().all(|x| *x == ' ') && c[i] != ' ';
+        // the first column (from the 4th) or a later one
+        if after_gap && depth == 0 && (i == 3 || i > 12)
+            && let Some(end) = key_at(i)
+        {
+            kind[i..end].fill(Kind::Key);
+            i = end;
+            continue;
+        }
+        if c[i] == '(' {
+            depth += 1;
+        }
+        if depth > 0 {
+            kind[i] = Kind::Aside;
+        }
+        if c[i] == ')' {
+            depth = depth.saturating_sub(1);
+        }
+        i += 1;
+    }
+    let style = |k: Kind| match k {
+        Kind::Plain => Style::new(),
+        Kind::Key => Style::new().fg(Color::Yellow),
+        Kind::Aside => Style::new().fg(Color::DarkGray),
+    };
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut from = 0;
+    for j in 1..=c.len() {
+        if j == c.len() || kind[j] != kind[from] {
+            spans.push(Span::styled(c[from..j].iter().collect::<String>(), style(kind[from])));
+            from = j;
+        }
+    }
+    Line::from(spans)
+}
+
 pub(super) fn help_lines(w: usize) -> Vec<String> {
     if HELP.lines().all(|l| l.chars().count() <= w) {
         return HELP.lines().map(str::to_string).collect();
@@ -462,7 +523,7 @@ impl App {
             (" keys - any key closes ", String::new())
         };
         let total = lines.len();
-        let text: Vec<Line> = lines.into_iter().skip(top).take(room).map(Line::from).collect();
+        let text: Vec<Line> = lines.iter().skip(top).take(room).map(|l| help_line(l)).collect();
         let r = popup_titled(f, title, &right, text, Color::DarkGray);
         let bar = scrollbar(f, Bar::Help, r.right().saturating_sub(1), r.y + 1, r.height.saturating_sub(2), total, top);
         self.hits.push((r, Hit::Popup));
