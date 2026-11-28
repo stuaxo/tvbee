@@ -1,6 +1,6 @@
 ---
 source: crates/tveee-tui/src/snapshots.rs
-assertion_line: 809
+assertion_line: 862
 expression: s
 ---
 ┌ tveee ui - 192.168.1.19 ───────────────────────────────────────────────────────────────────────────────────── player ┐
@@ -15,7 +15,7 @@ expression: s
 │                                                                       │          sync Hue bulbs with the TV         ││
 │                                                                       │lights    all              │                 ││
 │                                                                       └─────────────────────────────────────────────┘│
-│                                                                       ┌ system - i hides ───────────────────────────┐│
+│                                                                       ┌ system - i hides, I pauses ─────────────────┐│
 │                                                                       │power    Awake                               ││
 │                                                                       │app      [player] org.xbmc.kodi              ││
 │                                                                       │memory   1032/1342 MB used, 310 MB free      ││

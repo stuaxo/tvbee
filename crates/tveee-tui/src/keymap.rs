@@ -19,6 +19,8 @@ pub enum Input {
     ToggleMode,
     ToggleHelp,
     ToggleInfo,
+    /// Pause (or resume) the system panel's figures.
+    PauseInfo,
     /// The Ambilight panel (TVs that have one).
     ToggleAmbilight,
     /// Pair with the TV's API (from the Ambilight panel).
@@ -93,6 +95,7 @@ pub fn input_for(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Input {
         (KeyCode::Char('u'), _) => Input::ToggleUrl,
         (KeyCode::Char('y'), _) => Input::CopyUrl,
         (KeyCode::Char('i'), _) => Input::ToggleInfo,
+        (KeyCode::Char('I'), _) => Input::PauseInfo,
         (KeyCode::Char('l'), _) => Input::ToggleAmbilight,
         (KeyCode::Char('P'), _) => Input::Pair,
         (KeyCode::Char('L'), _) => Input::AmbilightDialog,

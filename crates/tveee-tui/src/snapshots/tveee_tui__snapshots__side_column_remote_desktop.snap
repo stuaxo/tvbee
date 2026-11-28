@@ -10,7 +10,7 @@ expression: s
 │progress ━━━━━━━━━━━━━━━━━━━━┃─────────────── 27:56 / 48:47 (57%)      │   ←     ok      →    home   vol+            ││
 │audio    AAC-LC  AAC                                                   │          ↓            del   vol-            ││
 │do        t  list   /  search                                          └─────────────────────────────────────────────┘│
-│                                                                       ┌ system - i hides ───────────────────────────┐│
+│                                                                       ┌ system - i hides, I pauses ─────────────────┐│
 │volume   ━━━━━━━━━━━━━━━━┃─────────────────────── 24/60                │power    Awake   up 3h 40m                   ││
 │                                                                       │app      [player] org.xbmc.kodi              ││
 │                                                                       │memory   1032/1342 MB used, 310 MB free      ││

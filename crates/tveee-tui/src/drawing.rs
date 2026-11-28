@@ -473,7 +473,7 @@ impl App {
         self.hits.clear();
         self.links.clear();
         // the system figures are read only while something shows them
-        let wanted = self.info_shown();
+        let wanted = self.info_shown() && self.info_frozen.is_none();
         if wanted != self.system_watching {
             let _ = self.engine.send(Action::WatchSystem(wanted));
             self.system_watching = wanted;
@@ -918,7 +918,7 @@ impl App {
     }
 
     pub(super) fn panel_disks(&self) -> Vec<(&'static str, info::Disk)> {
-        self.st.snap.as_ref().map_or_else(Vec::new, |s| info::interesting_disks(&s.system.disks).into_iter().map(|(l, d)| (l, d.clone())).collect())
+        self.panel_snap().map_or_else(Vec::new, |s| info::interesting_disks(&s.system.disks).into_iter().map(|(l, d)| (l, d.clone())).collect())
     }
 
     pub(super) fn panel_height(&self) -> u16 {
@@ -928,11 +928,25 @@ impl App {
     }
 
     /// The system panel: power, app, memory graph, swap, storage, load.
-    pub(super) fn draw_panel(&self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let block = Block::bordered().title(" system - i hides ").border_style(Style::new().fg(Color::DarkGray));
+    /// What the system panel shows: as it was when paused (I), else now.
+    pub(super) fn panel_snap(&self) -> Option<&tveee_core::engine::Snapshot> {
+        self.info_frozen.as_ref().map(|(s, _)| s).or(self.st.snap.as_ref())
+    }
+
+    pub(super) fn draw_panel(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let title = if self.info_frozen.is_some() {
+            Line::from(vec![Span::raw(" system - "), Span::styled("paused", Style::new().fg(Color::Black).bg(Color::Yellow)), Span::raw(", I resumes ")])
+        } else {
+            Line::from(" system - i hides, I pauses ")
+        };
+        // the title: a click pauses or resumes
+        let tw = u16::try_from(title.width()).unwrap_or(0);
+        self.hits
+            .push((ratatui::layout::Rect { x: area.x + 1, y: area.y, width: tw.min(area.width.saturating_sub(2)), height: 1 }, Hit::Input(Input::PauseInfo)));
+        let block = Block::bordered().title(title).border_style(Style::new().fg(Color::DarkGray));
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let Some(s) = &self.st.snap else { return };
+        let Some(s) = self.panel_snap() else { return };
         let sys = &s.system;
         let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(Color::DarkGray));
         let width = usize::from(inner.width);
@@ -1015,8 +1029,9 @@ impl App {
     pub(super) fn draw_mem_graph(&self, f: &mut Frame, rect: ratatui::layout::Rect, total_mb: u64) {
         let x = rect.x + 9;
         let w = rect.width.saturating_sub(9 + 1);
-        let n = usize::from(w).min(self.st.mem_history.len());
-        let recent = &self.st.mem_history[self.st.mem_history.len() - n..];
+        let history = self.info_frozen.as_ref().map_or(&self.st.mem_history, |(_, h)| h);
+        let n = usize::from(w).min(history.len());
+        let recent = &history[history.len() - n..];
         let hot = recent.last().is_some_and(|u| total_mb > 0 && *u * 10 >= total_mb * 9);
         let floor = graph_floor(recent, total_mb);
         let shifted: Vec<u64> = recent.iter().map(|u| u.saturating_sub(floor)).collect();
