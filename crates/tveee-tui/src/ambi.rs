@@ -3,6 +3,26 @@
 use super::*;
 use tveee_core::panel::{Row, Run, View};
 
+/// An option as shown: a word (` on `), or a light's colour block with a
+/// space either side (`  ▆▆  `); the one with the cursor in brackets in
+/// those spaces (`[on]`, `[▆▆]`), so nothing moves. Green: in effect now.
+/// With its width.
+fn option_spans(choice: &tveee_core::panel::Choice, here: bool, current: bool) -> (Vec<Span<'static>>, u16) {
+    let (open, close) = if here { ("[", "]") } else { (" ", " ") };
+    let mark = Style::new().fg(Color::Yellow).bold();
+    match choice.colour {
+        Some((r, g, b)) => (vec![Span::styled(open, mark), Span::styled("  ", Style::new().bg(Color::Rgb(r, g, b))), Span::styled(close, mark)], 4),
+        None => {
+            let mut st = Style::new();
+            if current {
+                st = st.fg(Color::Green).bold();
+            }
+            let w = u16::try_from(choice.label.chars().count() + 2).unwrap_or(u16::MAX);
+            (vec![Span::styled(open, mark), Span::styled(choice.label.clone(), st), Span::styled(close, mark)], w)
+        }
+    }
+}
+
 /// A clickable part of a panel line: x, width, what clicking does.
 type Spot = (u16, u16, Hit);
 
@@ -172,33 +192,23 @@ impl App {
         }
         const LABEL: u16 = 9;
         for (ri, r) in s.rows.iter().enumerate() {
-            let mut spans = vec![Span::styled(format!("{:<9}", r.name), dim)];
+            // the row the cursor is in: its name bold
+            let name = if cursor.is_some_and(|(r, _)| r == ri) { Style::new().bold() } else { dim };
+            let mut spans = vec![Span::styled(format!("{:<9}", r.name), name)];
             let mut spots = Vec::new();
             let mut x = LABEL;
             let mut side: Option<String> = None;
             for (ci, choice) in r.options.iter().enumerate() {
-                let here = cursor == Some((ri, ci));
-                // a light: a block in its colour (the cursor: ▐▌ on it); the sides apart
-                let (shown, mut st) = match choice.colour {
-                    Some((rr, g, b)) => {
-                        let this = choice.label.split(' ').next().unwrap_or("").to_string();
-                        if side.as_ref().is_some_and(|s| *s != this) {
-                            spans.push(Span::styled("│ ", dim));
-                            x += 2;
-                        }
-                        side = Some(this);
-                        let dark = u32::from(rr) * 3 + u32::from(g) * 6 + u32::from(b) < 1280;
-                        (if here { "▐▌" } else { "  " }.to_string(), Style::new().bg(Color::Rgb(rr, g, b)).fg(if dark { Color::White } else { Color::Black }))
+                // the sides' lights apart
+                if choice.colour.is_some() {
+                    let this = choice.label.split(' ').next().unwrap_or("").to_string();
+                    if side.as_ref().is_some_and(|s| *s != this) {
+                        spans.push(Span::styled("│", dim));
+                        x += 1;
                     }
-                    None => (format!(" {} ", choice.label), Style::new()),
-                };
-                if r.current == Some(ci) {
-                    st = st.fg(Color::Green).bold();
+                    side = Some(this);
                 }
-                if here && choice.colour.is_none() {
-                    st = st.reversed();
-                }
-                let w = u16::try_from(shown.chars().count()).unwrap_or(1);
+                let (shown, w) = option_spans(choice, cursor == Some((ri, ci)), r.current == Some(ci));
                 // the options wrap under themselves
                 if x + w > width && x > LABEL {
                     out.push((Line::from(std::mem::take(&mut spans)), std::mem::take(&mut spots)));
@@ -206,9 +216,13 @@ impl App {
                     x = LABEL;
                 }
                 spots.push((x, w, Hit::AmbiOption(ri, ci)));
-                spans.push(Span::styled(shown, st));
-                spans.push(Span::raw(" "));
-                x += w + 1;
+                spans.extend(shown);
+                // a word gets a space after it; a light has its own
+                let gap = u16::from(choice.colour.is_none());
+                if gap == 1 {
+                    spans.push(Span::raw(" "));
+                }
+                x += w + gap;
             }
             // what it does, beside its options, else under them
             if let Some(help) = r.help {
@@ -278,35 +292,27 @@ impl App {
         // Tab) to set that one instead
         let mut lights: Vec<(usize, usize, usize)> = Vec::new();
         if let Some(r) = rows.get(row) {
-            let mut spans = vec![Span::styled("for  ", dim)];
+            let mut spans = vec![Span::styled("for  ", Style::new().bold())];
             let mut x = 5;
             let mut side: Option<&str> = None;
             for (ci, o) in r.options.iter().enumerate() {
-                let here = ci == col;
-                let (shown, mut st) = match o.colour {
-                    Some(c) => {
-                        let this = o.label.split(' ').next().unwrap_or("");
-                        if side.is_some_and(|s| s != this) {
-                            spans.push(Span::styled("│ ", dim));
-                            x += 2;
-                        }
-                        side = Some(this);
-                        let dark = u32::from(c.0) * 3 + u32::from(c.1) * 6 + u32::from(c.2) < 1280;
-                        (if here { "▐▌" } else { "  " }.to_string(), block(c).fg(if dark { Color::White } else { Color::Black }))
+                if o.colour.is_some() {
+                    let this = o.label.split(' ').next().unwrap_or("");
+                    if side.is_some_and(|s| s != this) {
+                        spans.push(Span::styled("│", dim));
+                        x += 1;
                     }
-                    None => (format!(" {} ", o.label), Style::new()),
-                };
-                if here {
-                    st = st.add_modifier(Modifier::BOLD);
-                    if o.colour.is_none() {
-                        st = st.reversed();
-                    }
+                    side = Some(this);
                 }
-                let w = shown.chars().count();
+                let (shown, w) = option_spans(o, ci == col, false);
+                let w = usize::from(w);
                 lights.push((x, w, ci));
-                spans.push(Span::styled(shown, st));
-                spans.push(Span::raw(" "));
-                x += w + 1;
+                spans.extend(shown);
+                let gap = usize::from(o.colour.is_none());
+                if gap == 1 {
+                    spans.push(Span::raw(" "));
+                }
+                x += w + gap;
             }
             spans.push(Span::styled(" tab: the next", dim));
             text.push(Line::from(spans));
