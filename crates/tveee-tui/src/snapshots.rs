@@ -1409,3 +1409,39 @@ fn help_has_colour() {
     assert_eq!(help_line(line).spans.iter().map(|s| s.content.as_ref()).collect::<String>(), line);
     assert!(parts(line).contains(&("pgup pgdn".to_string(), Some(Color::Yellow))));
 }
+
+#[test]
+fn options_left_right_set_the_row() {
+    use tveee_core::options::{LOW_BANDWIDTH, OPTIONS};
+    let (mut a, _rx, _h) = app_seeing(kodi_paused());
+    a.opts = Some(Vec::new());
+    let row = OPTIONS.iter().position(|o| o.name == LOW_BANDWIDTH).expect("update frequency");
+    a.overlay = Overlay::Options(row);
+    // → the second choice (low bandwidth), ← back; the tab doesn't change
+    a.options_key(row, KeyCode::Right);
+    assert!(a.opt(LOW_BANDWIDTH) && !a.options_plugins);
+    a.options_key(row, KeyCode::Right);
+    assert!(a.opt(LOW_BANDWIDTH), "→ again: still the second");
+    a.options_key(row, KeyCode::Left);
+    assert!(!a.opt(LOW_BANDWIDTH) && !a.options_plugins);
+    assert_eq!(a.overlay, Overlay::Options(row), "still open, on it");
+    // ↑ from the first row: the tab bar, where ←/→ switch tabs
+    a.overlay = Overlay::Options(0);
+    a.options_key(0, KeyCode::Up);
+    assert!(a.options_on_tabs);
+    let s = screen(&mut a, DESKTOP);
+    assert!(s.contains("←→ switch"), "{s}");
+    a.options_key(0, KeyCode::Right);
+    assert!(a.options_plugins && a.options_on_tabs);
+    // ↓ back to the rows; Tab still switches from there
+    a.options_key(0, KeyCode::Down);
+    assert!(!a.options_on_tabs);
+    a.options_key(0, KeyCode::Tab);
+    assert!(!a.options_plugins);
+    // Esc on the tab bar leaves it; Esc again closes
+    a.options_key(0, KeyCode::Up);
+    a.options_key(0, KeyCode::Esc);
+    assert!(!a.options_on_tabs && matches!(a.overlay, Overlay::Options(_)));
+    a.options_key(0, KeyCode::Esc);
+    assert_eq!(a.overlay, Overlay::None);
+}

@@ -116,6 +116,9 @@ struct App {
     list_watching: bool,
     /// The options dialog's tab: its options, or the plugins.
     options_plugins: bool,
+    /// The keys are on the options' tab bar (↑ from the first row): ←/→
+    /// switch tabs there, and only there.
+    options_on_tabs: bool,
     /// Every plugin and whether it's on (the options dialog's plugins tab).
     plugins: Vec<tveee_core::plugin::PluginState>,
     /// What has been typed into the open prompt.
@@ -541,6 +544,7 @@ impl App {
             list_seen: None,
             list_watching: false,
             options_plugins: false,
+            options_on_tabs: false,
             plugins: Vec::new(),
             prompt: String::new(),
             search_targets: Vec::new(),
@@ -730,7 +734,10 @@ impl App {
                 let _ = actions.send(Action::Visualiser);
             }
             Input::OpenList => self.open_list(actions),
-            Input::OpenOptions => self.overlay = Overlay::Options(0),
+            Input::OpenOptions => {
+                self.options_on_tabs = false;
+                self.overlay = Overlay::Options(0);
+            }
             Input::OpenMenu if !self.menu.is_empty() => {
                 // in standby, start on "wake"
                 let standby = self.st.snap.as_ref().is_some_and(|s| s.standby);
