@@ -275,7 +275,8 @@ pub(super) const HELP: &str = " everywhere
    /        search the app in front (tab picks another app)
    z        music visualiser: show or hide it (Kodi, while it plays music)
    t        the list the app shows (Kodi's folder or add-on, YouTube's chapters
-            and links): choose from it, following the app (type to filter)
+            and links): choose from it, following the app (type to filter;
+            ⌫ ← or alt+↑ up a level, tab the breadcrumbs, ^L a location)
    g        live TV guide: now/next on every channel (type to filter, ←/→ later
             or earlier, tab favourites/radio, shift+tab programme details, ⏎ watch,
             * or click the star to add/remove a favourite);
