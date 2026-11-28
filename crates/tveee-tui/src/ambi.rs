@@ -4,18 +4,21 @@ use super::*;
 use tveee_core::panel::{Row, Run, View};
 
 /// An option as shown: a word (` on `), or a light's colour block with a
-/// space either side (` ▆▆ `); the one with the cursor has thin bars in
-/// those spaces, against it (`▕on▏`, `▕▆▆▏`: the eighth blocks sit at a
-/// cell's right and left edge), so nothing moves. Green: in effect now.
-/// With its width.
+/// space either side (` ▆▆ `); the one with the cursor has bars in those
+/// spaces, against it, so nothing moves: thin yellow ones round a word
+/// (`▕on▏`: eighth blocks sit at a cell's edge), half-cell grey ones round
+/// a light (`▐▆▆▌`: thin ones were hard to see; a quarter block for the
+/// left side isn't in common fonts). Green: in effect now. With its width.
 fn option_spans(choice: &tveee_core::panel::Choice, here: bool, current: bool) -> (Vec<Span<'static>>, u16) {
     let (open, close) = if here { ("▕", "▏") } else { (" ", " ") };
     let mark = Style::new().fg(Color::Yellow).bold();
     match choice.colour {
         Some((r, g, b)) => {
-            // white bars frame a light best; yellow round one that's near white
-            let light = u32::from(r) + u32::from(g) + u32::from(b) > 600;
-            let bar = Style::new().fg(if light { Color::Yellow } else { Color::White }).bold();
+            let (open, close) = if here { ("▐", "▌") } else { (" ", " ") };
+            // grey frames a light without competing with it; white round a
+            // light that's grey itself
+            let greyish = r.max(g).max(b) - r.min(g).min(b) < 40 && (80..=200).contains(&((u16::from(r) + u16::from(g) + u16::from(b)) / 3));
+            let bar = Style::new().fg(if greyish { Color::White } else { Color::Rgb(150, 150, 150) });
             (vec![Span::styled(open, bar), Span::styled("  ", Style::new().bg(Color::Rgb(r, g, b))), Span::styled(close, bar)], 4)
         }
         None => {
