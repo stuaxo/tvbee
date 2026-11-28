@@ -124,7 +124,7 @@ fn window(tv: &Tv) -> Result<(u64, String)> {
 }
 
 fn label(tv: &Tv, name: &str) -> Result<String> {
-    let r = call(tv, "XBMC.GetInfoLabels", &format!(r#"{{"labels":[{}]}}"#, Value::from(name)))?;
+    let r = super::call_json(tv, "XBMC.GetInfoLabels", serde_json::json!({ "labels": [name] }))?;
     Ok(r.get(name).and_then(Value::as_str).unwrap_or("").to_string())
 }
 
@@ -160,7 +160,7 @@ fn showing(tv: &Tv) -> String {
 fn open_page(tv: &Tv, a: &Addon) -> Result<String> {
     let _ = tveee_core::builtin::apps::bring_to_front(tv, PACKAGE);
     let path = format!("addons://search/{}/", a.name);
-    call(tv, "GUI.ActivateWindow", &format!(r#"{{"window":"addonbrowser","parameters":[{}]}}"#, Value::from(path)))?;
+    super::call_json(tv, "GUI.ActivateWindow", serde_json::json!({ "window": "addonbrowser", "parameters": [path] }))?;
     let (id, _) = wait_for(tv, 8, |id, _| id == BROWSER)?;
     if id != BROWSER {
         return failed(format!("Kodi didn't open its add-on browser ({})", showing(tv)));
@@ -237,7 +237,7 @@ pub fn install_cmd(tv: &Tv, q: &str) -> Result<String> {
     let until = Instant::now() + Duration::from_secs(120);
     loop {
         std::thread::sleep(Duration::from_millis(800));
-        let done = call(tv, "Addons.GetAddonDetails", &format!(r#"{{"addonid":{},"properties":["installed"]}}"#, Value::from(a.id.as_str())))
+        let done = super::call_json(tv, "Addons.GetAddonDetails", serde_json::json!({ "addonid": a.id, "properties": ["installed"] }))
             .is_ok_and(|r| r.pointer("/addon/installed").and_then(Value::as_bool).unwrap_or(true));
         if done {
             close_page(tv);

@@ -136,7 +136,7 @@ pub fn read_zip(path: &Path) -> Result<Package> {
 fn known(tv: &Tv) -> Result<Vec<(String, bool)>> {
     let mut out = Vec::new();
     for installed in [true, false] {
-        let r = call(tv, "Addons.GetAddons", &format!(r#"{{"installed":{installed}}}"#))?;
+        let r = super::call_json(tv, "Addons.GetAddons", serde_json::json!({ "installed": installed }))?;
         for a in r.get("addons").and_then(Value::as_array).into_iter().flatten() {
             if let Some(id) = a.get("addonid").and_then(Value::as_str) {
                 out.push((id.to_string(), installed));
@@ -182,8 +182,7 @@ fn rescan(tv: &Tv) -> Result<String> {
 
 /// Installed in Kodi, and on (enabled; turned on if Kodi left it off).
 fn enabled(tv: &Tv, id: &str) -> Result<Option<bool>> {
-    let params = format!(r#"{{"addonid":{},"properties":["enabled"]}}"#, Value::from(id));
-    match call(tv, "Addons.GetAddonDetails", &params) {
+    match super::call_json(tv, "Addons.GetAddonDetails", serde_json::json!({ "addonid": id, "properties": ["enabled"] })) {
         Ok(r) => Ok(r.pointer("/addon/enabled").and_then(Value::as_bool)),
         Err(_) => Ok(None),
     }
@@ -222,7 +221,7 @@ pub fn install_zip(tv: &Tv, path: &Path) -> Result<String> {
     match enabled(tv, &m.id)? {
         Some(true) => Ok(format!("{what} {} ({} {}); {restarted}", m.name, m.id, m.version)),
         Some(false) => {
-            call(tv, "Addons.SetAddonEnabled", &format!(r#"{{"addonid":{},"enabled":true}}"#, Value::from(m.id.as_str())))?;
+            super::call_json(tv, "Addons.SetAddonEnabled", serde_json::json!({ "addonid": m.id, "enabled": true }))?;
             Ok(format!("{what} {} ({} {}) and turned it on; {restarted}", m.name, m.id, m.version))
         }
         None if running(tv) => failed(format!("copied {} into Kodi, but Kodi doesn't list it after restarting (look in its add-ons, or its log)", m.id)),

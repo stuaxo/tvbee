@@ -172,8 +172,7 @@ pub fn list_place(p: &Place) -> ListPlace {
 /// The file Kodi's player is playing, if it's playing one.
 pub fn playing_file(tv: &Tv) -> Option<String> {
     let (id, _) = super::player_id(tv).ok()??;
-    let r = call(tv, "Player.GetItem", &format!(r#"{{"playerid":{id},"properties":["file"]}}"#)).ok()?;
-    Some(r.pointer("/item/file")?.as_str()?.to_string()).filter(|f| !f.is_empty())
+    super::rpc::ask(tv, &super::rpc::PlayingFile(id)).ok()?
 }
 
 /// Where Kodi's list is, and what's playing in it (by its file).
