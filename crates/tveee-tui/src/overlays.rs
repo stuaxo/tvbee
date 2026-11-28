@@ -384,7 +384,7 @@ impl App {
         let on = !self.opt(o.name);
         let saved = self.set_opt(o.name, on);
         self.note = match saved {
-            Ok(()) => format!("{}: {}", o.label, if on { "on" } else { "off" }),
+            Ok(()) => format!("{}: {}", o.label, o.choices.map_or(if on { "on" } else { "off" }, |c| c[usize::from(on)])),
             Err(e) => format!("couldn't save the option: {e}"),
         };
         self.overlay = Overlay::Options(i);
@@ -521,8 +521,18 @@ impl App {
             ]
         } else {
             for (i, o) in tveee_core::options::OPTIONS.iter().enumerate() {
-                let tick = if self.opt(o.name) { "[x]" } else { "[ ]" };
-                let line = Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), dim)]);
+                let on = self.opt(o.name);
+                let line = match o.choices {
+                    // a choice of two: both named, the one chosen standing out
+                    Some([off, yes]) => {
+                        let word = |w: &str, chosen: bool| if chosen { Span::styled(format!("‹{w}›"), Style::new().bold()) } else { Span::styled(format!(" {w} "), dim) };
+                        Line::from(vec![Span::raw(format!("     {:<20}", o.label)), word(off, !on), Span::raw(" "), word(yes, on), Span::styled(format!("  {}", o.help), dim)])
+                    }
+                    None => {
+                        let tick = if on { "[x]" } else { "[ ]" };
+                        Line::from(vec![Span::raw(format!(" {tick} {:<20}", o.label)), Span::styled(format!("  {}", o.help), dim)])
+                    }
+                };
                 at.push(body.len());
                 body.push(if i == sel { line.reversed() } else { line });
             }
